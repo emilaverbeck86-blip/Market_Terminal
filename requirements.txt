@@ -1,0 +1,5 @@
+vaderSentiment
+httpx
+fastapi
+uvicorn
+python-dotenv
