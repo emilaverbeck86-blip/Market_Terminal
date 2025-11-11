@@ -14,28 +14,41 @@
       <div id="tickerScroll" class="ticker-scroll" aria-live="polite" aria-atomic="true"></div>
     </div>
     <div class="topbar-controls">
-      <label for="themeSelect">Theme</label>
-      <select id="themeSelect">
-        <option value="dark" selected>Dark</option>
-        <option value="light">Light</option>
-      </select>
+      <div class="dropdown">
+        <button class="dropbtn">Settings ▾</button>
+        <div class="dropdown-menu" id="settingsMenu">
+          <div class="menu-row">
+            <span>Theme</span>
+            <label class="switch">
+              <input type="checkbox" id="themeToggle">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="menu-sep"></div>
+          <div class="menu-row"><label><input type="checkbox" class="tile-toggle" data-tile="tile-chart" checked> Chart</label></div>
+          <div class="menu-row"><label><input type="checkbox" class="tile-toggle" data-tile="tile-company" checked> Company</label></div>
+          <div class="menu-row"><label><input type="checkbox" class="tile-toggle" data-tile="tile-news" checked> News</label></div>
+          <div class="menu-row"><label><input type="checkbox" class="tile-toggle" data-tile="tile-movers" checked> Movers</label></div>
+          <div class="menu-row"><label><input type="checkbox" class="tile-toggle" data-tile="tile-marketnews" checked> Market News</label></div>
+        </div>
+      </div>
     </div>
   </header>
 
-  <main class="grid">
+  <main class="grid" id="gridRoot">
     <!-- TradingView Chart -->
-    <section class="card chart-card" aria-labelledby="chartTitle">
-      <h3 id="chartTitle">Chart</h3>
+    <section class="card chart-card draggable" id="tile-chart" draggable="true" aria-labelledby="chartTitle">
+      <div class="card-hd"><h3 id="chartTitle">Chart</h3><button class="min-btn" data-hide="tile-chart">−</button></div>
       <div class="card-body chart-body">
         <div id="tv_container" class="chart-box"><div class="fallback-note">Loading chart…</div></div>
       </div>
     </section>
 
-    <!-- Quote & Sentiment (minimal) -->
-    <section class="card">
-      <h3>Quote & Sentiment</h3>
+    <!-- Company (description only) -->
+    <section class="card draggable" id="tile-company" draggable="true">
+      <div class="card-hd"><h3>Company</h3><button class="min-btn" data-hide="tile-company">−</button></div>
       <div class="card-body">
-        <div id="quoteBox" class="quote-box">
+        <div id="companyBox" class="company-box">
           <div class="muted">Select a ticker…</div>
         </div>
         <div class="senti-wrap">
@@ -46,8 +59,8 @@
     </section>
 
     <!-- News (selected ticker) -->
-    <section class="card">
-      <h3>News</h3>
+    <section class="card draggable" id="tile-news" draggable="true">
+      <div class="card-hd"><h3>News</h3><button class="min-btn" data-hide="tile-news">−</button></div>
       <div class="card-body">
         <div id="newsList" class="news-list"><div class="fallback-note">Loading news…</div></div>
         <div class="list-controls"><button id="newsMoreBtn" class="ghost-btn" type="button">View more</button></div>
@@ -55,8 +68,8 @@
     </section>
 
     <!-- Movers -->
-    <section class="card">
-      <h3>Top Movers (Watchlist)</h3>
+    <section class="card draggable" id="tile-movers" draggable="true">
+      <div class="card-hd"><h3>Top Movers (Watchlist)</h3><button class="min-btn" data-hide="tile-movers">−</button></div>
       <div class="card-body">
         <div class="two-col">
           <div>
@@ -72,8 +85,8 @@
     </section>
 
     <!-- Market News -->
-    <section class="card">
-      <h3>Market News (US)</h3>
+    <section class="card draggable" id="tile-marketnews" draggable="true">
+      <div class="card-hd"><h3>Market News (US)</h3><button class="min-btn" data-hide="tile-marketnews">−</button></div>
       <div class="card-body">
         <div id="marketNewsList" class="news-list"><div class="fallback-note">Loading market headlines…</div></div>
         <div class="list-controls"><button id="marketNewsMoreBtn" class="ghost-btn" type="button">View more</button></div>
@@ -81,7 +94,7 @@
     </section>
   </main>
 
-  <footer class="footer-muted">Market Terminal · Data: Stooq (quotes), NewsAPI (headlines)</footer>
+  <footer class="footer-muted">Market Terminal · Data: yfinance (OHLC), NewsAPI (headlines)</footer>
   <script type="module" src="/static/main.js"></script>
 </body>
 </html>
