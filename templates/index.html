@@ -17,7 +17,7 @@
 
   <main class="grid">
     <!-- BIG TradingView Chart -->
-    <section class="card chart-card" id="chartCard" aria-labelledby="chartTitle">
+    <section class="card chart-card" aria-labelledby="chartTitle">
       <h3 id="chartTitle">Chart</h3>
       <div class="card-body chart-body">
         <div id="tv_container" class="chart-box">
@@ -31,14 +31,14 @@
       <h3>Quote & Sentiment</h3>
       <div class="card-body">
         <div id="quoteBox" class="quote-box"><div class="muted">Select a ticker…</div></div>
-        <div id="sentimentHeader" class="senti-wrap">
+        <div class="senti-wrap">
           <span id="sentimentBadge" class="sentiment-badge">Sentiment: —</span>
           <div class="sentiment-meter" aria-hidden="true"><div id="sentimentBar" class="sentiment-bar"></div></div>
         </div>
       </div>
     </section>
 
-    <!-- Per-symbol News -->
+    <!-- News (selected ticker) -->
     <section class="card">
       <h3>News</h3>
       <div class="card-body">
@@ -72,26 +72,9 @@
         <div class="list-controls"><button id="marketNewsMoreBtn" class="ghost-btn" type="button">View more</button></div>
       </div>
     </section>
-
-    <!-- Embedded TradingEconomics Calendar (US · Medium+High) -->
-    <section class="card">
-      <h3>Economic Calendar (USD · High & Medium)</h3>
-      <div class="card-body">
-        <div class="calendar-embed-wrap">
-          <iframe
-            class="te-calendar-iframe"
-            title="TradingEconomics Economic Calendar (United States, Medium & High)"
-            src="https://tradingeconomics.com/api/calendar.aspx?c=guest:guest&countries=United%20States&importance=2,3&lang=en&timezone=UTC"
-            loading="lazy"
-            referrerpolicy="no-referrer"
-          ></iframe>
-        </div>
-        <div class="muted small-note">Source: TradingEconomics</div>
-      </div>
-    </section>
   </main>
 
-  <footer class="footer-muted">Market Terminal · Data: yfinance · NewsAPI · TradingEconomics</footer>
+  <footer class="footer-muted">Market Terminal · Data: yfinance · NewsAPI</footer>
   <script type="module" src="/static/main.js"></script>
 </body>
 </html>
