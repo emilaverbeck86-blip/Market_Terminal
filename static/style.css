@@ -1,15 +1,17 @@
-/* Global font & theme (sleek, professional) */
 :root{
   --bg:#0b0b0c; --card:#121214; --border:#1d1d20;
-  --text:#e7e7ea; --muted:#9a9aa0; --pos:#2ecc71; --neg:#ff5a5f;
+  --text:#e7e7ea; --muted:#9a9aa0;
+  --pos:#2ecc71; --neg:#ff5a5f;
   --shadow: rgba(255,255,255,.12);
   --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;
 }
 :root[data-theme="light"]{
   --bg:#f6f6f8; --card:#ffffff; --border:#e6e6ea;
-  --text:#17171a; --muted:#6b6b72; --pos:#1a8f4d; --neg:#c62828;
+  --text:#17171a; --muted:#6b6b72;
+  --pos:#1a8f4d; --neg:#c62828;
   --shadow: rgba(0,0,0,.08);
 }
+
 *{ box-sizing:border-box; }
 html,body{ height:100%; }
 body{ margin:0; background:var(--bg); color:var(--text); font-family:var(--font); }
@@ -59,10 +61,12 @@ body{ margin:0; background:var(--bg); color:var(--text); font-family:var(--font)
   display:grid; grid-template-columns: 1.35fr 0.65fr;
   grid-auto-rows:minmax(140px, auto);
   gap:14px; padding:14px;
+  transition: grid-template-columns .2s ease;
 }
 .card{
   background:var(--card); border:1px solid var(--border);
   border-radius:14px; overflow:hidden;
+  transition: width .2s ease, height .2s ease;
 }
 .card-hd{ display:flex; align-items:center; justify-content:space-between; padding:.75rem .9rem; border-bottom:1px solid var(--border); }
 .card-hd h3{ margin:0; font-size:1rem; letter-spacing:.2px; }
@@ -77,12 +81,17 @@ body{ margin:0; background:var(--bg); color:var(--text); font-family:var(--font)
   background:transparent; border:2px dashed var(--border);
   box-shadow: inset 0 0 0 2px rgba(255,255,255,.08), 0 0 0 4px var(--shadow);
 }
-
-/* Spanning */
 .span-2{ grid-column: span 2; }
 
+/* Resizer */
+.resize-handle{
+  position:absolute; right:8px; bottom:8px; width:14px; height:14px;
+  border-right:2px solid var(--muted); border-bottom:2px solid var(--muted);
+  cursor:nwse-resize; opacity:.7;
+}
+.resizable{ position:relative; }
+
 /* Chart */
-.chart-card{ }
 .chart-body{ height: clamp(560px, 72vh, 900px); padding:.5rem .6rem; }
 .chart-box{ width:100%; height:100%; min-height:560px; }
 
@@ -105,6 +114,14 @@ body{ margin:0; background:var(--bg); color:var(--text); font-family:var(--font)
 /* Company */
 .company-box .co-name{ font-size:1rem; margin-bottom:.35rem; }
 .company-box .co-desc{ margin:.2rem 0 0; line-height:1.5; }
+
+/* Sentiment tile */
+.senti-tile{ display:flex; flex-direction:column; gap:.6rem; }
+.senti-label{ font-weight:800; }
+.senti-bar{ height:12px; width:100%; border:1px solid var(--border); border-radius:999px; overflow:hidden; background:transparent; }
+.senti-fill{ height:100%; width:50%; transition: width .4s ease; background: linear-gradient(90deg, var(--neg), #ffd166, var(--pos)); }
+.senti-fill.neg{ filter:saturate(1.1); }
+.senti-fill.pos{ filter:saturate(1.1); }
 
 /* News & Movers */
 .news-list{ display:grid; gap:.45rem; }
