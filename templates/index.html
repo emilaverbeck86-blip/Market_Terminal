@@ -16,11 +16,13 @@
   </header>
 
   <main class="grid">
-    <!-- TradingView Chart -->
-    <section class="card">
+    <!-- BIG TradingView Chart (spans 2 rows; fixed viewport height) -->
+    <section class="card chart-card" id="chartCard" aria-labelledby="chartTitle">
       <h3 id="chartTitle">Chart</h3>
-      <div class="card-body">
-        <div id="tv_container" class="chart-box"><div class="fallback-note">Loading chart…</div></div>
+      <div class="card-body chart-body">
+        <div id="tv_container" class="chart-box">
+          <div class="fallback-note">Loading chart…</div>
+        </div>
       </div>
     </section>
 
