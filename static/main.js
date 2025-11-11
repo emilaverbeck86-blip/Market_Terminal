@@ -1,4 +1,5 @@
-// Stable Stooq tickers; sticky server cache; click-to-open Settings; drag/drop with placeholder & auto-resize.
+// Stable Stooq tickers; click-open Settings; drag/drop with placeholder,
+// resizable tiles (height + snap width), separate Sentiment tile.
 
 const TICKER_ENDPOINT="/api/tickers";
 const MOVERS_ENDPOINT="/api/movers";
@@ -12,8 +13,6 @@ const tickerScroll=document.getElementById('tickerScroll');
 const tvContainer=document.getElementById('tv_container');
 const chartTitle=document.getElementById('chartTitle');
 const newsList=document.getElementById('newsList');
-const sentiBadge=document.getElementById('sentimentBadge');
-const sentiBar=document.getElementById('sentimentBar');
 const marketNewsList=document.getElementById('marketNewsList');
 const newsMoreBtn=document.getElementById('newsMoreBtn');
 const marketNewsMoreBtn=document.getElementById('marketNewsMoreBtn');
@@ -26,23 +25,21 @@ const settingsBtn=document.getElementById('settingsBtn');
 const settingsMenu=document.getElementById('settingsMenu');
 const themeToggle=document.getElementById('themeToggle');
 
+// Sentiment tile DOM
+const sentiLabel=document.getElementById('sentimentLabel');
+const sentiFill=document.getElementById('sentiFill');
+
 let currentSymbol=null, newsExpanded=false, marketNewsExpanded=false;
 
-// ---------- Settings dropdown (click-to-open, outside-click to close) ----------
+// ---------- Settings dropdown ----------
 (function(){
   let open=false;
-  function close(){ settingsMenu.classList.remove('open'); open=false; }
-  settingsBtn.addEventListener('click',(e)=>{
-    e.stopPropagation();
-    open=!open; settingsMenu.classList.toggle('open', open);
-  });
-  document.addEventListener('click',(e)=>{
-    if(!open) return;
-    if(!settingsMenu.contains(e.target) && e.target!==settingsBtn) close();
-  });
+  const close=()=>{ settingsMenu.classList.remove('open'); open=false; };
+  settingsBtn.addEventListener('click',(e)=>{ e.stopPropagation(); open=!open; settingsMenu.classList.toggle('open', open); });
+  document.addEventListener('click',(e)=>{ if(!open) return; if(!settingsMenu.contains(e.target) && e.target!==settingsBtn) close(); });
 })();
 
-// ---------- Theme ----------
+// ---------- Theme & tile toggles ----------
 (function(){
   const saved=localStorage.getItem('mt_theme')||'dark';
   document.documentElement.setAttribute('data-theme', saved);
@@ -54,7 +51,6 @@ let currentSymbol=null, newsExpanded=false, marketNewsExpanded=false;
     if(currentSymbol) mountTradingView(currentSymbol);
   });
 
-  // tile toggles
   const savedVis=JSON.parse(localStorage.getItem('mt_tiles_vis')||"{}");
   settingsMenu.querySelectorAll('.tile-toggle').forEach(cb=>{
     const id=cb.dataset.tile;
@@ -66,6 +62,7 @@ let currentSymbol=null, newsExpanded=false, marketNewsExpanded=false;
       v[id]=cb.checked; localStorage.setItem('mt_tiles_vis', JSON.stringify(v));
     });
   });
+
   document.querySelectorAll('.min-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id=btn.dataset.hide; applyTileVisibility(id,false);
@@ -80,7 +77,7 @@ function applyTileVisibility(id, show){
   el.style.display=show?'':'none';
 }
 
-// ---------- Drag & drop with placeholder + auto-resize ----------
+// ---------- Drag & drop (with placeholder & width snap) ----------
 (function(){
   const orderKey='mt_tile_order';
   const saved=JSON.parse(localStorage.getItem(orderKey)||'[]');
@@ -94,7 +91,6 @@ function applyTileVisibility(id, show){
     placeholder=document.createElement('section');
     placeholder.className='placeholder card';
     placeholder.style.height=`${card.getBoundingClientRect().height}px`;
-    placeholder.style.borderStyle='dashed';
     card.after(placeholder);
   });
 
@@ -102,9 +98,9 @@ function applyTileVisibility(id, show){
     const card=e.target.closest('.draggable'); if(!card) return;
     card.classList.remove('dragging');
     if(placeholder){ placeholder.replaceWith(card); placeholder=null; }
-    // auto-resize: if card is in right column, force span-1
-    const colIndex = [...gridRoot.children].indexOf(card) % 2; // 0 left, 1 right
-    if(colIndex===1 && card.classList.contains('span-2')) card.classList.remove('span-2');
+    // auto-resize width: snap to 1 col if dropped on right column
+    const colIndex = [...gridRoot.children].indexOf(card) % 2; // 0 left, 1 right (2-col grid)
+    if(colIndex===1) card.classList.remove('span-2');
     saveOrder();
   });
 
@@ -128,6 +124,35 @@ function applyTileVisibility(id, show){
       return closest;
     }, {offset:Number.NEGATIVE_INFINITY}).element;
   }
+})();
+
+// ---------- Resizable tiles (bottom-right handle) ----------
+(function initResizable(){
+  const cards=[...document.querySelectorAll('.resizable')];
+  cards.forEach(card=>{
+    const handle=card.querySelector('.resize-handle');
+    if(!handle) return;
+    let startX=0,startY=0,startW=0,startH=0;
+    const onMove=(e)=>{
+      const dx=e.clientX-startX, dy=e.clientY-startY;
+      const axis=handle.dataset.axis||'both';
+      if(axis==='v' || axis==='both') card.style.height=Math.max(180, startH+dy)+'px';
+      if(axis==='both'){
+        // Decide width span by threshold against grid column width
+        const gridW=gridRoot.clientWidth; const gap=14;
+        const colW=(gridW-gap)/2;
+        const newW=Math.max(colW*0.9, startW+dx);
+        const span2=newW>(colW*1.25);
+        card.classList.toggle('span-2', span2);
+      }
+    };
+    const onUp=()=>{ document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); };
+    handle.addEventListener('pointerdown',(e)=>{
+      startX=e.clientX; startY=e.clientY;
+      const rect=card.getBoundingClientRect(); startW=rect.width; startH=rect.height;
+      document.addEventListener('pointermove', onMove); document.addEventListener('pointerup', onUp);
+    });
+  });
 })();
 
 // ---------- TradingView ----------
@@ -187,7 +212,7 @@ async function loadTickers(){
     const r=await fetch(TICKER_ENDPOINT); const data=await r.json();
     if(!tickerScroll.childElementCount) renderTicker(data);
     else updateTicker(data);
-  }catch(e){ /* keep previous UI snapshot */ }
+  }catch(e){ /* keep old snapshot */ }
 }
 
 // ---------- Movers / Company / News / Sentiment / Market news ----------
@@ -200,11 +225,35 @@ function renderMovers(movers){
   fill(gainersBody, movers.gainers||[]); fill(losersBody, movers.losers||[]);
 }
 async function loadMovers(){ try{ const r=await fetch(MOVERS_ENDPOINT); renderMovers(await r.json()); }catch{ renderMovers({gainers:[],losers:[]}); } }
+
 async function loadCompany(symbol){
-  try{ const r=await fetch(`${PROF_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`); const p=await r.json();
-    companyBox.innerHTML=`<div class="co-name"><b>${p.name||symbol}</b> <span class="muted">(${symbol})</span></div><p class="co-desc">${(p.description||'').slice(0,1000)}</p>`;
+  try{
+    const r=await fetch(`${PROF_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
+    const p=await r.json();
+    companyBox.innerHTML=`<div class="co-name"><b>${p.name||symbol}</b> <span class="muted">(${symbol})</span></div><p class="co-desc">${p.description||''}</p>`;
   }catch{ companyBox.innerHTML='<div class="muted">No description available.</div>'; }
 }
+
+// Sentiment tile
+function renderSentiment(compound){
+  // map [-1..1] to 0..100%
+  const pct=Math.round((compound+1)*50);
+  sentiFill.style.width=pct+'%';
+  sentiFill.classList.toggle('neg', compound< -0.05);
+  sentiFill.classList.toggle('pos', compound>  0.05);
+  if(compound>0.05)      sentiLabel.textContent=`Bullish ${(compound*100).toFixed(0)}%`;
+  else if(compound<-0.05)sentiLabel.textContent=`Bearish ${Math.abs(compound*100).toFixed(0)}%`;
+  else                   sentiLabel.textContent='Neutral';
+}
+async function loadSentiment(symbol){
+  try{
+    const r=await fetch(`${SENTI_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`); 
+    const s=await r.json(); 
+    const comp=(typeof s.compound==='number')?s.compound:0;
+    renderSentiment(comp);
+  }catch{ renderSentiment(0); }
+}
+
 function renderNews(container, articles, limit){
   container.innerHTML=''; if(!Array.isArray(articles)||!articles.length){ container.innerHTML='<div class="muted">No headlines.</div>'; return; }
   articles.slice(0,limit).forEach(n=>{ const item=document.createElement('div'); item.className='news-item';
@@ -220,12 +269,6 @@ async function loadNews(symbol){
     newsMoreBtn.onclick=()=>{ newsExpanded=!newsExpanded; renderNews(newsList, data, newsExpanded?30:8); newsMoreBtn.textContent=newsExpanded?'View less':'View more'; };
   }catch{ newsList.innerHTML='<div class="muted">Failed to load news.</div>'; newsMoreBtn.style.display='none'; }
 }
-function badge(score){ if(score>0.05)return{cls:'pos',label:`Positive ${(score*100).toFixed(0)}%`}; if(score<-0.05)return{cls:'neg',label:`Negative ${Math.abs(score*100).toFixed(0)}%`}; return{cls:'neu',label:'Neutral'}; }
-async function loadSentiment(symbol){
-  try{ const r=await fetch(`${SENTI_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`); const s=await r.json();
-    const comp=(typeof s.compound==='number')?s.compound:0; const b=badge(comp); sentiBadge.className=`sentiment-badge ${b.cls}`; sentiBadge.textContent=`Sentiment: ${b.label}`; sentiBar.style.width=Math.round((comp+1)*50)+'%';
-  }catch{ sentiBadge.className='sentiment-badge'; sentiBadge.textContent='Sentiment: —'; sentiBar.style.width='0%'; }
-}
 async function loadMarketNews(){
   marketNewsList.innerHTML='<div class="fallback-note">Loading market headlines…</div>';
   try{ const r=await fetch(MKT_NEWS_ENDPOINT); const data=await r.json();
@@ -239,13 +282,17 @@ async function loadMarketNews(){
 async function onSymbolSelect(symbol){
   currentSymbol=symbol;
   mountTradingView(symbol);
-  await Promise.all([ loadCompany(symbol), loadNews(symbol), loadSentiment(symbol) ]);
+  await Promise.all([
+    loadCompany(symbol),
+    loadSentiment(symbol),
+    loadNews(symbol)
+  ]);
 }
 
 // ---------- Boot ----------
 document.addEventListener('DOMContentLoaded', ()=>{
-  loadTickers(); setInterval(loadTickers, 1000*60); // align with server TTL
-  loadMovers();  setInterval(loadMovers, 1000*60);
+  loadTickers(); setInterval(loadTickers, 1000*60);
+  loadMovers();  setInterval(loadMovers,  1000*60);
   loadMarketNews(); setInterval(loadMarketNews, 1000*180);
   setTimeout(()=>{ if(!currentSymbol) onSymbolSelect('TSLA'); }, 800);
 });
