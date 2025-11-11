@@ -1,6 +1,4 @@
-// Stable Stooq tickers; click-open Settings; drag/drop with placeholder,
-// resizable tiles (height + snap width), separate Sentiment tile.
-
+// -------- Endpoints --------
 const TICKER_ENDPOINT="/api/tickers";
 const MOVERS_ENDPOINT="/api/movers";
 const QUOTE_ENDPOINT ="/api/quote";
@@ -8,7 +6,9 @@ const PROF_ENDPOINT  ="/api/profile";
 const NEWS_ENDPOINT  ="/api/news";
 const SENTI_ENDPOINT ="/api/sentiment";
 const MKT_NEWS_ENDPOINT="/api/market-news";
+const STATS_ENDPOINT ="/api/stats";
 
+// -------- DOM --------
 const tickerScroll=document.getElementById('tickerScroll');
 const tvContainer=document.getElementById('tv_container');
 const chartTitle=document.getElementById('chartTitle');
@@ -25,13 +25,21 @@ const settingsBtn=document.getElementById('settingsBtn');
 const settingsMenu=document.getElementById('settingsMenu');
 const themeToggle=document.getElementById('themeToggle');
 
-// Sentiment tile DOM
+// Sentiment tile
 const sentiLabel=document.getElementById('sentimentLabel');
 const sentiFill=document.getElementById('sentiFill');
 
+// Snapshot tile
+const snapVol=document.getElementById('snapVol');
+const snapVolAvg=document.getElementById('snapVolAvg');
+const snapPerf=document.getElementById('snapPerf');
+const seasonalsCanvas=document.getElementById('seasonalsCanvas');
+const gaugeNeedle=document.getElementById('gaugeNeedle');
+const gaugeText=document.getElementById('gaugeText');
+
 let currentSymbol=null, newsExpanded=false, marketNewsExpanded=false;
 
-// ---------- Settings dropdown ----------
+// -------- Settings dropdown (click-open) --------
 (function(){
   let open=false;
   const close=()=>{ settingsMenu.classList.remove('open'); open=false; };
@@ -39,7 +47,7 @@ let currentSymbol=null, newsExpanded=false, marketNewsExpanded=false;
   document.addEventListener('click',(e)=>{ if(!open) return; if(!settingsMenu.contains(e.target) && e.target!==settingsBtn) close(); });
 })();
 
-// ---------- Theme & tile toggles ----------
+// -------- Theme & tile toggles --------
 (function(){
   const saved=localStorage.getItem('mt_theme')||'dark';
   document.documentElement.setAttribute('data-theme', saved);
@@ -58,8 +66,8 @@ let currentSymbol=null, newsExpanded=false, marketNewsExpanded=false;
     applyTileVisibility(id, cb.checked);
     cb.addEventListener('change', ()=>{
       applyTileVisibility(id, cb.checked);
-      const v=JSON.parse(localStorage.getItem('mt_tiles_vis')||"{}");
-      v[id]=cb.checked; localStorage.setItem('mt_tiles_vis', JSON.stringify(v));
+      const v=JSON.parse(localStorage.getItem('mt_tiles_vis')||"{}"); v[id]=cb.checked;
+      localStorage.setItem('mt_tiles_vis', JSON.stringify(v));
     });
   });
 
@@ -77,7 +85,7 @@ function applyTileVisibility(id, show){
   el.style.display=show?'':'none';
 }
 
-// ---------- Drag & drop (with placeholder & width snap) ----------
+// -------- Drag & drop (with placeholder & width snap) --------
 (function(){
   const orderKey='mt_tile_order';
   const saved=JSON.parse(localStorage.getItem(orderKey)||'[]');
@@ -98,8 +106,7 @@ function applyTileVisibility(id, show){
     const card=e.target.closest('.draggable'); if(!card) return;
     card.classList.remove('dragging');
     if(placeholder){ placeholder.replaceWith(card); placeholder=null; }
-    // auto-resize width: snap to 1 col if dropped on right column
-    const colIndex = [...gridRoot.children].indexOf(card) % 2; // 0 left, 1 right (2-col grid)
+    const colIndex = [...gridRoot.children].indexOf(card) % 2;
     if(colIndex===1) card.classList.remove('span-2');
     saveOrder();
   });
@@ -126,36 +133,70 @@ function applyTileVisibility(id, show){
   }
 })();
 
-// ---------- Resizable tiles (bottom-right handle) ----------
+// -------- Resizable tiles (smooth, outline ghost) --------
 (function initResizable(){
   const cards=[...document.querySelectorAll('.resizable')];
   cards.forEach(card=>{
     const handle=card.querySelector('.resize-handle');
     if(!handle) return;
     let startX=0,startY=0,startW=0,startH=0;
+    let ghost=null;
+
     const onMove=(e)=>{
       const dx=e.clientX-startX, dy=e.clientY-startY;
       const axis=handle.dataset.axis||'both';
-      if(axis==='v' || axis==='both') card.style.height=Math.max(180, startH+dy)+'px';
+
+      // live outline
+      const rect=card.getBoundingClientRect();
+      if(axis==='v' || axis==='both'){
+        const nh=Math.max(180, startH+dy);
+        ghost.style.height=nh+'px';
+      }
       if(axis==='both'){
-        // Decide width span by threshold against grid column width
-        const gridW=gridRoot.clientWidth; const gap=14;
-        const colW=(gridW-gap)/2;
-        const newW=Math.max(colW*0.9, startW+dx);
-        const span2=newW>(colW*1.25);
-        card.classList.toggle('span-2', span2);
+        const gridW=gridRoot.clientWidth; const gap=14; const colW=(gridW-gap)/2;
+        const newW = Math.max(colW*0.9, startW+dx);
+        const span2 = newW>(colW*1.25);
+        ghost.classList.toggle('span-2', span2);
+        ghost.style.width = span2 ? (colW*2+gap)+'px' : colW+'px';
       }
     };
-    const onUp=()=>{ document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); };
+
+    const onUp=()=>{
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      card.classList.remove('resizing');
+      if(ghost){
+        // apply ghost size
+        card.style.height = ghost.style.height || card.style.height;
+        if(ghost.classList.contains('span-2')) card.classList.add('span-2');
+        else card.classList.remove('span-2');
+        ghost.remove(); ghost=null;
+      }
+    };
+
     handle.addEventListener('pointerdown',(e)=>{
       startX=e.clientX; startY=e.clientY;
-      const rect=card.getBoundingClientRect(); startW=rect.width; startH=rect.height;
-      document.addEventListener('pointermove', onMove); document.addEventListener('pointerup', onUp);
+      const rect=card.getBoundingClientRect();
+      startW=rect.width; startH=rect.height;
+      card.classList.add('resizing');
+
+      ghost=document.createElement('section');
+      ghost.className='ghost-outline card';
+      ghost.style.position='absolute';
+      ghost.style.left=rect.left+window.scrollX+'px';
+      ghost.style.top=rect.top+window.scrollY+'px';
+      ghost.style.width=rect.width+'px';
+      ghost.style.height=rect.height+'px';
+      ghost.classList.toggle('span-2', card.classList.contains('span-2'));
+      document.body.appendChild(ghost);
+
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
     });
   });
 })();
 
-// ---------- TradingView ----------
+// -------- TradingView --------
 const TV_EXCHANGE={AAPL:"NASDAQ",MSFT:"NASDAQ",NVDA:"NASDAQ",AMZN:"NASDAQ",META:"NASDAQ",GOOGL:"NASDAQ",TSLA:"NASDAQ",AVGO:"NASDAQ",AMD:"NASDAQ",NFLX:"NASDAQ",ADBE:"NASDAQ",INTC:"NASDAQ",CSCO:"NASDAQ",QCOM:"NASDAQ",TXN:"NASDAQ",CRM:"NYSE",PYPL:"NASDAQ",SHOP:"NYSE",ABNB:"NASDAQ",SNOW:"NYSE",JPM:"NYSE",BAC:"NYSE",WFC:"NYSE",GS:"NYSE",MS:"NYSE",V:"NYSE",MA:"NYSE",AXP:"NYSE","BRK-B":"NYSE",KO:"NYSE",PEP:"NASDAQ",MCD:"NYSE",PG:"NYSE",HD:"NYSE",LOW:"NYSE",COST:"NASDAQ",DIS:"NYSE",NKE:"NYSE",T:"NYSE",VZ:"NYSE",XOM:"NYSE",CVX:"NYSE",PFE:"NYSE",LLY:"NYSE",UNH:"NYSE",MRK:"NYSE",ABBV:"NYSE",CAT:"NYSE",BA:"NYSE",UPS:"NYSE",FDX:"NYSE",ORCL:"NYSE",IBM:"NYSE",UBER:"NYSE",LYFT:"NASDAQ"};
 const toTV=s=>`${(TV_EXCHANGE[s]||'NASDAQ')}:${s}`;
 function mountTradingView(symbol){
@@ -168,12 +209,13 @@ function mountTradingView(symbol){
   new TradingView.widget({symbol:toTV(symbol), interval:'60', timezone:'Etc/UTC', theme, style:'1', toolbar_bg:'transparent', locale:'en', enable_publishing:false, allow_symbol_change:false, container_id:'tv_container', autosize:true});
 }
 
-// ---------- Helpers ----------
+// -------- Helpers --------
 const fmtPrice=v=>(typeof v==='number'&&isFinite(v))?v.toFixed(2):'—';
 const fmtChange=v=>(v==null||!isFinite(v))?'—':`${v>0?'+':(v<0?'−':'')}${Math.abs(v).toFixed(2)}%`;
 function applyChangeClass(el,v){ el.className='chg '+(v>0?'pos':(v<0?'neg':'neu')); }
+const intComma = n => (typeof n==='number' && isFinite(n)) ? n.toLocaleString() : '—';
 
-// ---------- Ticker bar ----------
+// -------- Ticker bar (stable) --------
 const tickerNodes=new Map();
 function renderTicker(items){
   if(!Array.isArray(items)||!items.length){ items=[{symbol:"TSLA",price:null,change_pct:null},{symbol:"AAPL",price:null,change_pct:null},{symbol:"MSFT",price:null,change_pct:null}]; }
@@ -215,7 +257,7 @@ async function loadTickers(){
   }catch(e){ /* keep old snapshot */ }
 }
 
-// ---------- Movers / Company / News / Sentiment / Market news ----------
+// -------- Movers / Company / Sentiment / News / Market news --------
 function renderMovers(movers){
   const fill=(tbody,arr)=>{ tbody.innerHTML=''; if(!Array.isArray(arr)||!arr.length){tbody.innerHTML='<tr><td class="muted">No data</td></tr>'; return;}
     arr.forEach(r=>{ const tr=document.createElement('tr');
@@ -228,15 +270,12 @@ async function loadMovers(){ try{ const r=await fetch(MOVERS_ENDPOINT); renderMo
 
 async function loadCompany(symbol){
   try{
-    const r=await fetch(`${PROF_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
-    const p=await r.json();
+    const r=await fetch(`${PROF_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`); const p=await r.json();
     companyBox.innerHTML=`<div class="co-name"><b>${p.name||symbol}</b> <span class="muted">(${symbol})</span></div><p class="co-desc">${p.description||''}</p>`;
   }catch{ companyBox.innerHTML='<div class="muted">No description available.</div>'; }
 }
 
-// Sentiment tile
 function renderSentiment(compound){
-  // map [-1..1] to 0..100%
   const pct=Math.round((compound+1)*50);
   sentiFill.style.width=pct+'%';
   sentiFill.classList.toggle('neg', compound< -0.05);
@@ -246,12 +285,8 @@ function renderSentiment(compound){
   else                   sentiLabel.textContent='Neutral';
 }
 async function loadSentiment(symbol){
-  try{
-    const r=await fetch(`${SENTI_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`); 
-    const s=await r.json(); 
-    const comp=(typeof s.compound==='number')?s.compound:0;
-    renderSentiment(comp);
-  }catch{ renderSentiment(0); }
+  try{ const r=await fetch(`${SENTI_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`); const s=await r.json(); renderSentiment(typeof s.compound==='number'?s.compound:0); }
+  catch{ renderSentiment(0); }
 }
 
 function renderNews(container, articles, limit){
@@ -278,21 +313,79 @@ async function loadMarketNews(){
   }catch{ marketNewsList.innerHTML='<div class="muted">Failed to load market headlines.</div>'; marketNewsMoreBtn.style.display='none'; }
 }
 
-// ---------- Selection ----------
+// -------- Snapshot tile rendering --------
+function renderPerf(perf){
+  const labels=["1W","1M","3M","6M","YTD","1Y"];
+  snapPerf.innerHTML="";
+  labels.forEach(k=>{
+    const v = typeof perf?.[k]==='number' ? perf[k] : null;
+    const chip=document.createElement('div');
+    chip.className='perf-chip '+(v>0?'pos':(v<0?'neg':'neu'));
+    chip.innerHTML=`<div class="val">${v!=null?(v>0?'+':'')+v.toFixed(2)+'%':'—'}</div><div class="lab">${k}</div>`;
+    snapPerf.appendChild(chip);
+  });
+}
+function drawSeasonals(lines){
+  const ctx=seasonalsCanvas.getContext('2d'); const w=seasonalsCanvas.width=seasonalsCanvas.clientWidth; const h=seasonalsCanvas.height=140;
+  ctx.clearRect(0,0,w,h);
+  const years=[2025, 2024, 2023];
+  const colors={"2025":"#5B8CFF","2024":"#4CAF50","2023":"#FFA133"};
+  let max=-1e9,min=1e9,len=0;
+  years.forEach(y=>{
+    const L=(lines||[]).find(s=>s.year===y);
+    if(!L) return;
+    len=Math.max(len, L.points.length);
+    L.points.forEach(p=>{ max=Math.max(max,p.v); min=Math.min(min,p.v); });
+  });
+  if(!isFinite(max) || !isFinite(min) || len===0){ return; }
+  if(max===min){ max+=1; min-=1; }
+  const pad=8;
+  const sx = (i)=> pad + (w-2*pad) * (i/(len-1));
+  const sy = (v)=> h - pad - (h-2*pad) * ((v-min)/(max-min));
+
+  years.forEach(y=>{
+    const L=(lines||[]).find(s=>s.year===y);
+    if(!L || L.points.length<2) return;
+    ctx.beginPath(); ctx.lineWidth=2; ctx.strokeStyle=colors[String(y)];
+    L.points.forEach((p,i)=>{ const x=sx(i), yv=sy(p.v); if(i===0) ctx.moveTo(x,yv); else ctx.lineTo(x,yv); });
+    ctx.stroke();
+  });
+}
+function renderGauge(score,label){
+  // score 0..100 -> -90..+90deg
+  const angle = -90 + (score/100)*180;
+  gaugeNeedle.style.transform=`rotate(${angle}deg)`;
+  gaugeText.textContent = label || 'Neutral';
+}
+async function loadSnapshot(symbol){
+  snapVol.textContent='—'; snapVolAvg.textContent='—'; renderPerf(null); drawSeasonals(null); renderGauge(50,'Neutral');
+  try{
+    const r=await fetch(`${STATS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
+    const s=await r.json();
+    snapVol.textContent=intComma(s.volume);
+    snapVolAvg.textContent=intComma(s.avg_volume_30d);
+    renderPerf(s.performance);
+    drawSeasonals(s.seasonals);
+    renderGauge(s.technicals?.score ?? 50, s.technicals?.label ?? 'Neutral');
+  }catch(e){}
+}
+
+// -------- Selection --------
 async function onSymbolSelect(symbol){
   currentSymbol=symbol;
   mountTradingView(symbol);
   await Promise.all([
     loadCompany(symbol),
     loadSentiment(symbol),
-    loadNews(symbol)
+    loadNews(symbol),
+    loadSnapshot(symbol)
   ]);
 }
 
-// ---------- Boot ----------
+// -------- Boot --------
 document.addEventListener('DOMContentLoaded', ()=>{
-  loadTickers(); setInterval(loadTickers, 1000*60);
+  loadTickers(); setInterval(loadTickers, 1000*30); // 30s, matches server TTL
   loadMovers();  setInterval(loadMovers,  1000*60);
   loadMarketNews(); setInterval(loadMarketNews, 1000*180);
-  setTimeout(()=>{ if(!currentSymbol) onSymbolSelect('TSLA'); }, 800);
+  setTimeout(()=>{ if(!currentSymbol) onSymbolSelect('TSLA'); }, 700);
 });
