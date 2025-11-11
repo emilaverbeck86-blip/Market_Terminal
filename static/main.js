@@ -1,5 +1,4 @@
-// Market Terminal — tickers, TV chart, quote, movers, news, sentiment.
-// Calendar now embedded via iframe in index.html (no JS call needed).
+// Market Terminal — robust ticker/news/movers with graceful fallbacks.
 
 const TICKER_ENDPOINT    = "/api/tickers";
 const MOVERS_ENDPOINT    = "/api/movers";
@@ -42,6 +41,7 @@ const TV_EXCHANGE = {
 };
 const toTV = s => `${(TV_EXCHANGE[s]||'NASDAQ')}:${s}`;
 
+// ---------- TradingView ----------
 function mountTradingView(symbol) {
   chartTitle.textContent = `Chart – ${symbol}`;
   tvContainer.innerHTML = "";
@@ -67,15 +67,16 @@ function mountTradingView(symbol) {
   });
 }
 
-// --------- Ticker bar ----------
-const nodes = new Map();
+// ---------- Ticker bar ----------
+const tickerNodes = new Map();
 const fmtPrice = v => (typeof v==='number' && isFinite(v)) ? v.toFixed(2) : '—';
 const fmtChange = v => (v==null||!isFinite(v)) ? '0.00%' : `${v>0?'+':(v<0?'−':'')}${Math.abs(v).toFixed(2)}%`;
 function applyChangeClass(el, v){ el.className = 'chg ' + (v>0?'pos':(v<0?'neg':'')); }
 
-function buildTickerRow(items){
+function renderTicker(items){
   tickerScroll.innerHTML = '';
-  nodes.clear();
+  tickerNodes.clear();
+  // duplicate once to keep bar full & scrolling
   const twice = [...items, ...items];
   twice.forEach(tk=>{
     const item=document.createElement('div'); item.className='ticker-item'; item.dataset.sym=tk.symbol;
@@ -85,14 +86,16 @@ function buildTickerRow(items){
     item.append(sym, price, chg);
     item.addEventListener('click', ()=>onSymbolSelect(tk.symbol));
     tickerScroll.appendChild(item);
-    if (!nodes.has(tk.symbol)) nodes.set(tk.symbol,{item,price,chg,last:tk.price});
+    if (!tickerNodes.has(tk.symbol)) tickerNodes.set(tk.symbol,{item,price,chg,last:tk.price});
   });
+  // start marquee; pause on hover is in CSS
   requestAnimationFrame(()=> tickerScroll.classList.add('marquee-ready'));
   if (!currentSymbol && items.length) onSymbolSelect(items[0].symbol);
 }
-function liveUpdate(items){
+
+function updateTicker(items){
   items.forEach(tk=>{
-    const n=nodes.get(tk.symbol); if(!n) return;
+    const n=tickerNodes.get(tk.symbol); if(!n) return;
     const newText = fmtPrice(tk.price);
     if (newText !== n.price.textContent){
       const up = (tk.price||0) > (n.last||0);
@@ -105,20 +108,28 @@ function liveUpdate(items){
     n.chg.textContent = fmtChange(tk.change_pct);
   });
 }
+
 async function loadTickers(){
   try{
     const r = await fetch(TICKER_ENDPOINT);
-    if (!r.ok) throw new Error('tickers');
+    if (!r.ok) throw new Error(`tickers ${r.status}`);
     const data = await r.json();
-    if (!tickerScroll.childElementCount) buildTickerRow(data);
-    else liveUpdate(data);
-  }catch(e){ /* keep prior */ }
+    if (!tickerScroll.childElementCount) renderTicker(data);
+    else updateTicker(data);
+  }catch(e){
+    // Render minimal default so chart/news still work
+    if (!tickerScroll.childElementCount){
+      const dflt=[{symbol:"TSLA",price:null,change_pct:null},{symbol:"AAPL",price:null,change_pct:null},{symbol:"MSFT",price:null,change_pct:null}];
+      renderTicker(dflt);
+    }
+  }
 }
 
-// --------- Movers & Quote ----------
+// ---------- Movers & Quote ----------
 function renderMovers(movers){
   const fill = (tbody, arr) => {
     tbody.innerHTML = '';
+    if (!Array.isArray(arr) || !arr.length){ tbody.innerHTML='<tr><td class="muted">No data</td></tr>'; return; }
     arr.forEach(r=>{
       const tr=document.createElement('tr');
       tr.innerHTML = `<td>${r.symbol}</td><td>${fmtPrice(r.price)}</td><td class="${r.change_pct>0?'pos':(r.change_pct<0?'neg':'')}">${fmtChange(r.change_pct)}</td>`;
@@ -132,14 +143,15 @@ function renderMovers(movers){
 async function loadMovers(){
   try{
     const r=await fetch(MOVERS_ENDPOINT);
-    if (!r.ok) return;
+    if (!r.ok) throw 0;
     renderMovers(await r.json());
-  }catch(e){}
+  }catch(e){
+    renderMovers({gainers:[], losers:[]});
+  }
 }
 async function loadQuote(symbol){
   try{
     const r = await fetch(`${QUOTE_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
-    if (!r.ok) throw new Error('quote');
     const q = await r.json();
     quoteBox.innerHTML = `
       <div class="stat-row">
@@ -161,9 +173,13 @@ async function loadQuote(symbol){
   }
 }
 
-// --------- News / Sentiment / Market News ----------
+// ---------- News / Sentiment / Market News ----------
 function renderNews(container, articles, limit){
   container.innerHTML = '';
+  if (!Array.isArray(articles) || !articles.length){
+    container.innerHTML = '<div class="muted">No headlines.</div>';
+    return;
+  }
   articles.slice(0, limit).forEach(n=>{
     const item = document.createElement('div'); item.className = 'news-item';
     const a = document.createElement('a');
@@ -178,13 +194,10 @@ function renderNews(container, articles, limit){
 async function loadNews(symbol){
   newsList.innerHTML='<div class="fallback-note">Loading news…</div>';
   try{
-    const r=await fetch(`${NEWS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
+    const r=await fetch(`${NEWS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`); 
     const data=await r.json();
-    if (!Array.isArray(data) || !data.length){
-      newsList.innerHTML='<div class="muted">No recent headlines found.</div>'; newsMoreBtn.style.display='none'; return;
-    }
     renderNews(newsList, data, newsExpanded?NEWS_EXPANDED_COUNT:NEWS_INIT_COUNT);
-    newsMoreBtn.style.display = data.length > NEWS_INIT_COUNT ? 'inline-flex' : 'none';
+    newsMoreBtn.style.display = (Array.isArray(data) && data.length>NEWS_INIT_COUNT) ? 'inline-flex' : 'none';
     newsMoreBtn.textContent = newsExpanded ? 'View less' : 'View more';
     newsMoreBtn.onclick=()=>{ newsExpanded=!newsExpanded; renderNews(newsList, data, newsExpanded?NEWS_EXPANDED_COUNT:NEWS_INIT_COUNT); newsMoreBtn.textContent=newsExpanded?'View less':'View more'; };
   }catch(e){ newsList.innerHTML='<div class="muted">Failed to load news.</div>'; newsMoreBtn.style.display='none'; }
@@ -201,27 +214,29 @@ async function loadSentiment(symbol){
 async function loadMarketNews(){
   marketNewsList.innerHTML='<div class="fallback-note">Loading market headlines…</div>';
   try{
-    const r=await fetch(MKT_NEWS_ENDPOINT); const data=await r.json();
-    if (!Array.isArray(data) || !data.length){
-      marketNewsList.innerHTML='<div class="muted">No market headlines available.</div>'; marketNewsMoreBtn.style.display='none'; return;
-    }
+    const r=await fetch(MKT_NEWS_ENDPOINT); 
+    const data=await r.json();
     renderNews(marketNewsList, data, marketNewsExpanded?MARKET_NEWS_EXP:MARKET_NEWS_INIT);
-    marketNewsMoreBtn.style.display = data.length > MARKET_NEWS_INIT ? 'inline-flex' : 'none';
+    marketNewsMoreBtn.style.display = (Array.isArray(data) && data.length>MARKET_NEWS_INIT) ? 'inline-flex' : 'none';
     marketNewsMoreBtn.textContent = marketNewsExpanded ? 'View less' : 'View more';
     marketNewsMoreBtn.onclick=()=>{ marketNewsExpanded=!marketNewsExpanded; renderNews(marketNewsList, data, marketNewsExpanded?MARKET_NEWS_EXP:MARKET_NEWS_INIT); marketNewsMoreBtn.textContent=marketNewsExpanded?'View less':'View more'; };
   }catch(e){ marketNewsList.innerHTML='<div class="muted">Failed to load market headlines.</div>'; marketNewsMoreBtn.style.display='none'; }
 }
 
-// --------- Selection ----------
+// ---------- Selection ----------
 async function onSymbolSelect(symbol){
   currentSymbol = symbol;
   mountTradingView(symbol);
   await Promise.all([ loadQuote(symbol), loadNews(symbol), loadSentiment(symbol) ]);
 }
 
-// --------- Boot ----------
+// ---------- Boot ----------
 document.addEventListener('DOMContentLoaded', ()=>{
-  loadTickers(); setInterval(loadTickers, 10000);
+  // try to load tickers; if anything fails, still mount TSLA so page is alive
+  loadTickers().finally(()=>{
+    if (!currentSymbol) onSymbolSelect('TSLA');
+  });
+  setInterval(loadTickers, 10000);
   loadMovers();  setInterval(loadMovers, 30000);
   loadMarketNews(); setInterval(loadMarketNews, 180000);
 });
