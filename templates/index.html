@@ -1,36 +1,43 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
-  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="dark" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
   <title>Market Terminal</title>
   <link rel="stylesheet" href="/static/style.css" />
   <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
-  <!-- Top Ticker -->
-  <header>
+  <header class="topbar">
     <div class="ticker-bar">
       <div id="tickerScroll" class="ticker-scroll" aria-live="polite" aria-atomic="true"></div>
+    </div>
+    <div class="topbar-controls">
+      <label for="themeSelect">Theme</label>
+      <select id="themeSelect">
+        <option value="dark" selected>Dark</option>
+        <option value="light">Light</option>
+      </select>
     </div>
   </header>
 
   <main class="grid">
-    <!-- BIG TradingView Chart -->
+    <!-- TradingView Chart -->
     <section class="card chart-card" aria-labelledby="chartTitle">
       <h3 id="chartTitle">Chart</h3>
       <div class="card-body chart-body">
-        <div id="tv_container" class="chart-box">
-          <div class="fallback-note">Loading chart…</div>
-        </div>
+        <div id="tv_container" class="chart-box"><div class="fallback-note">Loading chart…</div></div>
       </div>
     </section>
 
-    <!-- Quote + Sentiment -->
+    <!-- Quote & Sentiment (minimal) -->
     <section class="card">
       <h3>Quote & Sentiment</h3>
       <div class="card-body">
-        <div id="quoteBox" class="quote-box"><div class="muted">Select a ticker…</div></div>
+        <div id="quoteBox" class="quote-box">
+          <div class="muted">Select a ticker…</div>
+        </div>
         <div class="senti-wrap">
           <span id="sentimentBadge" class="sentiment-badge">Sentiment: —</span>
           <div class="sentiment-meter" aria-hidden="true"><div id="sentimentBar" class="sentiment-bar"></div></div>
@@ -74,7 +81,7 @@
     </section>
   </main>
 
-  <footer class="footer-muted">Market Terminal · Data: yfinance · NewsAPI</footer>
+  <footer class="footer-muted">Market Terminal · Data: Stooq (quotes), NewsAPI (headlines)</footer>
   <script type="module" src="/static/main.js"></script>
 </body>
 </html>
