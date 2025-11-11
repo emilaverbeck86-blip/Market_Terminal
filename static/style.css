@@ -153,3 +153,14 @@ main{ padding:12px; margin-top: calc(var(--header-h) + 8px); }
 @media (max-width: 980px){
   .grid{ grid-template-columns: 1fr; }
 }
+/* --- Quote & Movers --- */
+.quote-box{ border:1px solid var(--border); border-radius:12px; padding:.6rem .8rem; background:#0b1218; }
+.stat-row{ display:flex; justify-content:space-between; align-items:end; gap:1rem; }
+.stat-price{ font-size:1.2rem; font-weight:800; }
+.stats-grid{ display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:.5rem; margin-top:.5rem; }
+.stats-grid div{ background:#0a0f14; border:1px solid var(--border); border-radius:10px; padding:.45rem .6rem; }
+.stats-grid span{ color:var(--muted); font-size:.85rem; display:block; }
+.two-col{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.simple-table{ width:100%; border-collapse:collapse; }
+.simple-table td{ border-bottom:1px solid var(--border); padding:.35rem .4rem; }
+.table-title{ color:#cbd6e2; font-weight:800; margin-bottom:.4rem; }
