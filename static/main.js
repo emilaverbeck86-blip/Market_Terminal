@@ -1,9 +1,10 @@
-// Market Terminal — uses Stooq quotes so movers/tickers always have % change.
-// Minimal Quote panel (no long stats). Theme toggle (dark/light).
+// Robust tickers with sticky server cache; company description instead of stats.
+// Drag & drop tiles + Settings (theme toggle + show/hide).
 
 const TICKER_ENDPOINT    = "/api/tickers";
 const MOVERS_ENDPOINT    = "/api/movers";
 const QUOTE_ENDPOINT     = "/api/quote";
+const PROF_ENDPOINT      = "/api/profile";
 const NEWS_ENDPOINT      = "/api/news";
 const SENTI_ENDPOINT     = "/api/sentiment";
 const MKT_NEWS_ENDPOINT  = "/api/market-news";
@@ -18,31 +19,107 @@ const sentiBar       = document.getElementById('sentimentBar');
 const marketNewsList = document.getElementById('marketNewsList');
 const newsMoreBtn    = document.getElementById('newsMoreBtn');
 const marketNewsMoreBtn = document.getElementById('marketNewsMoreBtn');
-const quoteBox       = document.getElementById('quoteBox');
 const gainersBody    = document.getElementById('gainersBody');
 const losersBody     = document.getElementById('losersBody');
-const themeSelect    = document.getElementById('themeSelect');
+const companyBox     = document.getElementById('companyBox');
+
+const gridRoot       = document.getElementById('gridRoot');
+const themeToggle    = document.getElementById('themeToggle');
+const settingsMenu   = document.getElementById('settingsMenu');
 
 const NEWS_INIT_COUNT = 8, NEWS_EXPANDED_COUNT = 30;
 const MARKET_NEWS_INIT = 6, MARKET_NEWS_EXP = 30;
 
 let currentSymbol = null, newsExpanded=false, marketNewsExpanded=false;
 
-// --- Theme toggle ---
-(function initTheme(){
-  const saved = localStorage.getItem('mt_theme');
-  if (saved === 'light' || saved === 'dark') {
-    document.documentElement.setAttribute('data-theme', saved);
-    themeSelect.value = saved;
-  }
-  themeSelect.addEventListener('change', ()=>{
-    const v = themeSelect.value;
-    document.documentElement.setAttribute('data-theme', v);
-    localStorage.setItem('mt_theme', v);
+// ===== Settings (theme + tile toggles) =====
+(function initSettings(){
+  // theme
+  const savedTheme = localStorage.getItem('mt_theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', savedTheme);
+  themeToggle.checked = (savedTheme === 'light');
+  themeToggle.addEventListener('change', ()=>{
+    const t = themeToggle.checked ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+    localStorage.setItem('mt_theme', t);
+    if (currentSymbol) mountTradingView(currentSymbol);
+  });
+
+  // tile show/hide
+  const savedVis = JSON.parse(localStorage.getItem('mt_tiles_vis') || "{}");
+  Array.from(settingsMenu.querySelectorAll('.tile-toggle')).forEach(cb=>{
+    const id = cb.dataset.tile;
+    if (id in savedVis) { cb.checked = !!savedVis[id]; }
+    applyTileVisibility(id, cb.checked);
+    cb.addEventListener('change', ()=>{
+      applyTileVisibility(id, cb.checked);
+      const v = JSON.parse(localStorage.getItem('mt_tiles_vis') || "{}");
+      v[id] = cb.checked; localStorage.setItem('mt_tiles_vis', JSON.stringify(v));
+    });
+  });
+
+  // header minus buttons
+  document.querySelectorAll('.min-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.hide;
+      applyTileVisibility(id, false);
+      const v = JSON.parse(localStorage.getItem('mt_tiles_vis') || "{}");
+      v[id]=false; localStorage.setItem('mt_tiles_vis', JSON.stringify(v));
+      const cb = settingsMenu.querySelector(`.tile-toggle[data-tile="${id}"]`);
+      if (cb) cb.checked=false;
+    });
   });
 })();
+function applyTileVisibility(id, show){
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.display = show ? '' : 'none';
+}
 
-// TradingView exchange map
+// ===== Drag & Drop layout (DOM reorder + save) =====
+(function initDrag(){
+  const orderKey = 'mt_tile_order';
+  const saved = JSON.parse(localStorage.getItem(orderKey) || '[]');
+  if (saved.length){
+    saved.forEach(id=>{
+      const el=document.getElementById(id);
+      if (el) gridRoot.appendChild(el);
+    });
+  }
+  let dragEl=null;
+  gridRoot.addEventListener('dragstart', e=>{
+    const card = e.target.closest('.draggable'); if(!card) return;
+    dragEl=card; e.dataTransfer.effectAllowed='move';
+    card.classList.add('dragging');
+  });
+  gridRoot.addEventListener('dragend', e=>{
+    const card = e.target.closest('.draggable'); if(!card) return;
+    card.classList.remove('dragging');
+    dragEl=null;
+    saveOrder();
+  });
+  gridRoot.addEventListener('dragover', e=>{
+    if(!dragEl) return; e.preventDefault();
+    const after = getDragAfterElement(gridRoot, e.clientY);
+    if (after == null) gridRoot.appendChild(dragEl);
+    else gridRoot.insertBefore(dragEl, after);
+  });
+  function saveOrder(){
+    const ids=[...gridRoot.querySelectorAll('.draggable')].map(n=>n.id);
+    localStorage.setItem(orderKey, JSON.stringify(ids));
+  }
+  function getDragAfterElement(container, y){
+    const els=[...container.querySelectorAll('.draggable:not(.dragging)')];
+    return els.reduce((closest, child)=>{
+      const box=child.getBoundingClientRect();
+      const offset=y - box.top - box.height/2;
+      if(offset<0 && offset>closest.offset){ return {offset, element:child}; }
+      else return closest;
+    }, {offset: Number.NEGATIVE_INFINITY}).element;
+  }
+})();
+
+// ===== TradingView =====
 const TV_EXCHANGE = {
   AAPL:"NASDAQ", MSFT:"NASDAQ", NVDA:"NASDAQ", AMZN:"NASDAQ", META:"NASDAQ",
   GOOGL:"NASDAQ", TSLA:"NASDAQ", AVGO:"NASDAQ", AMD:"NASDAQ", NFLX:"NASDAQ",
@@ -57,22 +134,22 @@ const TV_EXCHANGE = {
 };
 const toTV = s => `${(TV_EXCHANGE[s]||'NASDAQ')}:${s}`;
 
-// ---------- TradingView ----------
 function mountTradingView(symbol) {
   chartTitle.textContent = `Chart – ${symbol}`;
   tvContainer.innerHTML = "";
   if (typeof TradingView === "undefined" || !TradingView.widget) {
     const warn = document.createElement("div");
     warn.className = "muted";
-    warn.textContent = "TradingView script failed to load (check network/adblock).";
+    warn.textContent = "TradingView script failed to load.";
     tvContainer.appendChild(warn);
     return;
   }
+  const theme = document.documentElement.getAttribute('data-theme')==='light' ? 'light' : 'dark';
   new TradingView.widget({
     symbol: toTV(symbol),
     interval: '60',
     timezone: 'Etc/UTC',
-    theme: (document.documentElement.getAttribute('data-theme')==='light')?'light':'dark',
+    theme,
     style: '1',
     toolbar_bg: 'transparent',
     locale: 'en',
@@ -83,12 +160,12 @@ function mountTradingView(symbol) {
   });
 }
 
-// ---------- Helpers ----------
+// ===== Helpers =====
 const fmtPrice = v => (typeof v==='number' && isFinite(v)) ? v.toFixed(2) : '—';
-const fmtChange = v => (v==null||!isFinite(v)) ? '0.00%' : `${v>0?'+':(v<0?'−':'')}${Math.abs(v).toFixed(2)}%`;
+const fmtChange = v => (v==null||!isFinite(v)) ? '—' : `${v>0?'+':(v<0?'−':'')}${Math.abs(v).toFixed(2)}%`;
 function applyChangeClass(el, v){ el.className = 'chg ' + (v>0?'pos':(v<0?'neg':'neu')); }
 
-// ---------- Ticker bar ----------
+// ===== Ticker bar =====
 const tickerNodes = new Map();
 
 function renderTicker(items){
@@ -97,7 +174,6 @@ function renderTicker(items){
   }
   tickerScroll.innerHTML = '';
   tickerNodes.clear();
-  // duplicate once to keep bar full & scrolling
   const twice = [...items, ...items];
   twice.forEach(tk=>{
     const item=document.createElement('div'); item.className='ticker-item'; item.dataset.sym=tk.symbol;
@@ -136,11 +212,11 @@ async function loadTickers(){
     if (!tickerScroll.childElementCount) renderTicker(data);
     else updateTicker(data);
   }catch(e){
-    if (!tickerScroll.childElementCount) renderTicker(null);
+    // keep previous snapshot in UI
   }
 }
 
-// ---------- Movers & Quote ----------
+// ===== Movers / Company / Quote =====
 function renderMovers(movers){
   const fill = (tbody, arr) => {
     tbody.innerHTML = '';
@@ -152,15 +228,8 @@ function renderMovers(movers){
       tbody.appendChild(tr);
     });
   };
-  renderTickerOnFirstLoad(); // ensure we have a symbol even if user doesn't click
   fill(gainersBody, movers.gainers||[]);
   fill(losersBody, movers.losers||[]);
-}
-function renderTickerOnFirstLoad(){
-  if (!currentSymbol){
-    const first = document.querySelector('.ticker-item');
-    if (first) onSymbolSelect(first.dataset.sym);
-  }
 }
 async function loadMovers(){
   try{
@@ -171,23 +240,20 @@ async function loadMovers(){
     renderMovers({gainers:[], losers:[]});
   }
 }
-async function loadQuote(symbol){
+async function loadCompany(symbol){
   try{
-    const r = await fetch(`${QUOTE_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
-    const q = await r.json();
-    quoteBox.innerHTML = `
-      <div class="stat-row">
-        <div class="q-left"><b>${q.symbol || symbol}</b></div>
-        <div class="q-right">${q.price!=null?fmtPrice(q.price):'—'} <span class="${q.change_pct>0?'pos':(q.change_pct<0?'neg':'neu')}">${fmtChange(q.change_pct)}</span></div>
-      </div>
-      <div class="muted small">Prev Close: ${q.previous_close??'—'}</div>
+    const r = await fetch(`${PROF_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
+    const p = await r.json();
+    companyBox.innerHTML = `
+      <div class="co-name"><b>${p.name || symbol}</b> <span class="muted">(${symbol})</span></div>
+      <p class="co-desc">${(p.description || '').slice(0, 800)}</p>
     `;
   }catch(e){
-    quoteBox.innerHTML = '<div class="muted">Quote unavailable.</div>';
+    companyBox.innerHTML = `<div class="muted">No description available.</div>`;
   }
 }
 
-// ---------- News / Sentiment / Market News ----------
+// ===== News / Sentiment =====
 function renderNews(container, articles, limit){
   container.innerHTML = '';
   if (!Array.isArray(articles) || !articles.length){
@@ -237,18 +303,23 @@ async function loadMarketNews(){
   }catch(e){ marketNewsList.innerHTML='<div class="muted">Failed to load market headlines.</div>'; marketNewsMoreBtn.style.display='none'; }
 }
 
-// ---------- Selection ----------
+// ===== Selection =====
 async function onSymbolSelect(symbol){
   currentSymbol = symbol;
   mountTradingView(symbol);
-  await Promise.all([ loadQuote(symbol), loadNews(symbol), loadSentiment(symbol) ]);
+  await Promise.all([
+    loadCompany(symbol),
+    loadNews(symbol),
+    loadSentiment(symbol),
+  ]);
 }
 
-// ---------- Boot ----------
+// ===== Boot =====
 document.addEventListener('DOMContentLoaded', ()=>{
-  loadTickers(); setInterval(loadTickers, 10000);
-  loadMovers();  setInterval(loadMovers, 30000);
-  loadMarketNews(); setInterval(loadMarketNews, 180000);
+  loadTickers(); setInterval(loadTickers, 1000*30); // 30s (server cache 45s)
+  loadMovers();  setInterval(loadMovers, 1000*45);  // sync-ish with cache
+  loadMarketNews(); setInterval(loadMarketNews, 1000*180);
+
   // Fallback chart if nothing clicked yet
-  setTimeout(()=>{ if(!currentSymbol) onSymbolSelect('TSLA'); }, 1200);
+  setTimeout(()=>{ if(!currentSymbol) onSymbolSelect('TSLA'); }, 800);
 });
