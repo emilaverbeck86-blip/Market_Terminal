@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- Meta -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Market Terminal</title>
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="/static/style.css" />
+
+  <!-- TradingView -->
+  <script src="https://s3.tradingview.com/tv.js"></script>
+</head>
+<body>
+  <!-- Header / Ticker (no label) -->
+  <header role="banner" aria-label="Top Ticker">
+    <div class="ticker-bar">
+      <div id="tickerScroll" class="ticker-scroll" aria-live="polite" aria-atomic="true"></div>
+    </div>
+    <noscript>
+      <div class="noscript">JavaScript is required for live tickers and charts.</div>
+    </noscript>
+  </header>
+
+  <!-- Main Row: Chart + Sentiment/News -->
+  <main class="grid" role="main">
+    <!-- Chart Card -->
+    <section class="card" id="chartCard" aria-labelledby="chartTitle">
+      <h3 id="chartTitle">Chart</h3>
+      <div class="card-body">
+        <div id="tv_container" class="chart-box">
+          <div class="fallback-note">Loading chart…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sentiment + Per-Symbol News -->
+    <section class="card" aria-labelledby="sentimentTitle">
+      <h3 id="sentimentTitle">Sentiment & News</h3>
+      <div class="card-body">
+        <div id="sentimentHeader" aria-live="polite" aria-atomic="true">
+          <span id="sentimentBadge" class="sentiment-badge">Sentiment: —</span>
+          <div class="sentiment-meter" aria-hidden="true">
+            <div id="sentimentBar" class="sentiment-bar"></div>
+          </div>
+        </div>
+
+        <!-- Per-symbol news -->
+        <div class="news-list" id="newsList" aria-label="Latest headlines">
+          <div class="fallback-note">Loading news…</div>
+        </div>
+
+        <!-- Per-symbol news controls -->
+        <div class="list-controls">
+          <button id="newsMoreBtn" class="ghost-btn" type="button">View more</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Second Row: Market News + Economic Calendar -->
+    <section class="card" aria-labelledby="marketNewsTitle">
+      <h3 id="marketNewsTitle">Market News</h3>
+      <div class="card-body">
+        <div class="news-list" id="marketNewsList">
+          <div class="fallback-note">Loading market headlines…</div>
+        </div>
+        <div class="list-controls">
+          <button id="marketNewsMoreBtn" class="ghost-btn" type="button">View more</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="econCalTitle">
+      <h3 id="econCalTitle">Economic Calendar (USD · High & Medium)</h3>
+      <div class="card-body">
+        <div class="calendar-wrap">
+          <table class="calendar-table" id="econCalTable" aria-label="High/Medium impact economic events for USD">
+            <thead>
+              <tr>
+                <th style="width:22%">Date/Time</th>
+                <th style="width:34%">Event</th>
+                <th style="width:12%">Actual</th>
+                <th style="width:12%">Forecast</th>
+                <th style="width:12%">Last</th>
+                <th style="width:8%">Country</th>
+              </tr>
+            </thead>
+            <tbody id="econCalBody">
+              <tr><td colspan="6" class="muted">Loading calendar…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer-muted">
+    Market Terminal · Data: yfinance · NewsAPI · TradingEconomics
+  </footer>
+
+  <!-- App JS -->
+  <script type="module" src="/static/main.js"></script>
+</body>
+</html>
