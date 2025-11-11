@@ -8,33 +8,39 @@
   <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
-  <header role="banner">
-    <div class="ticker-bar"><div id="tickerScroll" class="ticker-scroll" aria-live="polite" aria-atomic="true"></div></div>
+  <!-- Top Ticker (scrolls; pauses on hover) -->
+  <header>
+    <div class="ticker-bar">
+      <div id="tickerScroll" class="ticker-scroll" aria-live="polite" aria-atomic="true"></div>
+    </div>
   </header>
 
-  <main class="grid" role="main">
-    <!-- Chart -->
-    <section class="card" id="chartCard" aria-labelledby="chartTitle">
+  <main class="grid">
+    <!-- TradingView Chart -->
+    <section class="card">
       <h3 id="chartTitle">Chart</h3>
-      <div class="card-body"><div id="tv_container" class="chart-box"><div class="fallback-note">Loading chart…</div></div></div>
+      <div class="card-body">
+        <div id="tv_container" class="chart-box"><div class="fallback-note">Loading chart…</div></div>
+      </div>
     </section>
 
-    <!-- Quote + Sentiment + News -->
+    <!-- Quote + Sentiment -->
     <section class="card">
       <h3>Quote & Sentiment</h3>
       <div class="card-body">
         <div id="quoteBox" class="quote-box"><div class="muted">Select a ticker…</div></div>
-        <div id="sentimentHeader" style="margin-top:.6rem">
+        <div id="sentimentHeader" class="senti-wrap">
           <span id="sentimentBadge" class="sentiment-badge">Sentiment: —</span>
           <div class="sentiment-meter" aria-hidden="true"><div id="sentimentBar" class="sentiment-bar"></div></div>
         </div>
       </div>
     </section>
 
+    <!-- Per-symbol News -->
     <section class="card">
       <h3>News</h3>
       <div class="card-body">
-        <div class="news-list" id="newsList"><div class="fallback-note">Loading news…</div></div>
+        <div id="newsList" class="news-list"><div class="fallback-note">Loading news…</div></div>
         <div class="list-controls"><button id="newsMoreBtn" class="ghost-btn" type="button">View more</button></div>
       </div>
     </section>
@@ -60,17 +66,17 @@
     <section class="card">
       <h3>Market News (US)</h3>
       <div class="card-body">
-        <div class="news-list" id="marketNewsList"><div class="fallback-note">Loading market headlines…</div></div>
+        <div id="marketNewsList" class="news-list"><div class="fallback-note">Loading market headlines…</div></div>
         <div class="list-controls"><button id="marketNewsMoreBtn" class="ghost-btn" type="button">View more</button></div>
       </div>
     </section>
 
-    <!-- Econ Calendar -->
+    <!-- Economic Calendar -->
     <section class="card">
       <h3>Economic Calendar (USD · High & Medium)</h3>
       <div class="card-body">
         <div class="calendar-wrap">
-          <table class="calendar-table" aria-label="High/Medium impact economic events for USD">
+          <table class="calendar-table">
             <thead>
               <tr>
                 <th style="width:22%">Date/Time</th>
