@@ -14,7 +14,6 @@
       <div id="tickerScroll" class="ticker-scroll" aria-live="polite" aria-atomic="true"></div>
     </div>
 
-    <!-- Click-to-open Settings -->
     <div class="topbar-controls">
       <div class="dropdown" id="settingsDropdown">
         <button class="dropbtn" id="settingsBtn">Settings ▾</button>
@@ -22,18 +21,19 @@
           <div class="menu-row">
             <span>Theme</span>
             <div class="theme-toggle">
-              <!-- Swapped: moon on left, sun on right -->
-              <svg class="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M21.64 13a9 9 0 01-11.3-11.3A9 9 0 1021.64 13z"/></svg>
+              <!-- moon left / sun right -->
+              <svg class="icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M21.64 13a9 9 0 01-11.3-11.3A9 9 0 1021.64 13z"/></svg>
               <label class="switch">
                 <input type="checkbox" id="themeToggle">
                 <span class="slider"></span>
               </label>
-              <svg class="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M6.76 4.84l-1.8-1.79L3.17 4.84l1.79 1.79 1.8-1.79zM12 4V1h0v3h0zm6 8h3v0h-3v0zM4 12H1v0h3v0zm11.24 7.16l1.8 1.79 1.79-1.79-1.79-1.79-1.8 1.79zM12 23v-3h0v3h0zM6.76 19.16l-1.8 1.79-1.79-1.79 1.79-1.79 1.8 1.79zM19.16 6.76l1.79-1.92-1.79-1.66-1.79 1.79 1.79 1.79zM12 7a5 5 0 100 10 5 5 0 000-10z"/></svg>
+              <svg class="icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M6.76 4.84l-1.8-1.79L3.17 4.84l1.79 1.79 1.8-1.79zM12 4V1h0v3h0zm6 8h3v0h-3v0zM4 12H1v0h3v0zm11.24 7.16l1.8 1.79 1.79-1.79-1.79-1.79-1.8 1.79zM12 23v-3h0v3h0zM6.76 19.16l-1.8 1.79-1.79-1.79 1.79-1.79 1.8 1.79zM19.16 6.76l1.79-1.92-1.79-1.66-1.79 1.79 1.79 1.79zM12 7a5 5 0 100 10 5 5 0 000-10z"/></svg>
             </div>
           </div>
           <div class="menu-sep"></div>
           <div class="menu-label">Tiles</div>
           <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-chart" checked> Chart</label>
+          <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-snapshot" checked> Snapshot</label>
           <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-company" checked> Company</label>
           <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-sentiment" checked> Sentiment</label>
           <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-news" checked> News</label>
@@ -45,13 +45,53 @@
   </header>
 
   <main class="grid" id="gridRoot">
-    <!-- Chart (resizable; default spans 2 cols) -->
+    <!-- Chart -->
     <section class="card chart-card draggable span-2 resizable" id="tile-chart" data-span="2" draggable="true" aria-labelledby="chartTitle">
       <div class="card-hd"><h3 id="chartTitle">Chart</h3><button class="min-btn" data-hide="tile-chart">−</button></div>
       <div class="card-body chart-body">
         <div id="tv_container" class="chart-box"><div class="fallback-note">Loading chart…</div></div>
       </div>
       <div class="resize-handle" data-axis="both"></div>
+    </section>
+
+    <!-- Snapshot (new tile) -->
+    <section class="card draggable resizable" id="tile-snapshot" data-span="1" draggable="true">
+      <div class="card-hd"><h3>Snapshot</h3><button class="min-btn" data-hide="tile-snapshot">−</button></div>
+      <div class="card-body">
+        <div class="snap-wrap">
+          <div class="snap-stats">
+            <div class="snap-label">Key stats</div>
+            <div class="kv"><span>Volume</span><b id="snapVol">—</b></div>
+            <div class="kv"><span>Average Volume (30D)</span><b id="snapVolAvg">—</b></div>
+          </div>
+
+          <div class="snap-perf">
+            <div class="snap-label">Performance</div>
+            <div class="perf-grid" id="snapPerf">
+              <!-- chips injected -->
+            </div>
+          </div>
+
+          <div class="snap-seasonals">
+            <div class="snap-label">Seasonals</div>
+            <canvas id="seasonalsCanvas" height="140"></canvas>
+            <div class="season-legend">
+              <span class="lg lg-2025">2025</span>
+              <span class="lg lg-2024">2024</span>
+              <span class="lg lg-2023">2023</span>
+            </div>
+          </div>
+
+          <div class="snap-tech">
+            <div class="snap-label">Technicals</div>
+            <div class="gauge">
+              <div class="gauge-arc"><div id="gaugeNeedle" class="needle"></div></div>
+              <div id="gaugeText" class="gauge-text">Neutral</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="resize-handle" data-axis="v"></div>
     </section>
 
     <!-- Company -->
@@ -63,15 +103,13 @@
       <div class="resize-handle" data-axis="v"></div>
     </section>
 
-    <!-- Sentiment (separate tile) -->
+    <!-- Sentiment -->
     <section class="card draggable resizable" id="tile-sentiment" data-span="1" draggable="true">
       <div class="card-hd"><h3>Sentiment</h3><button class="min-btn" data-hide="tile-sentiment">−</button></div>
       <div class="card-body">
         <div class="senti-tile">
           <div id="sentimentLabel" class="senti-label">Neutral</div>
-          <div class="senti-bar">
-            <div id="sentiFill" class="senti-fill"></div>
-          </div>
+          <div class="senti-bar"><div id="sentiFill" class="senti-fill"></div></div>
         </div>
       </div>
       <div class="resize-handle" data-axis="v"></div>
@@ -116,7 +154,7 @@
     </section>
   </main>
 
-  <footer class="footer-muted">Market Terminal · Data: Stooq (quotes), NewsAPI (headlines)</footer>
+  <footer class="footer-muted">Market Terminal · Data: Yahoo (quotes), Stooq (fallback), NewsAPI (headlines)</footer>
   <script type="module" src="/static/main.js"></script>
 </body>
 </html>
