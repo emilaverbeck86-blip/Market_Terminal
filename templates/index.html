@@ -8,7 +8,7 @@
   <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
-  <!-- Top Ticker (scrolls; pauses on hover) -->
+  <!-- Top Ticker -->
   <header>
     <div class="ticker-bar">
       <div id="tickerScroll" class="ticker-scroll" aria-live="polite" aria-atomic="true"></div>
@@ -16,7 +16,7 @@
   </header>
 
   <main class="grid">
-    <!-- BIG TradingView Chart (spans 2 rows; fixed viewport height) -->
+    <!-- BIG TradingView Chart -->
     <section class="card chart-card" id="chartCard" aria-labelledby="chartTitle">
       <h3 id="chartTitle">Chart</h3>
       <div class="card-body chart-body">
@@ -73,25 +73,20 @@
       </div>
     </section>
 
-    <!-- Economic Calendar -->
+    <!-- Embedded TradingEconomics Calendar (US · Medium+High) -->
     <section class="card">
       <h3>Economic Calendar (USD · High & Medium)</h3>
       <div class="card-body">
-        <div class="calendar-wrap">
-          <table class="calendar-table">
-            <thead>
-              <tr>
-                <th style="width:22%">Date/Time</th>
-                <th style="width:34%">Event</th>
-                <th style="width:12%">Actual</th>
-                <th style="width:12%">Forecast</th>
-                <th style="width:12%">Last</th>
-                <th style="width:8%">Country</th>
-              </tr>
-            </thead>
-            <tbody id="econCalBody"><tr><td colspan="6" class="muted">Loading calendar…</td></tr></tbody>
-          </table>
+        <div class="calendar-embed-wrap">
+          <iframe
+            class="te-calendar-iframe"
+            title="TradingEconomics Economic Calendar (United States, Medium & High)"
+            src="https://tradingeconomics.com/api/calendar.aspx?c=guest:guest&countries=United%20States&importance=2,3&lang=en&timezone=UTC"
+            loading="lazy"
+            referrerpolicy="no-referrer"
+          ></iframe>
         </div>
+        <div class="muted small-note">Source: TradingEconomics</div>
       </div>
     </section>
   </main>
