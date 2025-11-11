@@ -13,44 +13,49 @@
     <div class="ticker-bar">
       <div id="tickerScroll" class="ticker-scroll" aria-live="polite" aria-atomic="true"></div>
     </div>
+
+    <!-- Click-to-open Settings -->
     <div class="topbar-controls">
-      <div class="dropdown">
-        <button class="dropbtn">Settings ▾</button>
-        <div class="dropdown-menu" id="settingsMenu">
+      <div class="dropdown" id="settingsDropdown">
+        <button class="dropbtn" id="settingsBtn">Settings ▾</button>
+        <div class="dropdown-menu" id="settingsMenu" aria-labelledby="settingsBtn">
           <div class="menu-row">
             <span>Theme</span>
-            <label class="switch">
-              <input type="checkbox" id="themeToggle">
-              <span class="slider"></span>
-            </label>
+            <div class="theme-toggle">
+              <svg class="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M6.76 4.84l-1.8-1.79L3.17 4.84l1.79 1.79 1.8-1.79zm10.48 14.32l1.79 1.79 1.79-1.79-1.79-1.79-1.79 1.79zM12 4V1h-0v3h0zm0 19v-3h0v3h0zM4 12H1v0h3v0zm19 0h-3v0h3v0zM6.76 19.16l-1.8 1.79-1.79-1.79 1.79-1.79 1.8 1.79zM19.16 6.76l1.79-1.92-1.79-1.66-1.79 1.79 1.79 1.79zM12 7a5 5 0 100 10 5 5 0 000-10z"/></svg>
+              <label class="switch">
+                <input type="checkbox" id="themeToggle">
+                <span class="slider"></span>
+              </label>
+              <svg class="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M21.64 13a9 9 0 01-11.3-11.3A9 9 0 1021.64 13z"/></svg>
+            </div>
           </div>
           <div class="menu-sep"></div>
-          <div class="menu-row"><label><input type="checkbox" class="tile-toggle" data-tile="tile-chart" checked> Chart</label></div>
-          <div class="menu-row"><label><input type="checkbox" class="tile-toggle" data-tile="tile-company" checked> Company</label></div>
-          <div class="menu-row"><label><input type="checkbox" class="tile-toggle" data-tile="tile-news" checked> News</label></div>
-          <div class="menu-row"><label><input type="checkbox" class="tile-toggle" data-tile="tile-movers" checked> Movers</label></div>
-          <div class="menu-row"><label><input type="checkbox" class="tile-toggle" data-tile="tile-marketnews" checked> Market News</label></div>
+          <div class="menu-label">Tiles</div>
+          <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-chart" checked> Chart</label>
+          <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-company" checked> Company</label>
+          <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-news" checked> News</label>
+          <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-movers" checked> Movers</label>
+          <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-marketnews" checked> Market News</label>
         </div>
       </div>
     </div>
   </header>
 
   <main class="grid" id="gridRoot">
-    <!-- TradingView Chart -->
-    <section class="card chart-card draggable" id="tile-chart" draggable="true" aria-labelledby="chartTitle">
+    <!-- Chart (default spans 2 cols; will auto-shrink on drop to right col) -->
+    <section class="card chart-card draggable span-2" id="tile-chart" data-span="2" draggable="true" aria-labelledby="chartTitle">
       <div class="card-hd"><h3 id="chartTitle">Chart</h3><button class="min-btn" data-hide="tile-chart">−</button></div>
       <div class="card-body chart-body">
         <div id="tv_container" class="chart-box"><div class="fallback-note">Loading chart…</div></div>
       </div>
     </section>
 
-    <!-- Company (description only) -->
-    <section class="card draggable" id="tile-company" draggable="true">
+    <!-- Company -->
+    <section class="card draggable" id="tile-company" data-span="1" draggable="true">
       <div class="card-hd"><h3>Company</h3><button class="min-btn" data-hide="tile-company">−</button></div>
       <div class="card-body">
-        <div id="companyBox" class="company-box">
-          <div class="muted">Select a ticker…</div>
-        </div>
+        <div id="companyBox" class="company-box"><div class="muted">Select a ticker…</div></div>
         <div class="senti-wrap">
           <span id="sentimentBadge" class="sentiment-badge">Sentiment: —</span>
           <div class="sentiment-meter" aria-hidden="true"><div id="sentimentBar" class="sentiment-bar"></div></div>
@@ -58,8 +63,8 @@
       </div>
     </section>
 
-    <!-- News (selected ticker) -->
-    <section class="card draggable" id="tile-news" draggable="true">
+    <!-- News -->
+    <section class="card draggable" id="tile-news" data-span="1" draggable="true">
       <div class="card-hd"><h3>News</h3><button class="min-btn" data-hide="tile-news">−</button></div>
       <div class="card-body">
         <div id="newsList" class="news-list"><div class="fallback-note">Loading news…</div></div>
@@ -68,7 +73,7 @@
     </section>
 
     <!-- Movers -->
-    <section class="card draggable" id="tile-movers" draggable="true">
+    <section class="card draggable" id="tile-movers" data-span="1" draggable="true">
       <div class="card-hd"><h3>Top Movers (Watchlist)</h3><button class="min-btn" data-hide="tile-movers">−</button></div>
       <div class="card-body">
         <div class="two-col">
@@ -84,8 +89,8 @@
       </div>
     </section>
 
-    <!-- Market News -->
-    <section class="card draggable" id="tile-marketnews" draggable="true">
+    <!-- Market news -->
+    <section class="card draggable" id="tile-marketnews" data-span="1" draggable="true">
       <div class="card-hd"><h3>Market News (US)</h3><button class="min-btn" data-hide="tile-marketnews">−</button></div>
       <div class="card-body">
         <div id="marketNewsList" class="news-list"><div class="fallback-note">Loading market headlines…</div></div>
@@ -94,7 +99,7 @@
     </section>
   </main>
 
-  <footer class="footer-muted">Market Terminal · Data: yfinance (OHLC), NewsAPI (headlines)</footer>
+  <footer class="footer-muted">Market Terminal · Data: Stooq (quotes), NewsAPI (headlines)</footer>
   <script type="module" src="/static/main.js"></script>
 </body>
 </html>
