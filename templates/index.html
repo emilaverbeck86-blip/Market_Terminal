@@ -1,82 +1,76 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <!-- Meta -->
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
   <title>Market Terminal</title>
-
-  <!-- Styles -->
   <link rel="stylesheet" href="/static/style.css" />
-
-  <!-- TradingView -->
   <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
-  <!-- Header / Ticker (no label) -->
-  <header role="banner" aria-label="Top Ticker">
-    <div class="ticker-bar">
-      <div id="tickerScroll" class="ticker-scroll" aria-live="polite" aria-atomic="true"></div>
-    </div>
-    <noscript>
-      <div class="noscript">JavaScript is required for live tickers and charts.</div>
-    </noscript>
+  <header role="banner">
+    <div class="ticker-bar"><div id="tickerScroll" class="ticker-scroll" aria-live="polite" aria-atomic="true"></div></div>
   </header>
 
-  <!-- Main Row: Chart + Sentiment/News -->
   <main class="grid" role="main">
-    <!-- Chart Card -->
+    <!-- Chart -->
     <section class="card" id="chartCard" aria-labelledby="chartTitle">
       <h3 id="chartTitle">Chart</h3>
+      <div class="card-body"><div id="tv_container" class="chart-box"><div class="fallback-note">Loading chart…</div></div></div>
+    </section>
+
+    <!-- Quote + Sentiment + News -->
+    <section class="card">
+      <h3>Quote & Sentiment</h3>
       <div class="card-body">
-        <div id="tv_container" class="chart-box">
-          <div class="fallback-note">Loading chart…</div>
+        <div id="quoteBox" class="quote-box"><div class="muted">Select a ticker…</div></div>
+        <div id="sentimentHeader" style="margin-top:.6rem">
+          <span id="sentimentBadge" class="sentiment-badge">Sentiment: —</span>
+          <div class="sentiment-meter" aria-hidden="true"><div id="sentimentBar" class="sentiment-bar"></div></div>
         </div>
       </div>
     </section>
 
-    <!-- Sentiment + Per-Symbol News -->
-    <section class="card" aria-labelledby="sentimentTitle">
-      <h3 id="sentimentTitle">Sentiment & News</h3>
+    <section class="card">
+      <h3>News</h3>
       <div class="card-body">
-        <div id="sentimentHeader" aria-live="polite" aria-atomic="true">
-          <span id="sentimentBadge" class="sentiment-badge">Sentiment: —</span>
-          <div class="sentiment-meter" aria-hidden="true">
-            <div id="sentimentBar" class="sentiment-bar"></div>
+        <div class="news-list" id="newsList"><div class="fallback-note">Loading news…</div></div>
+        <div class="list-controls"><button id="newsMoreBtn" class="ghost-btn" type="button">View more</button></div>
+      </div>
+    </section>
+
+    <!-- Movers -->
+    <section class="card">
+      <h3>Top Movers (Watchlist)</h3>
+      <div class="card-body">
+        <div class="two-col">
+          <div>
+            <div class="table-title">Top Gainers</div>
+            <table class="simple-table"><tbody id="gainersBody"><tr><td class="muted">Loading…</td></tr></tbody></table>
+          </div>
+          <div>
+            <div class="table-title">Top Losers</div>
+            <table class="simple-table"><tbody id="losersBody"><tr><td class="muted">Loading…</td></tr></tbody></table>
           </div>
         </div>
-
-        <!-- Per-symbol news -->
-        <div class="news-list" id="newsList" aria-label="Latest headlines">
-          <div class="fallback-note">Loading news…</div>
-        </div>
-
-        <!-- Per-symbol news controls -->
-        <div class="list-controls">
-          <button id="newsMoreBtn" class="ghost-btn" type="button">View more</button>
-        </div>
       </div>
     </section>
 
-    <!-- Second Row: Market News + Economic Calendar -->
-    <section class="card" aria-labelledby="marketNewsTitle">
-      <h3 id="marketNewsTitle">Market News</h3>
+    <!-- Market News -->
+    <section class="card">
+      <h3>Market News (US)</h3>
       <div class="card-body">
-        <div class="news-list" id="marketNewsList">
-          <div class="fallback-note">Loading market headlines…</div>
-        </div>
-        <div class="list-controls">
-          <button id="marketNewsMoreBtn" class="ghost-btn" type="button">View more</button>
-        </div>
+        <div class="news-list" id="marketNewsList"><div class="fallback-note">Loading market headlines…</div></div>
+        <div class="list-controls"><button id="marketNewsMoreBtn" class="ghost-btn" type="button">View more</button></div>
       </div>
     </section>
 
-    <section class="card" aria-labelledby="econCalTitle">
-      <h3 id="econCalTitle">Economic Calendar (USD · High & Medium)</h3>
+    <!-- Econ Calendar -->
+    <section class="card">
+      <h3>Economic Calendar (USD · High & Medium)</h3>
       <div class="card-body">
         <div class="calendar-wrap">
-          <table class="calendar-table" id="econCalTable" aria-label="High/Medium impact economic events for USD">
+          <table class="calendar-table" aria-label="High/Medium impact economic events for USD">
             <thead>
               <tr>
                 <th style="width:22%">Date/Time</th>
@@ -87,20 +81,14 @@
                 <th style="width:8%">Country</th>
               </tr>
             </thead>
-            <tbody id="econCalBody">
-              <tr><td colspan="6" class="muted">Loading calendar…</td></tr>
-            </tbody>
+            <tbody id="econCalBody"><tr><td colspan="6" class="muted">Loading calendar…</td></tr></tbody>
           </table>
         </div>
       </div>
     </section>
   </main>
 
-  <footer class="footer-muted">
-    Market Terminal · Data: yfinance · NewsAPI · TradingEconomics
-  </footer>
-
-  <!-- App JS -->
+  <footer class="footer-muted">Market Terminal · Data: yfinance · NewsAPI · TradingEconomics</footer>
   <script type="module" src="/static/main.js"></script>
 </body>
 </html>
