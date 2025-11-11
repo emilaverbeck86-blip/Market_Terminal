@@ -1,240 +1,349 @@
-// Market Terminal — fixed tickers (live), TV-friendly US stocks only,
-// movers panel, and quote panel.
+from __future__ import annotations
+import os, time, datetime, re, traceback
+from typing import Any, Dict, List, Optional, Tuple
 
-const TICKER_ENDPOINT    = "/api/tickers";
-const MOVERS_ENDPOINT    = "/api/movers";
-const QUOTE_ENDPOINT     = "/api/quote";
-const NEWS_ENDPOINT      = "/api/news";
-const SENTI_ENDPOINT     = "/api/sentiment";
-const MKT_NEWS_ENDPOINT  = "/api/market-news";
-const CAL_ENDPOINT       = "/api/calendar";
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request, Query
+from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 
-// DOM
-const tickerScroll   = document.getElementById('tickerScroll');
-const tvContainer    = document.getElementById('tv_container');
-const chartTitle     = document.getElementById('chartTitle');
-const newsList       = document.getElementById('newsList');
-const sentiBadge     = document.getElementById('sentimentBadge');
-const sentiBar       = document.getElementById('sentimentBar');
-const marketNewsList = document.getElementById('marketNewsList');
-const econCalBody    = document.getElementById('econCalBody');
-const newsMoreBtn    = document.getElementById('newsMoreBtn');
-const marketNewsMoreBtn = document.getElementById('marketNewsMoreBtn');
-const quoteBox       = document.getElementById('quoteBox');
-const gainersBody    = document.getElementById('gainersBody');
-const losersBody     = document.getElementById('losersBody');
+import httpx
+import yfinance as yf
 
-const NEWS_INIT_COUNT = 8, NEWS_EXPANDED_COUNT = 30;
-const MARKET_NEWS_INIT = 6, MARKET_NEWS_EXP = 30;
+# ---------------- Paths (robust for Render/Unix) ----------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+os.makedirs(STATIC_DIR, exist_ok=True)
+os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
-let currentSymbol = null, newsExpanded=false, marketNewsExpanded=false;
+# ---------------- Env ----------------
+load_dotenv(os.path.join(BASE_DIR, ".env"))  # local only
+NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
+TE_KEY = os.getenv("TE_KEY", "")  # TradingEconomics (single key or "client:secret")
 
-// TradingView exchange map (for clean symbols)
-const TV_EXCHANGE = {
-  AAPL:"NASDAQ", MSFT:"NASDAQ", NVDA:"NASDAQ", AMZN:"NASDAQ", META:"NASDAQ",
-  GOOGL:"NASDAQ", TSLA:"NASDAQ", AVGO:"NASDAQ", AMD:"NASDAQ", NFLX:"NASDAQ",
-  ADBE:"NASDAQ", INTC:"NASDAQ", CSCO:"NASDAQ", QCOM:"NASDAQ", TXN:"NASDAQ",
-  CRM:"NYSE", PYPL:"NASDAQ", SHOP:"NYSE", ABNB:"NASDAQ", SNOW:"NYSE",
-  JPM:"NYSE", BAC:"NYSE", WFC:"NYSE", GS:"NYSE", MS:"NYSE", V:"NYSE", MA:"NYSE",
-  AXP:"NYSE", "BRK-B":"NYSE", KO:"NYSE", PEP:"NASDAQ", MCD:"NYSE",
-  PG:"NYSE", HD:"NYSE", LOW:"NYSE", COST:"NASDAQ", DIS:"NYSE", NKE:"NYSE",
-  T:"NYSE", VZ:"NYSE", XOM:"NYSE", CVX:"NYSE", PFE:"NYSE", LLY:"NYSE",
-  UNH:"NYSE", MRK:"NYSE", ABBV:"NYSE", CAT:"NYSE", BA:"NYSE", UPS:"NYSE",
-  FDX:"NYSE", ORCL:"NYSE", IBM:"NYSE", UBER:"NYSE", LYFT:"NASDAQ"
-};
-function toTV(symbol){
-  const ex = TV_EXCHANGE[symbol] || "NASDAQ";
-  return `${ex}:${symbol}`;
-}
+# ---------------- FastAPI ----------------
+app = FastAPI(title="Market Terminal")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"],
+)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
-function mountTradingView(symbol) {
-  chartTitle.textContent = `Chart – ${symbol}`;
-  tvContainer.innerHTML = "";
-  if (typeof TradingView === "undefined" || !TradingView.widget) {
-    const warn = document.createElement("div");
-    warn.className = "muted";
-    warn.textContent = "TradingView script failed to load (check network/adblock).";
-    tvContainer.appendChild(warn);
-    return;
-  }
-  new TradingView.widget({
-    symbol: toTV(symbol),
-    interval: '60',
-    timezone: 'Etc/UTC',
-    theme: 'dark',
-    style: '1',
-    toolbar_bg: '#000',
-    locale: 'en',
-    enable_publishing: false,
-    allow_symbol_change: false,
-    container_id: 'tv_container',
-    autosize: true,
-  });
-}
+# ---------------- Watchlist (US stocks only, TV supported) ----------------
+WATCHLIST: List[str] = [
+    # Tech + Large Caps
+    "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","AVGO","AMD","NFLX","ADBE",
+    "INTC","CSCO","QCOM","TXN","CRM","PYPL","ORCL","IBM","SNOW","ABNB","SHOP",
+    # Financials
+    "JPM","BAC","WFC","GS","MS","V","MA","AXP","BRK-B",
+    # Consumer / Staples / Discretionary
+    "KO","PEP","PG","MCD","COST","HD","LOW","DIS","NKE",
+    # Energy / Industrials / Health
+    "XOM","CVX","CAT","BA","UNH","LLY","MRK","ABBV","UPS","FDX","UBER","LYFT"
+]
 
-// --------- Ticker bar (with frequent updates & color) ----------
-const nodes = new Map();
-function fmtPrice(v){ return (typeof v==='number' && isFinite(v)) ? v.toFixed(2) : '—'; }
-function fmtChange(v){ if(v==null||!isFinite(v)) return '0.00%'; const s=v>0?'+':(v<0?'−':''); return `${s}${Math.abs(v).toFixed(2)}%`; }
-function applyChangeClass(el, v){ el.className = 'chg ' + (v>0?'pos':(v<0?'neg':'')); }
+# ---------------- Cache ----------------
+def _now() -> float: return time.time()
+CACHE: Dict[str, Any] = {
+    "tickers":{"ts":0.0,"data":None},
+    "movers":{"ts":0.0,"data":None},
+    "market_news":{"ts":0.0,"data":None},
+    "calendar":{"ts":0.0,"data":None},
+}
+TTL = {"tickers": 10, "movers": 30, "market_news": 180, "calendar": 1800}
 
-function buildTickerRow(items){
-  tickerScroll.innerHTML = '';
-  nodes.clear();
-  // Duplicate row to keep bar full and scrolling
-  const twice = [...items, ...items];
-  twice.forEach(tk=>{
-    const item=document.createElement('div'); item.className='ticker-item'; item.dataset.sym=tk.symbol;
-    const sym=document.createElement('span'); sym.className='sym'; sym.textContent=tk.symbol;
-    const price=document.createElement('span'); price.className='price'; price.textContent=fmtPrice(tk.price);
-    const chg=document.createElement('span'); chg.className='chg'; applyChangeClass(chg, tk.change_pct); chg.textContent=fmtChange(tk.change_pct);
-    item.append(sym, price, chg);
-    item.addEventListener('click', ()=>onSymbolSelect(tk.symbol));
-    tickerScroll.appendChild(item);
-    nodes.set(tk.symbol,{item,price,chg,last:tk.price});
-  });
-  if (!currentSymbol && items.length) onSymbolSelect(items[0].symbol);
-}
+# ---------------- Helpers ----------------
+def _safe_float(x) -> Optional[float]:
+    try:
+        return float(x)
+    except Exception:
+        return None
 
-function liveUpdate(items){
-  items.forEach(tk=>{
-    const n=nodes.get(tk.symbol); if(!n) return;
-    const newText = fmtPrice(tk.price);
-    if (newText !== n.price.textContent){
-      const up = (tk.price||0) > (n.last||0);
-      n.item.classList.remove('flash-up','flash-down'); void n.item.offsetWidth;
-      n.item.classList.add(up?'flash-up':'flash-down');
-      setTimeout(()=>n.item.classList.remove('flash-up','flash-down'), 600);
-      n.price.textContent = newText; n.last=tk.price;
-    }
-    applyChangeClass(n.chg, tk.change_pct);
-    n.chg.textContent = fmtChange(tk.change_pct);
-  });
-}
+# ---------------- Tickers (batched yfinance; close vs prev close) ----------------
+def _fetch_tickers(symbols: List[str]) -> List[Dict[str, Any]]:
+    """
+    Fetch last close and previous close using yfinance.download for speed.
+    Returns [{symbol, price, change_pct}]
+    """
+    try:
+        df = yf.download(
+            tickers=" ".join(symbols),
+            period="2d", interval="1d",
+            auto_adjust=False, progress=False, threads=True
+        )
+    except Exception as e:
+        print("Ticker batch error:", e, traceback.format_exc())
+        return [{"symbol": s, "price": None, "change_pct": None} for s in symbols]
 
-async function loadTickers(){
-  try{
-    const r = await fetch(TICKER_ENDPOINT);
-    const data = await r.json();
-    if (!tickerScroll.childElementCount) buildTickerRow(data);
-    else liveUpdate(data);
-  }catch(e){ /* keep prior */ }
-}
+    out: List[Dict[str, Any]] = []
+    # MultiIndex for multiple tickers, single index for one
+    if getattr(df, "columns", None) is not None and df.columns.nlevels == 2:
+        for s in symbols:
+            try:
+                closes = df[s]["Close"].dropna()
+                if closes.shape[0] == 0:
+                    out.append({"symbol": s, "price": None, "change_pct": None}); continue
+                last = _safe_float(closes.iloc[-1])
+                prev = _safe_float(closes.iloc[-2] if closes.shape[0] > 1 else closes.iloc[-1])
+                chg = ((last - prev) / prev * 100.0) if last and prev else None
+                out.append({"symbol": s, "price": round(last, 2) if last is not None else None,
+                            "change_pct": round(chg, 2) if chg is not None else None})
+            except Exception:
+                out.append({"symbol": s, "price": None, "change_pct": None})
+    else:
+        # Single symbol edge case
+        try:
+            closes = df["Close"].dropna()
+            if closes.shape[0]:
+                last = _safe_float(closes.iloc[-1])
+                prev = _safe_float(closes.iloc[-2] if closes.shape[0] > 1 else closes.iloc[-1])
+                chg = ((last - prev) / prev * 100.0) if last and prev else None
+                out.append({"symbol": symbols[0], "price": round(last, 2) if last else None,
+                            "change_pct": round(chg, 2) if chg is not None else None})
+            else:
+                out.append({"symbol": symbols[0], "price": None, "change_pct": None})
+        except Exception:
+            out.append({"symbol": symbols[0], "price": None, "change_pct": None})
+    return out
 
-// --------- Movers & Quote ----------
-function renderMovers(movers){
-  const fill = (tbody, arr) => {
-    tbody.innerHTML = '';
-    arr.forEach(r=>{
-      const tr=document.createElement('tr');
-      tr.innerHTML = `<td>${r.symbol}</td><td>${fmtPrice(r.price)}</td><td class="${r.change_pct>0?'pos':(r.change_pct<0?'neg':'')}">${fmtChange(r.change_pct)}</td>`;
-      tr.addEventListener('click', ()=>onSymbolSelect(r.symbol));
-      tbody.appendChild(tr);
-    });
-  };
-  fill(gainersBody, movers.gainers||[]);
-  fill(losersBody, movers.losers||[]);
-}
-async function loadMovers(){
-  try{
-    const r=await fetch(MOVERS_ENDPOINT);
-    renderMovers(await r.json());
-  }catch(e){}
-}
-async function loadQuote(symbol){
-  try{
-    const r = await fetch(`${QUOTE_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
-    const q = await r.json();
-    quoteBox.innerHTML = `
-      <div class="stat-row">
-        <div><b>${q.symbol || symbol}</b></div>
-        <div class="stat-price">${q.price!=null?fmtPrice(q.price):'—'} <span class="${q.change_pct>0?'pos':(q.change_pct<0?'neg':'')}">${fmtChange(q.change_pct)}</span></div>
-      </div>
-      <div class="stats-grid">
-        <div><span>Prev Close</span><b>${q.previous_close??'—'}</b></div>
-        <div><span>Day Low</span><b>${q.day_low??'—'}</b></div>
-        <div><span>Day High</span><b>${q.day_high??'—'}</b></div>
-        <div><span>52w Low</span><b>${q.year_low??'—'}</b></div>
-        <div><span>52w High</span><b>${q.year_high??'—'}</b></div>
-        <div><span>Volume</span><b>${q.volume??'—'}</b></div>
-        <div><span>Market Cap</span><b>${q.market_cap??'—'}</b></div>
-      </div>
-    `;
-  }catch(e){
-    quoteBox.innerHTML = '<div class="muted">Quote unavailable.</div>';
-  }
-}
+def _compute_movers(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    valid = [r for r in rows if isinstance(r.get("change_pct"), (int,float))]
+    valid.sort(key=lambda x: x["change_pct"], reverse=True)
+    return {"gainers": valid[:8], "losers": list(reversed(valid[-8:]))}
 
-// --------- News/Sentiment/Calendar (unchanged from last version) ----------
-function renderNews(container, articles, limit){
-  container.innerHTML = '';
-  articles.slice(0, limit).forEach(n=>{
-    const item = document.createElement('div'); item.className = 'news-item';
-    const a = document.createElement('a');
-    a.href = n.url || '#'; a.target = '_blank'; a.rel = 'noopener noreferrer';
-    a.textContent = n.title || '(untitled)';
-    const meta = document.createElement('div'); meta.className = 'muted';
-    const src = n.source || 'Unknown'; const ts = n.published_at || '';
-    meta.textContent = `${src}${ts?` · ${ts}`:''}`;
-    item.append(a, meta); container.appendChild(item);
-  });
-}
-async function loadNews(symbol){
-  newsList.innerHTML='<div class="fallback-note">Loading news…</div>';
-  try{
-    const r=await fetch(`${NEWS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`); const data=await r.json();
-    if (!Array.isArray(data) || !data.length){ newsList.innerHTML='<div class="muted">No recent headlines found.</div>'; newsMoreBtn.style.display='none'; return; }
-    renderNews(newsList, data, newsExpanded?NEWS_EXPANDED_COUNT:NEWS_INIT_COUNT);
-    newsMoreBtn.style.display = data.length > NEWS_INIT_COUNT ? 'inline-flex' : 'none';
-    newsMoreBtn.textContent = newsExpanded ? 'View less' : 'View more';
-    newsMoreBtn.onclick=()=>{ newsExpanded=!newsExpanded; renderNews(newsList, data, newsExpanded?NEWS_EXPANDED_COUNT:NEWS_INIT_COUNT); newsMoreBtn.textContent=newsExpanded?'View less':'View more'; };
-  }catch(e){ newsList.innerHTML='<div class="muted">Failed to load news.</div>'; newsMoreBtn.style.display='none'; }
-}
-function badge(score){ if(score>0.05)return{cls:'pos',label:`Positive ${(score*100).toFixed(0)}%`}; if(score<-0.05)return{cls:'neg',label:`Negative ${Math.abs(score*100).toFixed(0)}%`}; return{cls:'neu',label:'Neutral'}; }
-async function loadSentiment(symbol){
-  try{
-    const r=await fetch(`${SENTI_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`); const s=await r.json();
-    const comp=(typeof s.compound==='number')?s.compound:0; const b=badge(comp);
-    sentiBadge.className=`sentiment-badge ${b.cls}`; sentiBadge.textContent=`Sentiment: ${b.label}`;
-    sentiBar.style.width=Math.round((comp+1)*50)+'%';
-  }catch{ sentiBadge.className='sentiment-badge'; sentiBadge.textContent='Sentiment: —'; sentiBar.style.width='0%'; }
-}
-async function loadMarketNews(){
-  marketNewsList.innerHTML='<div class="fallback-note">Loading market headlines…</div>';
-  try{
-    const r=await fetch(MKT_NEWS_ENDPOINT); const data=await r.json();
-    if (!Array.isArray(data) || !data.length){ marketNewsList.innerHTML='<div class="muted">No market headlines available.</div>'; marketNewsMoreBtn.style.display='none'; return; }
-    renderNews(marketNewsList, data, marketNewsExpanded?MARKET_NEWS_EXP:MARKET_NEWS_INIT);
-    marketNewsMoreBtn.style.display = data.length > MARKET_NEWS_INIT ? 'inline-flex' : 'none';
-    marketNewsMoreBtn.textContent = marketNewsExpanded ? 'View less' : 'View more';
-    marketNewsMoreBtn.onclick=()=>{ marketNewsExpanded=!marketNewsExpanded; renderNews(marketNewsList, data, marketNewsExpanded?MARKET_NEWS_EXP:MARKET_NEWS_INIT); marketNewsMoreBtn.textContent=marketNewsExpanded?'View less':'View more'; };
-  }catch(e){ marketNewsList.innerHTML='<div class="muted">Failed to load market headlines.</div>'; marketNewsMoreBtn.style.display='none'; }
-}
-async function loadCalendar(){
-  econCalBody.innerHTML='<tr><td colspan="6" class="muted">Loading calendar…</td></tr>';
-  try{
-    const r=await fetch(CAL_ENDPOINT); const data=await r.json();
-    if (!Array.isArray(data) || !data.length){ econCalBody.innerHTML='<tr><td colspan="6" class="muted">No data available.</td></tr>'; return; }
-    econCalBody.innerHTML='';
-    data.forEach(ev=>{
-      const tr=document.createElement('tr');
-      tr.innerHTML=`<td>${ev.datetime||''}</td><td>${ev.event||''}</td><td>${ev.actual??''}</td><td>${ev.forecast??''}</td><td>${ev.previous??''}</td><td>${ev.country||''}</td>`;
-      econCalBody.appendChild(tr);
-    });
-  }catch(e){ econCalBody.innerHTML='<tr><td colspan="6" class="muted">No data available.</td></tr>'; }
-}
+# ---------------- News (NewsAPI) ----------------
+async def _fetch_news_symbol(symbol:str, page_size:int=20)->List[Dict[str,Any]]:
+    if not NEWS_API_KEY:
+        return [{"title":"Add NEWS_API_KEY in Render → Environment to enable live headlines.",
+                 "url":"#", "source":"Local", "summary":"", "published_at":""}]
+    try:
+        url="https://newsapi.org/v2/everything"
+        params={"q":symbol,"language":"en","sortBy":"publishedAt","pageSize":page_size}
+        headers={"X-Api-Key": NEWS_API_KEY}
+        async with httpx.AsyncClient(timeout=12) as client:
+            r=await client.get(url, params=params, headers=headers)
+            if r.status_code!=200:
+                return [{"title":f"NewsAPI error {r.status_code}. Check NEWS_API_KEY.",
+                         "url":"#", "source":"NewsAPI"}]
+            data=r.json()
+            out=[]
+            for a in data.get("articles", []):
+                out.append({
+                    "title": a.get("title"),
+                    "url": a.get("url"),
+                    "source": (a.get("source") or {}).get("name"),
+                    "summary": a.get("description"),
+                    "published_at": a.get("publishedAt"),
+                })
+            return out or [{"title":"No recent headlines found.","url":"#","source":"NewsAPI"}]
+    except Exception as e:
+        print("NEWSAPI symbol exception:", e, traceback.format_exc())
+        return [{"title":"Could not reach NewsAPI (network/timeout).","url":"#","source":"Server"}]
 
-// --------- Selection ----------
-async function onSymbolSelect(symbol){
-  currentSymbol = symbol;
-  mountTradingView(symbol);
-  await Promise.all([ loadQuote(symbol), loadNews(symbol), loadSentiment(symbol) ]);
-}
+async def _fetch_market_news(page_size:int=20)->List[Dict[str,Any]]:
+    if not NEWS_API_KEY:
+        return [{"title":"Add NEWS_API_KEY in Render → Environment to enable US market headlines.",
+                 "url":"#", "source":"Local"}]
+    try:
+        url="https://newsapi.org/v2/top-headlines"
+        params={"country":"us","category":"business","pageSize":page_size}
+        headers={"X-Api-Key": NEWS_API_KEY}
+        async with httpx.AsyncClient(timeout=12) as client:
+            r=await client.get(url, params=params, headers=headers)
+            if r.status_code!=200:
+                return [{"title":f"NewsAPI error {r.status_code}. Check NEWS_API_KEY.",
+                         "url":"#", "source":"NewsAPI"}]
+            data=r.json()
+            out=[]
+            for a in data.get("articles", []):
+                out.append({
+                    "title": a.get("title"),
+                    "url": a.get("url"),
+                    "source": (a.get("source") or {}).get("name"),
+                    "summary": a.get("description"),
+                    "published_at": a.get("publishedAt"),
+                })
+            return out or [{"title":"No US market headlines right now.","url":"#","source":"NewsAPI"}]
+    except Exception as e:
+        print("NEWSAPI market exception:", e, traceback.format_exc())
+        return [{"title":"Could not reach NewsAPI (network/timeout).","url":"#","source":"Server"}]
 
-// --------- Boot ----------
-document.addEventListener('DOMContentLoaded', ()=>{
-  loadTickers(); setInterval(loadTickers, 10000); // refresh every 10s
-  loadMovers();  setInterval(loadMovers, 30000);
-  loadMarketNews(); setInterval(loadMarketNews, 180000);
-  loadCalendar(); setInterval(loadCalendar, 1800000);
-});
+# ---------------- TradingEconomics Calendar (robust + guest fallback) ----------------
+_DATE_MS_RE = re.compile(r"/Date\((\d+)")
+def _fmt_te_date(val: Any) -> str:
+    if isinstance(val, (int, float)):
+        dt = datetime.datetime.utcfromtimestamp(val/1000.0)
+        return dt.strftime("%Y-%m-%d %H:%M UTC")
+    if isinstance(val, str):
+        m = _DATE_MS_RE.search(val)
+        if m:
+            try:
+                ms = int(m.group(1)); dt = datetime.datetime.utcfromtimestamp(ms/1000.0)
+                return dt.strftime("%Y-%m-%d %H:%M UTC")
+            except Exception:
+                return val
+        return val
+    return ""
+
+async def _te_calendar_request(params: Dict[str, Any]) -> List[Dict[str, Any]]:
+    url = "https://api.tradingeconomics.com/calendar"
+    async with httpx.AsyncClient(timeout=12) as client:
+        # single-key
+        if TE_KEY and ":" not in TE_KEY:
+            p=dict(params); p["c"]=TE_KEY
+            r=await client.get(url, params=p)
+            if r.status_code==200 and isinstance(r.json(), list) and r.json():
+                return r.json()
+        # client:secret
+        if TE_KEY and ":" in TE_KEY:
+            client_id, secret = TE_KEY.split(":",1)
+            p=dict(params); p["client"]=client_id; p["key"]=secret
+            r=await client.get(url, params=p)
+            if r.status_code==200 and isinstance(r.json(), list) and r.json():
+                return r.json()
+        # guest fallback
+        p=dict(params); p["client"]="guest"; p["key"]="guest"
+        r=await client.get(url, params=p)
+        if r.status_code==200 and isinstance(r.json(), list):
+            return r.json()
+    return []
+
+async def _fetch_calendar_us() -> List[Dict[str, Any]]:
+    d1 = datetime.date.today()
+    d2 = d1 + datetime.timedelta(days=14)
+    params = {"country":"United States","importance":"2,3","d1":d1.isoformat(),"d2":d2.isoformat()}
+    raw = await _te_calendar_request(params)
+    if not raw: return []
+    KEYWORDS = ("CPI","Consumer Price Index","Inflation","PPI","Producer Price Index",
+                "Non-Farm","Nonfarm","Payrolls","Unemployment","FOMC","Average Hourly Earnings")
+    out=[]
+    for ev in raw:
+        title = (ev.get("Event") or ev.get("event") or "").strip()
+        if not title: continue
+        country = ev.get("Country") or ev.get("CountryCode") or "US"
+        currency = (ev.get("Category") or ev.get("Currency") or "").upper()
+        if not any(k.lower() in title.lower() for k in KEYWORDS) and currency != "USD":
+            continue
+        dt_str   = _fmt_te_date(ev.get("DateUtc") or ev.get("Date") or ev.get("DateSpan") or "")
+        out.append({
+            "datetime": dt_str,
+            "event": title,
+            "country": country,
+            "actual": ev.get("Actual") or ev.get("ActualValue") or ev.get("Value") or "",
+            "forecast": ev.get("Forecast") or ev.get("Estimate") or "",
+            "previous": ev.get("Previous") or ev.get("Prior") or "",
+        })
+    out.sort(key=lambda x: x.get("datetime") or "")
+    return out
+
+# ---------------- Sentiment ----------------
+try:
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+    _an = SentimentIntensityAnalyzer()
+except Exception:
+    _an = None
+
+def _sentiment_aggregate(news: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not news or _an is None: return {"compound": 0.0, "detail": []}
+    detail=[]; 
+    for n in news:
+        text=(n.get("title") or "")+". "+(n.get("summary") or "")
+        vs=_an.polarity_scores(text)
+        detail.append({"title": n.get("title"), "score": vs["compound"]})
+    comp = sum(d["score"] for d in detail)/len(detail) if detail else 0.0
+    return {"compound": comp, "detail": detail}
+
+# ---------------- Routes ----------------
+@app.get("/health")
+def health(): return {"ok": True}
+
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    idx = os.path.join(TEMPLATES_DIR, "index.html")
+    if not os.path.isfile(idx):
+        return PlainTextResponse("templates/index.html not found in this deploy.", status_code=500)
+    return templates.TemplateResponse("index.html", {"request": request})
+
+@app.get("/api/tickers")
+async def api_tickers():
+    now=_now(); c=CACHE["tickers"]
+    if c["data"] and now-c["ts"]<TTL["tickers"]:
+        return JSONResponse(content=c["data"])
+    rows = _fetch_tickers(WATCHLIST)
+    # duplicate to keep the bar full
+    data = rows
+    if len(rows) < 25:
+        data = rows * (25 // max(1,len(rows)) + 1)
+        data = data[:max(25, len(rows))]
+    c["ts"]=now; c["data"]=data
+    return JSONResponse(content=data)
+
+@app.get("/api/movers")
+async def api_movers():
+    now=_now(); c=CACHE["movers"]
+    if c["data"] and now-c["ts"]<TTL["movers"]:
+        return JSONResponse(content=c["data"])
+    rows = _fetch_tickers(WATCHLIST)
+    data = _compute_movers(rows)
+    c["ts"]=now; c["data"]=data
+    return JSONResponse(content=data)
+
+@app.get("/api/quote")
+async def api_quote(symbol: str = Query(...)):
+    try:
+        t = yf.Ticker(symbol)
+        fi = getattr(t, "fast_info", None) or {}
+        prev = fi.get("previous_close")
+        last = fi.get("last_price") or fi.get("last_traded") or fi.get("last") or None
+        chg = ((last - prev)/prev * 100.0) if last and prev else None
+        return JSONResponse(content={
+            "symbol": symbol,
+            "price": round(float(last),2) if last else None,
+            "change_pct": round(float(chg),2) if chg is not None else None,
+            "day_low": fi.get("day_low"), "day_high": fi.get("day_high"),
+            "year_low": fi.get("year_low"), "year_high": fi.get("year_high"),
+            "volume": fi.get("volume"), "market_cap": fi.get("market_cap"),
+            "previous_close": prev
+        })
+    except Exception as e:
+        print("quote error", e, traceback.format_exc())
+        return JSONResponse(content={"symbol":symbol}, status_code=200)
+
+@app.get("/api/news")
+async def api_news(symbol: str = Query(...)):
+    return JSONResponse(content=await _fetch_news_symbol(symbol))
+
+@app.get("/api/sentiment")
+async def api_sentiment(symbol: str = Query(...)):
+    news=await _fetch_news_symbol(symbol)
+    return JSONResponse(content=_sentiment_aggregate(news))
+
+@app.get("/api/market-news")
+async def api_market_news():
+    now=_now(); c=CACHE["market_news"]
+    if c["data"] and now-c["ts"]<TTL["market_news"]:
+        return JSONResponse(content=c["data"])
+    data=await _fetch_market_news(page_size=30)
+    c["ts"]=now; c["data"]=data
+    return JSONResponse(content=data)
+
+@app.get("/api/calendar")
+async def api_calendar():
+    now=_now(); c=CACHE["calendar"]
+    if c["data"] and now-c["ts"]<TTL["calendar"]:
+        return JSONResponse(content=c["data"])
+    data=await _fetch_calendar_us()
+    if not data:
+        data=[{"datetime":"","event":"No data (check TE_KEY or rate limit).",
+               "country":"US","actual":"","forecast":"","previous":""}]
+    c["ts"]=now; c["data"]=data
+    return JSONResponse(content=data)
+
+if __name__=="__main__":
+    import uvicorn
+    uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
