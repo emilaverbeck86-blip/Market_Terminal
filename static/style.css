@@ -119,3 +119,20 @@ header{ position:sticky; top:0; z-index:50; background:linear-gradient(0deg, rgb
   .chart-card{ grid-row: auto; }
   .chart-body{ height: clamp(420px, 58vh, 720px); }
 }
+
+/* ... keep your existing styles ... */
+
+/* Big chart sizing (from previous step) */
+.chart-card{ grid-column: 1 / 2; grid-row: span 2; }
+.chart-body{ height: clamp(560px, 72vh, 900px); padding:.5rem .6rem; }
+.chart-box{ width:100%; height:100%; min-height:560px; }
+
+/* Embedded TradingEconomics calendar */
+.calendar-embed-wrap{ width:100%; height: clamp(560px, 70vh, 1000px); }
+.te-calendar-iframe{
+  width:100%;
+  height:100%;
+  border:0;
+  background:#0b1218;
+}
+.small-note{ margin-top:.35rem; font-size:.85rem; }
