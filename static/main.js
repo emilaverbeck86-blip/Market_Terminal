@@ -1,4 +1,5 @@
-// Market Terminal — robust ticker/news/movers with graceful fallbacks.
+// Market Terminal — uses Stooq quotes so movers/tickers always have % change.
+// Minimal Quote panel (no long stats). Theme toggle (dark/light).
 
 const TICKER_ENDPOINT    = "/api/tickers";
 const MOVERS_ENDPOINT    = "/api/movers";
@@ -20,11 +21,26 @@ const marketNewsMoreBtn = document.getElementById('marketNewsMoreBtn');
 const quoteBox       = document.getElementById('quoteBox');
 const gainersBody    = document.getElementById('gainersBody');
 const losersBody     = document.getElementById('losersBody');
+const themeSelect    = document.getElementById('themeSelect');
 
 const NEWS_INIT_COUNT = 8, NEWS_EXPANDED_COUNT = 30;
 const MARKET_NEWS_INIT = 6, MARKET_NEWS_EXP = 30;
 
 let currentSymbol = null, newsExpanded=false, marketNewsExpanded=false;
+
+// --- Theme toggle ---
+(function initTheme(){
+  const saved = localStorage.getItem('mt_theme');
+  if (saved === 'light' || saved === 'dark') {
+    document.documentElement.setAttribute('data-theme', saved);
+    themeSelect.value = saved;
+  }
+  themeSelect.addEventListener('change', ()=>{
+    const v = themeSelect.value;
+    document.documentElement.setAttribute('data-theme', v);
+    localStorage.setItem('mt_theme', v);
+  });
+})();
 
 // TradingView exchange map
 const TV_EXCHANGE = {
@@ -56,9 +72,9 @@ function mountTradingView(symbol) {
     symbol: toTV(symbol),
     interval: '60',
     timezone: 'Etc/UTC',
-    theme: 'dark',
+    theme: (document.documentElement.getAttribute('data-theme')==='light')?'light':'dark',
     style: '1',
-    toolbar_bg: '#000',
+    toolbar_bg: 'transparent',
     locale: 'en',
     enable_publishing: false,
     allow_symbol_change: false,
@@ -67,13 +83,18 @@ function mountTradingView(symbol) {
   });
 }
 
-// ---------- Ticker bar ----------
-const tickerNodes = new Map();
+// ---------- Helpers ----------
 const fmtPrice = v => (typeof v==='number' && isFinite(v)) ? v.toFixed(2) : '—';
 const fmtChange = v => (v==null||!isFinite(v)) ? '0.00%' : `${v>0?'+':(v<0?'−':'')}${Math.abs(v).toFixed(2)}%`;
-function applyChangeClass(el, v){ el.className = 'chg ' + (v>0?'pos':(v<0?'neg':'')); }
+function applyChangeClass(el, v){ el.className = 'chg ' + (v>0?'pos':(v<0?'neg':'neu')); }
+
+// ---------- Ticker bar ----------
+const tickerNodes = new Map();
 
 function renderTicker(items){
+  if (!Array.isArray(items) || !items.length){
+    items = [{symbol:"TSLA",price:null,change_pct:null},{symbol:"AAPL",price:null,change_pct:null},{symbol:"MSFT",price:null,change_pct:null}];
+  }
   tickerScroll.innerHTML = '';
   tickerNodes.clear();
   // duplicate once to keep bar full & scrolling
@@ -88,9 +109,8 @@ function renderTicker(items){
     tickerScroll.appendChild(item);
     if (!tickerNodes.has(tk.symbol)) tickerNodes.set(tk.symbol,{item,price,chg,last:tk.price});
   });
-  // start marquee; pause on hover is in CSS
   requestAnimationFrame(()=> tickerScroll.classList.add('marquee-ready'));
-  if (!currentSymbol && items.length) onSymbolSelect(items[0].symbol);
+  if (!currentSymbol) onSymbolSelect(items[0].symbol);
 }
 
 function updateTicker(items){
@@ -112,16 +132,11 @@ function updateTicker(items){
 async function loadTickers(){
   try{
     const r = await fetch(TICKER_ENDPOINT);
-    if (!r.ok) throw new Error(`tickers ${r.status}`);
     const data = await r.json();
     if (!tickerScroll.childElementCount) renderTicker(data);
     else updateTicker(data);
   }catch(e){
-    // Render minimal default so chart/news still work
-    if (!tickerScroll.childElementCount){
-      const dflt=[{symbol:"TSLA",price:null,change_pct:null},{symbol:"AAPL",price:null,change_pct:null},{symbol:"MSFT",price:null,change_pct:null}];
-      renderTicker(dflt);
-    }
+    if (!tickerScroll.childElementCount) renderTicker(null);
   }
 }
 
@@ -132,19 +147,26 @@ function renderMovers(movers){
     if (!Array.isArray(arr) || !arr.length){ tbody.innerHTML='<tr><td class="muted">No data</td></tr>'; return; }
     arr.forEach(r=>{
       const tr=document.createElement('tr');
-      tr.innerHTML = `<td>${r.symbol}</td><td>${fmtPrice(r.price)}</td><td class="${r.change_pct>0?'pos':(r.change_pct<0?'neg':'')}">${fmtChange(r.change_pct)}</td>`;
+      tr.innerHTML = `<td>${r.symbol}</td><td>${fmtPrice(r.price)}</td><td class="${r.change_pct>0?'pos':(r.change_pct<0?'neg':'neu')}">${fmtChange(r.change_pct)}</td>`;
       tr.addEventListener('click', ()=>onSymbolSelect(r.symbol));
       tbody.appendChild(tr);
     });
   };
+  renderTickerOnFirstLoad(); // ensure we have a symbol even if user doesn't click
   fill(gainersBody, movers.gainers||[]);
   fill(losersBody, movers.losers||[]);
+}
+function renderTickerOnFirstLoad(){
+  if (!currentSymbol){
+    const first = document.querySelector('.ticker-item');
+    if (first) onSymbolSelect(first.dataset.sym);
+  }
 }
 async function loadMovers(){
   try{
     const r=await fetch(MOVERS_ENDPOINT);
-    if (!r.ok) throw 0;
-    renderMovers(await r.json());
+    const data=await r.json();
+    renderMovers(data);
   }catch(e){
     renderMovers({gainers:[], losers:[]});
   }
@@ -155,18 +177,10 @@ async function loadQuote(symbol){
     const q = await r.json();
     quoteBox.innerHTML = `
       <div class="stat-row">
-        <div><b>${q.symbol || symbol}</b></div>
-        <div class="stat-price">${q.price!=null?fmtPrice(q.price):'—'} <span class="${q.change_pct>0?'pos':(q.change_pct<0?'neg':'')}">${fmtChange(q.change_pct)}</span></div>
+        <div class="q-left"><b>${q.symbol || symbol}</b></div>
+        <div class="q-right">${q.price!=null?fmtPrice(q.price):'—'} <span class="${q.change_pct>0?'pos':(q.change_pct<0?'neg':'neu')}">${fmtChange(q.change_pct)}</span></div>
       </div>
-      <div class="stats-grid">
-        <div><span>Prev Close</span><b>${q.previous_close??'—'}</b></div>
-        <div><span>Day Low</span><b>${q.day_low??'—'}</b></div>
-        <div><span>Day High</span><b>${q.day_high??'—'}</b></div>
-        <div><span>52w Low</span><b>${q.year_low??'—'}</b></div>
-        <div><span>52w High</span><b>${q.year_high??'—'}</b></div>
-        <div><span>Volume</span><b>${q.volume??'—'}</b></div>
-        <div><span>Market Cap</span><b>${q.market_cap??'—'}</b></div>
-      </div>
+      <div class="muted small">Prev Close: ${q.previous_close??'—'}</div>
     `;
   }catch(e){
     quoteBox.innerHTML = '<div class="muted">Quote unavailable.</div>';
@@ -232,11 +246,9 @@ async function onSymbolSelect(symbol){
 
 // ---------- Boot ----------
 document.addEventListener('DOMContentLoaded', ()=>{
-  // try to load tickers; if anything fails, still mount TSLA so page is alive
-  loadTickers().finally(()=>{
-    if (!currentSymbol) onSymbolSelect('TSLA');
-  });
-  setInterval(loadTickers, 10000);
+  loadTickers(); setInterval(loadTickers, 10000);
   loadMovers();  setInterval(loadMovers, 30000);
   loadMarketNews(); setInterval(loadMarketNews, 180000);
+  // Fallback chart if nothing clicked yet
+  setTimeout(()=>{ if(!currentSymbol) onSymbolSelect('TSLA'); }, 1200);
 });
