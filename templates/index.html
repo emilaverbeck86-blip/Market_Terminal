@@ -15,6 +15,10 @@
     </div>
 
     <div class="topbar-controls">
+      <div class="quick-links">
+        <button class="ql-btn" data-index="^IXIC">NASDAQ</button>
+        <button class="ql-btn" data-index="^GSPC">S&P 500</button>
+      </div>
       <div class="dropdown" id="settingsDropdown">
         <button class="dropbtn" id="settingsBtn">Settings ▾</button>
         <div class="dropdown-menu" id="settingsMenu" aria-labelledby="settingsBtn">
@@ -35,7 +39,6 @@
           <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-chart" checked> Chart</label>
           <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-insights" checked> Market Insights</label>
           <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-company" checked> Company</label>
-          <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-sentiment" checked> Sentiment</label>
           <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-news" checked> News</label>
           <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-movers" checked> Movers</label>
           <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-marketnews" checked> Market News</label>
@@ -46,7 +49,7 @@
 
   <main class="grid" id="gridRoot">
     <!-- Chart -->
-    <section class="card chart-card span-2 resizable" id="tile-chart" data-span="2">
+    <section class="card chart-card span-2 resizable" id="tile-chart" data-size="L" data-span="2">
       <div class="card-hd" draggable="true"><h3 id="chartTitle">Chart</h3><button class="min-btn" data-hide="tile-chart">−</button></div>
       <div class="card-body chart-body">
         <div id="tv_container" class="chart-box"><div class="fallback-note">Loading chart…</div></div>
@@ -55,24 +58,27 @@
     </section>
 
     <!-- Market Insights -->
-    <section class="card resizable" id="tile-insights" data-span="1">
+    <section class="card resizable" id="tile-insights" data-size="M" data-span="1">
       <div class="card-hd" draggable="true"><h3 id="insightsTitle">Market Insights</h3><button class="min-btn" data-hide="tile-insights">−</button></div>
       <div class="card-body">
         <div class="perf-grid" id="perfGrid"></div>
         <div class="seasonals-wrap">
           <canvas id="seasonalsCanvas" width="900" height="220" aria-label="Seasonals"></canvas>
-          <div class="seasonals-legend">
+          <div class="seasonals-legend seasonals-legend-center">
             <span class="dot dot-2025"></span>2025
             <span class="dot dot-2024"></span>2024
             <span class="dot dot-2023"></span>2023
           </div>
+        </div>
+        <div class="gauge-wrap">
+          <canvas id="sentiGauge" width="320" height="160" aria-label="Sentiment gauge"></canvas>
         </div>
       </div>
       <div class="resize-handle" data-axis="v"></div>
     </section>
 
     <!-- Company -->
-    <section class="card resizable" id="tile-company" data-span="1">
+    <section class="card resizable" id="tile-company" data-size="M" data-span="1">
       <div class="card-hd" draggable="true"><h3>Company</h3><button class="min-btn" data-hide="tile-company">−</button></div>
       <div class="card-body">
         <div id="companyBox" class="company-box"><div class="muted">Select a ticker…</div></div>
@@ -80,20 +86,8 @@
       <div class="resize-handle" data-axis="v"></div>
     </section>
 
-    <!-- Sentiment -->
-    <section class="card resizable" id="tile-sentiment" data-span="1">
-      <div class="card-hd" draggable="true"><h3>Sentiment</h3><button class="min-btn" data-hide="tile-sentiment">−</button></div>
-      <div class="card-body">
-        <div class="senti-tile">
-          <div id="sentimentLabel" class="senti-label">Neutral</div>
-          <div class="senti-bar"><div id="sentiFill" class="senti-fill"></div></div>
-        </div>
-      </div>
-      <div class="resize-handle" data-axis="v"></div>
-    </section>
-
     <!-- News -->
-    <section class="card resizable" id="tile-news" data-span="1">
+    <section class="card resizable" id="tile-news" data-size="L" data-span="1">
       <div class="card-hd" draggable="true"><h3>News</h3><button class="min-btn" data-hide="tile-news">−</button></div>
       <div class="card-body">
         <div id="newsList" class="news-list"><div class="fallback-note">Loading news…</div></div>
@@ -103,7 +97,7 @@
     </section>
 
     <!-- Movers -->
-    <section class="card resizable" id="tile-movers" data-span="1">
+    <section class="card resizable" id="tile-movers" data-size="M" data-span="1">
       <div class="card-hd" draggable="true"><h3>Top Movers (Watchlist)</h3><button class="min-btn" data-hide="tile-movers">−</button></div>
       <div class="card-body">
         <div class="two-col">
@@ -121,7 +115,7 @@
     </section>
 
     <!-- Market news -->
-    <section class="card resizable" id="tile-marketnews" data-span="1">
+    <section class="card resizable" id="tile-marketnews" data-size="M" data-span="1">
       <div class="card-hd" draggable="true"><h3>Market News (US)</h3><button class="min-btn" data-hide="tile-marketnews">−</button></div>
       <div class="card-body">
         <div id="marketNewsList" class="news-list"><div class="fallback-note">Loading market headlines…</div></div>
@@ -131,7 +125,7 @@
     </section>
   </main>
 
-  <footer class="footer-muted">Market Terminal · Data: Yahoo (prices), Stooq (backup), NewsAPI (headlines)</footer>
+  <footer class="footer-muted">Market Terminal · Data: Yahoo (prices & RSS fallback), Stooq backup</footer>
   <script type="module" src="/static/main.js"></script>
 </body>
 </html>
