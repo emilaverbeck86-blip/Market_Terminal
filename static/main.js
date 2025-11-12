@@ -1,7 +1,8 @@
-// Faster endpoints + robust UI. Chart tile can be MOVED (drag header) and RESIZED (handle).
+// Fast endpoints + robust UI. TV tile is movable (drag header) and resizable (corner handle).
 const ENDPOINTS={
   tickers:"/api/tickers", movers:"/api/movers", profile:"/api/profile",
-  metrics:"/api/metrics", news:"/api/news", mktnews:"/api/market-news", health:"/api/health"
+  metrics:"/api/metrics", news:"/api/news", mktnews:"/api/market-news",
+  sentiment:"/api/sentiment"
 };
 
 const tickerScroll=document.getElementById('tickerScroll');
@@ -16,6 +17,8 @@ const gridRoot=document.getElementById('gridRoot');
 const themeToggle=document.getElementById('themeToggle');
 const settingsBtn=document.getElementById('settingsBtn');
 const settingsMenu=document.getElementById('settingsMenu');
+const nasdaqBtn=document.getElementById('btnNasdaq');
+const spxBtn=document.getElementById('btnSPX');
 
 const perfGrid=document.getElementById('perfGrid');
 const seasonalsCanvas=document.getElementById('seasonalsCanvas');
@@ -27,7 +30,7 @@ const gaugeLabel=document.getElementById('gaugeLabel');
 let currentSymbol=null, currentTVOverride=null;
 let lastSeasonals=null, lastCompound=0;
 
-// ---------- fetch helper with timeout ----------
+// ---------- helpers ----------
 function fetchJSON(url, {timeout=10000, params} = {}){
   const ctrl=new AbortController();
   const id=setTimeout(()=>ctrl.abort(), timeout);
@@ -40,7 +43,7 @@ const fmtPrice=v=>(typeof v==='number'&&isFinite(v))?v.toFixed(2):'—';
 const fmtChange=v=>(v==null||!isFinite(v))?'—':`${v>0?'+':(v<0?'−':'')}${Math.abs(v).toFixed(2)}%`;
 function applyChangeClass(el,v){ el.className='chg '+(v>0?'pos':(v<0?'neg':'neu')); }
 
-// ---------- settings + theme ----------
+// ---------- theme + settings ----------
 (function(){
   let open=false;
   const close=()=>{ settingsMenu.classList.remove('open'); open=false; };
@@ -59,7 +62,7 @@ function applyChangeClass(el,v){ el.className='chg '+(v>0?'pos':(v<0?'neg':'neu'
   });
 })();
 
-// ---------- Drag order (header only) ----------
+// ---------- drag-order (header only) ----------
 (function(){
   const orderKey='mt_tile_order';
   const saved=JSON.parse(localStorage.getItem(orderKey)||'[]');
@@ -83,7 +86,7 @@ function applyChangeClass(el,v){ el.className='chg '+(v>0?'pos':(v<0?'neg':'neu'
     dragEl.classList.remove('dragging');
     if(placeholder){ placeholder.replaceWith(dragEl); placeholder=null; }
     const ids=[...gridRoot.querySelectorAll('.card')].map(n=>n.id);
-    localStorage.setItem(orderKey, JSON.stringify(ids));
+    localStorage.setItem('mt_tile_order', JSON.stringify(ids));
     dragEl=null;
   });
   function getAfter(container, y){
@@ -97,7 +100,7 @@ function applyChangeClass(el,v){ el.className='chg '+(v>0?'pos':(v<0?'neg':'neu'
   }
 })();
 
-// ---------- Snap-resize (chart tile resizable) ----------
+// ---------- snap-resize (chart + insights resizable) ----------
 (function initSnapResize(){
   const GAP=14, ROW_UNIT=90;
   const cards=[...document.querySelectorAll('.resizable')];
@@ -105,7 +108,7 @@ function applyChangeClass(el,v){ el.className='chg '+(v>0?'pos':(v<0?'neg':'neu'
   function colWidth(){ return (gridRoot.clientWidth - GAP) / 2; }
   cards.forEach(card=>{
     const handle=card.querySelector('.resize-handle'); if(!handle) return;
-    const allowed=(card.dataset.allowed||"1x3,1x4").split(",").map(s=>{const [c,r]=s.split("x").map(Number); return {c,r};});
+    const allowed=(card.dataset.allowed||"1x3,1x4,2x3,2x4").split(",").map(s=>{const [c,r]=s.split("x").map(Number); return {c,r};});
     let startRect=null, startX=0, startY=0;
     const onMove=(e)=>{
       const dx=e.clientX-startX, dy=e.clientY-startY;
@@ -259,19 +262,16 @@ function drawSeasonals(seasonals){
   keys.forEach(k=> (lastSeasonals[k]||[]).forEach(([x,y])=>{minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);} ));
   if(minY===maxY){minY-=1;maxY+=1;}
   const pad=28, xS=x=>pad+(x-minX)/(maxX-minX||1)*(W-2*pad), yS=y=>H-pad-(y-minY)/(maxY-minY||1)*(H-2*pad);
-  // grid
   ctx.strokeStyle=gridColor; ctx.beginPath(); [0.25,0.5,0.75].forEach(f=>{const x=pad+f*(W-2*pad); ctx.moveTo(x,pad); ctx.lineTo(x,H-pad);}); ctx.stroke();
-  // axis
   ctx.strokeStyle=axisColor; ctx.beginPath(); ctx.moveTo(pad,H-pad); ctx.lineTo(W-pad,H-pad); ctx.stroke();
-  // lines
   keys.forEach(k=>{ const pts=lastSeasonals[k]||[]; if(!pts.length) return;
-    ctx.strokeStyle=colors[k]||'#aaa'; ctx.lineWidth=2; ctx.beginPath();
+    const c=colors[k]||'#aaa'; ctx.strokeStyle=c; ctx.lineWidth=2; ctx.beginPath();
     pts.forEach(([x,y],i)=>{ const X=xS(x), Y=yS(y); if(i===0) ctx.moveTo(X,Y); else ctx.lineTo(X,Y); }); ctx.stroke();
   });
 }
 new ResizeObserver(()=>drawSeasonals(lastSeasonals)).observe(seasonalsCanvas.parentElement);
 
-// Simple gauge placeholder (kept neutral so far)
+let lastCompound=0;
 function drawGauge(comp=0){
   lastCompound=comp;
   const W=gaugeCanvas.clientWidth, H=gaugeCanvas.clientHeight;
@@ -289,12 +289,17 @@ function drawGauge(comp=0){
   let label='Neutral'; if(comp>0.05) label=`Bullish ${(comp*100).toFixed(0)}%`; else if(comp<-0.05) label=`Bearish ${Math.abs(comp*100).toFixed(0)}%`;
   gaugeLabel.textContent=label;
 }
+
 async function loadInsights(symbol){
   insightsTitle.textContent=`Market Insights: ${symbol}`;
   renderPerf(null); drawSeasonals(null); drawGauge(0);
   try{
     const m=await fetchJSON(ENDPOINTS.metrics, {params:{symbol}, timeout: 12000});
     renderPerf(m.performance); drawSeasonals(m.seasonals||{});
+  }catch{}
+  try{
+    const s=await fetchJSON(ENDPOINTS.sentiment, {params:{symbol}, timeout: 12000});
+    drawGauge(typeof s.compound==='number'?s.compound:0);
   }catch{}
 }
 
@@ -327,10 +332,9 @@ async function onSymbolSelect(symbol, tvOverride=null){
   await Promise.allSettled([ loadCompany(symbol), loadInsights(symbol), loadNews(symbol) ]);
 }
 
-// ---------- Quick links ----------
-document.querySelectorAll('.quick-links .ql').forEach(b=>{
-  b.addEventListener('click',()=> onSymbolSelect(b.dataset.symbol, b.dataset.tv || null));
-});
+// ---------- Shortcuts (index values, data via ETFs) ----------
+nasdaqBtn.addEventListener('click', ()=> onSymbolSelect('QQQ', 'NASDAQ:IXIC'));
+spxBtn.addEventListener('click', ()=> onSymbolSelect('SPY',  'TVC:SPX'));
 
 // ---------- Boot ----------
 document.addEventListener('DOMContentLoaded', ()=>{
