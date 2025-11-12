@@ -1,14 +1,15 @@
-// Snap preview fixed (always shows the target grid size), header-only drag,
-// reliable prices, scrollable tiles, trading-day seasonals, sentiment gauge,
-// Finnhub/Yahoo news, and SPX/QQQ quick links (SPX chart via TVC; data via SPY/QQQ).
+// Robust front-end: timeouts, clear error messaging, snap-resize preview fixed,
+// Stooq-backed endpoints, SPX/QQQ shortcuts preserved.
 
-const TICKER_ENDPOINT="/api/tickers";
-const MOVERS_ENDPOINT="/api/movers";
-const PROF_ENDPOINT  ="/api/profile";
-const METRICS_ENDPOINT="/api/metrics";
-const NEWS_ENDPOINT  ="/api/news";
-const SENTI_ENDPOINT ="/api/sentiment";
-const MKT_NEWS_ENDPOINT="/api/market-news";
+const ENDPOINTS={
+  tickers:"/api/tickers",
+  movers:"/api/movers",
+  profile:"/api/profile",
+  metrics:"/api/metrics",
+  news:"/api/news",
+  mktnews:"/api/market-news",
+  health:"/api/health"
+};
 
 const tickerScroll=document.getElementById('tickerScroll');
 const tvContainer=document.getElementById('tv_container');
@@ -23,34 +24,29 @@ const themeToggle=document.getElementById('themeToggle');
 const settingsBtn=document.getElementById('settingsBtn');
 const settingsMenu=document.getElementById('settingsMenu');
 
-// Quick links (support custom TV symbol)
-document.querySelectorAll('.quick-links .ql').forEach(b=>{
-  b.addEventListener('click',()=>{
-    const backendSym=b.dataset.symbol;        // SPY/QQQ
-    const tvSym=b.dataset.tv || null;         // TVC:SPX etc.
-    onSymbolSelect(backendSym, tvSym);
-  });
-});
+let currentSymbol=null, currentTVOverride=null;
+let lastSeasonals=null, lastCompound=0;
 
-// Insights
-const perfGrid=document.getElementById('perfGrid');
-const seasonalsCanvas=document.getElementById('seasonalsCanvas');
-const ctx=seasonalsCanvas.getContext('2d');
-const insightsTitle=document.getElementById('insightsTitle');
-const gaugeCanvas=document.getElementById('gaugeCanvas');
-const gctx=gaugeCanvas.getContext('2d');
-const gaugeLabel=document.getElementById('gaugeLabel');
+// --- helpers ---
+function fetchJSON(url, {timeout=10000, params} = {}){
+  const ctrl=new AbortController();
+  const id=setTimeout(()=>ctrl.abort(), timeout);
+  const u = params ? (url + "?" + new URLSearchParams(params).toString()) : url;
+  return fetch(u, {signal: ctrl.signal})
+    .then(r=>{ if(!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.json(); })
+    .finally(()=>clearTimeout(id));
+}
+const fmtPrice=v=>(typeof v==='number'&&isFinite(v))?v.toFixed(2):'—';
+const fmtChange=v=>(v==null||!isFinite(v))?'—':`${v>0?'+':(v<0?'−':'')}${Math.abs(v).toFixed(2)}%`;
+function applyChangeClass(el,v){ el.className='chg '+(v>0?'pos':(v<0?'neg':'neu')); }
 
-// Settings dropdown
+// --- Settings dropdown & theme ---
 (function(){
   let open=false;
   const close=()=>{ settingsMenu.classList.remove('open'); open=false; };
   settingsBtn.addEventListener('click',(e)=>{ e.stopPropagation(); open=!open; settingsMenu.classList.toggle('open', open); });
   document.addEventListener('click',(e)=>{ if(!open) return; if(!settingsMenu.contains(e.target) && e.target!==settingsBtn) close(); });
-})();
 
-// Theme
-(function(){
   const saved=localStorage.getItem('mt_theme')||'dark';
   document.documentElement.setAttribute('data-theme', saved);
   themeToggle.checked=(saved==='light');
@@ -64,7 +60,7 @@ const gaugeLabel=document.getElementById('gaugeLabel');
   });
 })();
 
-// Tile visibility
+// --- tile visibility (unchanged) ---
 (function(){
   const savedVis=JSON.parse(localStorage.getItem('mt_tiles_vis')||"{}");
   settingsMenu.querySelectorAll('.tile-toggle').forEach(cb=>{
@@ -77,7 +73,6 @@ const gaugeLabel=document.getElementById('gaugeLabel');
       v[id]=cb.checked; localStorage.setItem('mt_tiles_vis', JSON.stringify(v));
     });
   });
-
   document.querySelectorAll('.min-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id=btn.dataset.hide; applyTileVisibility(id,false);
@@ -92,7 +87,7 @@ function applyTileVisibility(id, show){
   el.style.display=show?'':'none';
 }
 
-// ---------- Header-only drag ----------
+// --- header-only drag (same as before) ---
 (function(){
   const orderKey='mt_tile_order';
   const saved=JSON.parse(localStorage.getItem(orderKey)||'[]');
@@ -138,21 +133,18 @@ function applyTileVisibility(id, show){
   }
 })();
 
-// ---------- Snap-resize (preview shows target size) ----------
+// --- snap-resize with correct on-screen preview ---
 (function initSnapResize(){
   const GAP = 14;
-  const ROW_UNIT = 90; // must match CSS grid auto-rows
+  const ROW_UNIT = 90;
   const cards=[...document.querySelectorAll('.resizable')];
   let outline=null;
 
-  function colWidth(){
-    return (gridRoot.clientWidth - GAP) / 2;
-  }
+  function colWidth(){ return (gridRoot.clientWidth - GAP) / 2; }
 
   cards.forEach(card=>{
     const handle=card.querySelector('.resize-handle');
     if(!handle) return;
-
     const allowed=(card.dataset.allowed||"1x3,1x4").split(",").map(s=>{
       const [c,r]=s.split("x").map(Number); return {c,r};
     });
@@ -168,17 +160,17 @@ function applyTileVisibility(id, show){
       const estCols = estW > cW*1.25 ? 2 : 1;
       const estRows = Math.max(2, Math.round(estH / ROW_UNIT));
 
-      // pick nearest allowed option
       let best=allowed[0], bestDist=1e9;
       allowed.forEach(opt=>{
         const d=Math.abs(opt.c-estCols)*3 + Math.abs(opt.r-estRows);
         if(d<bestDist){ best=opt; bestDist=d; }
       });
 
-      // compute exact pixel size for outline (target size)
-      const targetW = best.c===2 ? (cW*2 + GAP) : cW;   // 2 columns account for gap
+      // place outline exactly over the card's top-left (no drift out of viewport)
+      const targetW = best.c===2 ? (cW*2 + GAP) : cW;
       const targetH = best.r * ROW_UNIT;
-
+      outline.style.left=`${startRect.left}px`;
+      outline.style.top =`${startRect.top}px`;
       outline.style.width = `${targetW}px`;
       outline.style.height= `${targetH}px`;
     };
@@ -186,7 +178,6 @@ function applyTileVisibility(id, show){
     const onUp=()=>{
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
-      // translate outline target to class spans
       const cW=colWidth();
       const ow=parseFloat(outline.style.width), oh=parseFloat(outline.style.height);
       const cols = (ow > cW*1.25) ? 2 : 1;
@@ -201,7 +192,6 @@ function applyTileVisibility(id, show){
       document.body.removeChild(outline); outline=null;
       card.classList.remove('resizing');
 
-      // redraw canvases to fit
       drawSeasonals(lastSeasonals);
       drawGauge(lastCompound);
     };
@@ -225,12 +215,10 @@ function applyTileVisibility(id, show){
   });
 })();
 
-// ---------- TradingView ----------
+// --- TradingView ---
 const TV_EXCHANGE={AAPL:"NASDAQ",MSFT:"NASDAQ",NVDA:"NASDAQ",AMZN:"NASDAQ",META:"NASDAQ",GOOGL:"NASDAQ",TSLA:"NASDAQ",AVGO:"NASDAQ",AMD:"NASDAQ",NFLX:"NASDAQ",ADBE:"NASDAQ",INTC:"NASDAQ",CSCO:"NASDAQ",QCOM:"NASDAQ",TXN:"NASDAQ",CRM:"NYSE",PYPL:"NASDAQ",SHOP:"NYSE",ABNB:"NASDAQ",SNOW:"NYSE",JPM:"NYSE",BAC:"NYSE",WFC:"NYSE",GS:"NYSE",MS:"NYSE",V:"NYSE",MA:"NYSE",AXP:"NYSE","BRK-B":"NYSE",KO:"NYSE",PEP:"NASDAQ",MCD:"NYSE",PG:"NYSE",HD:"NYSE",LOW:"NYSE",COST:"NASDAQ",DIS:"NYSE",NKE:"NYSE",T:"NYSE",VZ:"NYSE",XOM:"NYSE",CVX:"NYSE",PFE:"NYSE",LLY:"NYSE",UNH:"NYSE",MRK:"NYSE",ABBV:"NYSE",CAT:"NYSE",BA:"NYSE",UPS:"NYSE",FDX:"NYSE",ORCL:"NYSE",IBM:"NYSE",UBER:"NYSE",LYFT:"NASDAQ"};
 const toTV=s=>`${(TV_EXCHANGE[s]||'NASDAQ')}:${s}`;
-let currentTVOverride=null;
 function mountTradingView(symbol, tvOverride=null){
-  currentTVOverride=tvOverride;
   chartTitle.textContent=`Chart – ${symbol}`;
   tvContainer.innerHTML="";
   if(typeof TradingView==="undefined"||!TradingView.widget){
@@ -252,17 +240,9 @@ function mountTradingView(symbol, tvOverride=null){
   });
 }
 
-// ---------- Helpers ----------
-const fmtPrice=v=>(typeof v==='number'&&isFinite(v))?v.toFixed(2):'—';
-const fmtChange=v=>(v==null||!isFinite(v))?'—':`${v>0?'+':(v<0?'−':'')}${Math.abs(v).toFixed(2)}%`;
-function applyChangeClass(el,v){ el.className='chg '+(v>0?'pos':(v<0?'neg':'neu')); }
-
-// ---------- Ticker bar ----------
+// --- Ticker bar (robust) ---
 const tickerNodes=new Map();
 function renderTicker(items){
-  if(!Array.isArray(items)||!items.length){
-    items=[{symbol:"TSLA",price:null,change_pct:null},{symbol:"AAPL",price:null,change_pct:null},{symbol:"MSFT",price:null,change_pct:null}];
-  }
   tickerScroll.innerHTML=''; tickerNodes.clear();
   const twice=[...items,...items];
   twice.forEach(tk=>{
@@ -275,8 +255,7 @@ function renderTicker(items){
     tickerScroll.appendChild(item);
     if(!tickerNodes.has(tk.symbol)) tickerNodes.set(tk.symbol,{item,price,chg,last:tk.price});
   });
-  requestAnimationFrame(()=>tickerScroll.classList.add('marquee-ready'));
-  if(!currentSymbol) onSymbolSelect(items[0].symbol);
+  if(items.length) onSymbolSelect(items[0].symbol);
 }
 function updateTicker(items){
   items.forEach(tk=>{
@@ -295,13 +274,19 @@ function updateTicker(items){
 }
 async function loadTickers(){
   try{
-    const r=await fetch(TICKER_ENDPOINT); const data=await r.json();
+    const data=await fetchJSON(ENDPOINTS.tickers, {timeout: 12000});
     if(!tickerScroll.childElementCount) renderTicker(data);
     else updateTicker(data);
-  }catch(e){ /* keep last good */ }
+  }catch(err){
+    console.error("tickers error", err);
+    // show a minimal fallback once
+    if(!tickerScroll.childElementCount){
+      renderTicker([{symbol:"AAPL"},{symbol:"MSFT"},{symbol:"NVDA"}]);
+    }
+  }
 }
 
-// ---------- Movers ----------
+// --- Movers (clickable rows + pointer cursor) ---
 function renderMovers(movers){
   const fill=(tbody,arr)=>{
     tbody.innerHTML='';
@@ -318,18 +303,35 @@ function renderMovers(movers){
   };
   fill(gainersBody, movers.gainers||[]); fill(losersBody, movers.losers||[]);
 }
-async function loadMovers(){ try{ const r=await fetch(MOVERS_ENDPOINT); renderMovers(await r.json()); }catch{ renderMovers({gainers:[],losers:[]}); } }
-
-// ---------- Company ----------
-async function loadCompany(symbol){
+async function loadMovers(){
   try{
-    const r=await fetch(`/api/profile?symbol=${encodeURIComponent(symbol)}`);
-    const p=await r.json();
-    companyBox.innerHTML=`<div class="co-name"><b>${p.name||symbol}</b> <span class="muted">(${symbol})</span></div><p class="co-desc">${p.description||''}</p>`;
-  }catch{ companyBox.innerHTML='<div class="muted">No description available.</div>'; }
+    const movers=await fetchJSON(ENDPOINTS.movers, {timeout: 12000});
+    renderMovers(movers);
+  }catch(err){
+    console.error("movers error",err);
+    renderMovers({gainers:[], losers:[]});
+  }
 }
 
-// ---------- Insights ----------
+// --- Company/profile ---
+async function loadCompany(symbol){
+  try{
+    const p=await fetchJSON(ENDPOINTS.profile, {params:{symbol}, timeout: 8000});
+    companyBox.innerHTML=`<div class="co-name"><b>${p.name||symbol}</b> <span class="muted">(${symbol})</span></div><p class="co-desc">${p.description||''}</p>`;
+  }catch(err){
+    console.error("profile error",err);
+    companyBox.innerHTML='<div class="muted">No description available.</div>';
+  }
+}
+
+// --- Insights (performance + seasonals + gauge) ---
+const perfGrid=document.getElementById('perfGrid');
+const seasonalsCanvas=document.getElementById('seasonalsCanvas');
+const insightsTitle=document.getElementById('insightsTitle');
+const gaugeCanvas=document.getElementById('gaugeCanvas');
+const gctx=gaugeCanvas.getContext('2d');
+const gaugeLabel=document.getElementById('gaugeLabel');
+
 function renderPerf(perf){
   const labels=["1W","1M","3M","6M","YTD","1Y"];
   perfGrid.innerHTML='';
@@ -341,7 +343,6 @@ function renderPerf(perf){
     perfGrid.appendChild(d);
   });
 }
-let lastSeasonals=null;
 function drawSeasonals(seasonals){
   lastSeasonals=seasonals||{};
   const parent=seasonalsCanvas.parentElement;
@@ -353,28 +354,22 @@ function drawSeasonals(seasonals){
   const axisColor = theme==='light' ? '#333' : '#ddd';
   const colors = {"2025":"#3b82f6","2024":"#22c55e","2023":"#f59e0b"};
 
-  const seriesKeys=Object.keys(lastSeasonals).sort().reverse().slice(0,3);
-  const ctx=seasonalsCanvas.getContext('2d');
-  ctx.clearRect(0,0,W,H);
-  if(!seriesKeys.length){ return; }
+  const keys=Object.keys(lastSeasonals).sort().reverse().slice(0,3);
+  const ctx=seasonalsCanvas.getContext('2d'); ctx.clearRect(0,0,W,H);
+  if(!keys.length) return;
 
-  // find ranges
-  let minX=1, maxX=1, minY=0, maxY=0;
-  seriesKeys.forEach(k=>{
-    (lastSeasonals[k]||[]).forEach(([x,y])=>{
-      minX=Math.min(minX,x); maxX=Math.max(maxX,x);
-      minY=Math.min(minY,y); maxY=Math.max(maxY,y);
-    });
-  });
+  let minX=1,maxX=1,minY=0,maxY=0;
+  keys.forEach(k=> (lastSeasonals[k]||[]).forEach(([x,y])=>{
+    minX=Math.min(minX,x); maxX=Math.max(maxX,x); minY=Math.min(minY,y); maxY=Math.max(maxY,y);
+  }));
   if(minY===maxY){ minY-=1; maxY+=1; }
 
   const pad=28;
-  const xScale=(x)=> pad + (x-minX)/(maxX-minX||1)*(W-2*pad);
-  const yScale=(y)=> H-pad - (y-minY)/(maxY-minY||1)*(H-2*pad);
+  const xScale=x=> pad + (x-minX)/(maxX-minX||1)*(W-2*pad);
+  const yScale=y=> H-pad - (y-minY)/(maxY-minY||1)*(H-2*pad);
 
   // grid
-  ctx.strokeStyle=gridColor; ctx.lineWidth=1;
-  ctx.beginPath();
+  ctx.strokeStyle=gridColor; ctx.lineWidth=1; ctx.beginPath();
   [0.25,0.5,0.75].forEach(f=>{ const x=pad+f*(W-2*pad); ctx.moveTo(x,pad); ctx.lineTo(x,H-pad); });
   ctx.stroke();
 
@@ -382,21 +377,19 @@ function drawSeasonals(seasonals){
   ctx.strokeStyle=axisColor; ctx.lineWidth=1.2; ctx.beginPath(); ctx.moveTo(pad,H-pad); ctx.lineTo(W-pad,H-pad); ctx.stroke();
 
   // series
-  seriesKeys.forEach(k=>{
+  keys.forEach(k=>{
     const pts=lastSeasonals[k]||[]; if(!pts.length) return;
-    ctx.strokeStyle=colors[k]||'#aaa'; ctx.lineWidth=2;
-    ctx.beginPath();
+    ctx.strokeStyle=colors[k]||'#aaa'; ctx.lineWidth=2; ctx.beginPath();
     pts.forEach(([x,y],i)=>{ const X=xScale(x), Y=yScale(y); if(i===0) ctx.moveTo(X,Y); else ctx.lineTo(X,Y); });
     ctx.stroke();
   });
 }
-// Fit on size changes
 new ResizeObserver(()=>drawSeasonals(lastSeasonals)).observe(seasonalsCanvas.parentElement);
 
-// Sentiment gauge
-let lastCompound=0;
+// gauge
+let lastCmp=0;
 function drawGauge(compound=0){
-  lastCompound=compound;
+  lastCmp=compound; lastCompound=compound;
   const W=gaugeCanvas.clientWidth, H=gaugeCanvas.clientHeight;
   gaugeCanvas.width=W; gaugeCanvas.height=H;
   const c=gctx; c.clearRect(0,0,W,H);
@@ -409,7 +402,7 @@ function drawGauge(compound=0){
 
   const angle = Math.PI + (compound+1)*Math.PI/2;
   const nx = cx + (r-6)*Math.cos(angle), ny = cy + (r-6)*Math.sin(angle);
-  c.strokeStyle= getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#fff';
+  c.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#fff';
   c.lineWidth=3; c.beginPath(); c.moveTo(cx,cy); c.lineTo(nx,ny); c.stroke();
   c.beginPath(); c.arc(cx,cy,4,0,2*Math.PI); c.fillStyle=c.strokeStyle; c.fill();
 
@@ -423,54 +416,71 @@ async function loadInsights(symbol){
   insightsTitle.textContent=`Market Insights: ${symbol}`;
   renderPerf(null); drawSeasonals(null); drawGauge(0);
   try{
-    const r=await fetch(`${METRICS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
-    const m=await r.json();
+    const m=await fetchJSON(ENDPOINTS.metrics, {params:{symbol}, timeout: 12000});
     renderPerf(m.performance);
     drawSeasonals(m.seasonals||{});
-  }catch{}
-  try{
-    const r=await fetch(`${SENTI_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`); const s=await r.json();
-    const comp=typeof s.compound==='number'?s.compound:0; drawGauge(comp);
-  }catch{ drawGauge(0); }
+  }catch(err){ console.error("metrics error", err); }
+  // Optional: sentiment via news provider not guaranteed here; leave gauge Neutral unless you add endpoint back
 }
 
-// ---------- News ----------
+// --- News (scrollable tile) ---
 function renderNews(container, articles){
   container.innerHTML='';
   if(!Array.isArray(articles)||!articles.length){ container.innerHTML='<div class="muted">No headlines.</div>'; return; }
-  articles.forEach(n=>{ const item=document.createElement('div'); item.className='news-item';
+  articles.forEach(n=>{
+    const item=document.createElement('div'); item.className='news-item';
     const a=document.createElement('a'); a.href=n.url||'#'; a.target='_blank'; a.rel='noopener noreferrer'; a.textContent=n.title||'(untitled)';
     const meta=document.createElement('div'); meta.className='muted'; const src=n.source||'Unknown'; const ts=n.published_at||''; meta.textContent=`${src}${ts?` · ${ts}`:''}`;
-    item.append(a,meta); container.appendChild(item); });
+    item.append(a,meta); container.appendChild(item);
+  });
 }
 async function loadNews(symbol){
   newsList.innerHTML='<div class="fallback-note">Loading news…</div>';
-  try{ const r=await fetch(`${NEWS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`); const data=await r.json(); renderNews(newsList, data); }
-  catch{ newsList.innerHTML='<div class="muted">Failed to load news.</div>'; }
+  try{
+    const data=await fetchJSON(ENDPOINTS.news, {params:{symbol}, timeout: 12000});
+    renderNews(newsList, data);
+  }catch(err){
+    console.error("news error",err);
+    newsList.innerHTML='<div class="muted">Failed to load news.</div>';
+  }
 }
 async function loadMarketNews(){
   marketNewsList.innerHTML='<div class="fallback-note">Loading market headlines…</div>';
-  try{ const r=await fetch(MKT_NEWS_ENDPOINT); const data=await r.json(); renderNews(marketNewsList, data); }
-  catch{ marketNewsList.innerHTML='<div class="muted">Failed to load market headlines.</div>'; }
+  try{
+    const data=await fetchJSON(ENDPOINTS.mktnews, {timeout: 12000});
+    renderNews(marketNewsList, data);
+  }catch(err){
+    console.error("market news error",err);
+    marketNewsList.innerHTML='<div class="muted">Failed to load market headlines.</div>';
+  }
 }
 
-// ---------- Selection ----------
-let currentSymbol=null, currentTVOverride=null;
+// --- Selection ---
 async function onSymbolSelect(symbol, tvOverride=null){
-  currentSymbol=symbol;
-  currentTVOverride=tvOverride;
+  currentSymbol=symbol; currentTVOverride=tvOverride;
   mountTradingView(symbol, tvOverride);
-  await Promise.all([
+  await Promise.allSettled([
     loadCompany(symbol),
     loadInsights(symbol),
     loadNews(symbol)
   ]);
 }
 
-// ---------- Boot ----------
-document.addEventListener('DOMContentLoaded', ()=>{
-  loadTickers(); setInterval(loadTickers, 1000*60);
-  loadMovers();  setInterval(loadMovers,  1000*60);
-  loadMarketNews(); setInterval(loadMarketNews, 1000*180);
+// --- Quick links ---
+document.querySelectorAll('.quick-links .ql').forEach(b=>{
+  b.addEventListener('click',()=>{
+    const backendSym=b.dataset.symbol;        // SPY/QQQ
+    const tvSym=b.dataset.tv || null;         // TVC:SPX etc.
+    onSymbolSelect(backendSym, tvSym);
+  });
+});
+
+// --- Boot ---
+document.addEventListener('DOMContentLoaded', async ()=>{
+  // quick health check (optional)
+  fetchJSON(ENDPOINTS.health, {timeout: 5000}).catch(()=>console.warn("Health check failed"));
+  loadTickers(); setInterval(loadTickers, 60_000);
+  loadMovers();  setInterval(loadMovers,  60_000);
+  loadMarketNews(); setInterval(loadMarketNews, 180_000);
   setTimeout(()=>{ if(!currentSymbol) onSymbolSelect('TSLA'); }, 800);
 });
