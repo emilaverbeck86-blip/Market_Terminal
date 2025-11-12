@@ -1,7 +1,6 @@
 from __future__ import annotations
-import os, time, csv, io, asyncio, math, datetime as dt, re
+import os, time, csv, io, asyncio, math, datetime as dt
 from typing import Any, Dict, List, Optional
-from xml.etree import ElementTree as ET
 
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
@@ -13,7 +12,7 @@ import httpx
 import yfinance as yf
 import pandas as pd
 
-# ---------------- App paths ----------------
+# ---------- Paths / App ----------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -21,7 +20,8 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
 load_dotenv(os.path.join(BASE_DIR, ".env"))
-NEWS_API_KEY = (os.getenv("NEWS_API_KEY") or "").strip()
+NEWS_API_KEY = os.getenv("NEWS_API_KEY", "").strip()         # optional (NewsAPI)
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "").strip()   # optional (Finnhub)
 
 app = FastAPI(title="Market Terminal")
 app.add_middleware(
@@ -32,7 +32,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
-# ---------------- Watchlist ----------------
+# ---------- Watchlist ----------
 WATCHLIST = [
     "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","AVGO","AMD","NFLX","ADBE",
     "INTC","CSCO","QCOM","TXN","CRM","PYPL","ORCL","IBM","SNOW","ABNB","SHOP",
@@ -40,10 +40,8 @@ WATCHLIST = [
     "KO","PEP","PG","MCD","COST","HD","LOW","DIS","NKE",
     "XOM","CVX","CAT","BA","UNH","LLY","MRK","ABBV","UPS","FDX","UBER","LYFT"
 ]
-# indices we expose as shortcuts
-INDEX_MAP = {"^GSPC": "S&P 500", "^IXIC": "NASDAQ"}
 
-# ---------------- Cache ----------------
+# ---------- Cache ----------
 def _now() -> float: return time.time()
 CACHE: Dict[str, Dict[str, Any]] = {
     "tickers": {"ts": 0.0, "data": None},
@@ -51,7 +49,7 @@ CACHE: Dict[str, Dict[str, Any]] = {
 }
 TTL = {"tickers": 60, "market_news": 180}
 
-# ---------------- Price helpers ----------------
+# ---------- Helpers ----------
 def _safe_float(x) -> Optional[float]:
     try:
         f = float(x)
@@ -60,7 +58,8 @@ def _safe_float(x) -> Optional[float]:
         return None
 
 def _pct(last: Optional[float], prev: Optional[float]) -> Optional[float]:
-    if last is None or prev in (None, 0): return None
+    if last is None or prev in (None, 0):
+        return None
     return (last - prev) / prev * 100.0
 
 def _stooq_symbol(sym: str) -> str:
@@ -104,69 +103,89 @@ def _yf_last_prev(sym: str) -> Dict[str, Optional[float]]:
     return {"last": last, "prev": prev}
 
 async def _batch_quotes(symbols: List[str]) -> Optional[List[Dict[str, Any]]]:
-    rows: List[Dict[str, Any]] = []
-    # Yahoo first (best on Render)
+    out: List[Dict[str, Any]] = []
+    # Prefer Yahoo
+    yahoo_rows: List[Dict[str, Any]] = []
     for s in symbols:
         dp = _yf_last_prev(s)
         chg = _pct(dp["last"], dp["prev"])
-        rows.append({
+        yahoo_rows.append({
             "symbol": s,
             "price": round(dp["last"], 2) if dp["last"] is not None else None,
             "change_pct": round(chg, 2) if chg is not None else None
         })
-    if any(isinstance(r.get("price"), (int, float)) for r in rows):
-        return rows
-    # Fallback: Stooq
-    out: List[Dict[str, Any]] = []
-    sem = asyncio.Semaphore(10)
-    async with httpx.AsyncClient() as client:
-        async def one(s: str):
-            async with sem:
-                dp = await _stooq_last_prev(client, s)
-                chg = _pct(dp["last"], dp["prev"])
-                return {
-                    "symbol": s,
-                    "price": round(dp["last"], 2) if dp["last"] is not None else None,
-                    "change_pct": round(chg, 2) if chg is not None else None
-                }
-        res = await asyncio.gather(*[one(s) for s in symbols], return_exceptions=True)
-    for i, r in enumerate(res):
-        if isinstance(r, Exception):
-            out.append({"symbol": symbols[i], "price": None, "change_pct": None})
-        else:
-            out.append(r)
-    return out if any(isinstance(r.get("price"), (int, float)) for r in out) else None
+    if any(isinstance(r.get("price"), (int,float)) for r in yahoo_rows):
+        out = yahoo_rows
+    else:
+        # Fallback Stooq
+        sem = asyncio.Semaphore(10)
+        async with httpx.AsyncClient() as client:
+            async def one(s: str):
+                async with sem:
+                    dp = await _stooq_last_prev(client, s)
+                    chg = _pct(dp["last"], dp["prev"])
+                    return {"symbol": s,
+                            "price": round(dp["last"], 2) if dp["last"] is not None else None,
+                            "change_pct": round(chg, 2) if chg is not None else None}
+            res = await asyncio.gather(*[one(s) for s in symbols], return_exceptions=True)
+        for i, r in enumerate(res):
+            if isinstance(r, Exception):
+                out.append({"symbol": symbols[i], "price": None, "change_pct": None})
+            else:
+                out.append(r)
+    if not any(isinstance(r.get("price"), (int,float)) for r in out):
+        return None
+    return out
 
 def _movers(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     v = [r for r in rows if isinstance(r.get("change_pct"), (int, float))]
     v.sort(key=lambda x: x["change_pct"], reverse=True)
     return {"gainers": v[:8], "losers": list(reversed(v[-8:]))}
 
-# ---------------- News (NewsAPI + Yahoo RSS fallback) ----------------
-def _rss_strip(txt: str) -> str:
-    if not txt: return ""
-    return re.sub(r"<[^>]+>", "", txt).strip()
-
-async def _rss_parse(url: str, timeout: int = 10) -> List[Dict[str, Any]]:
+# ---------- News Providers ----------
+def _yahoo_news(symbol: str, limit: int = 30) -> List[Dict[str, Any]]:
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.get(url)
-        if r.status_code != 200:
-            return []
-        root = ET.fromstring(r.content)
-        items = []
-        for item in root.findall(".//item"):
-            title = _rss_strip((item.findtext("title") or ""))
-            link = (item.findtext("link") or "#").strip()
-            pub = (item.findtext("pubDate") or "").strip()
-            source = "Yahoo Finance"
-            items.append({"title": title, "url": link, "source": source, "published_at": pub})
-        return items
+        t = yf.Ticker(symbol)
+        items = getattr(t, "news", None) or []
+        out=[]
+        for a in items[:limit]:
+            out.append({"title": a.get("title"),
+                        "url": a.get("link") or a.get("url"),
+                        "source": (a.get("publisher") or "Yahoo"),
+                        "summary": a.get("summary") or "",
+                        "published_at": ""})
+        return out
     except Exception:
         return []
 
-async def _news_symbol(symbol: str, page_size: int = 20) -> List[Dict[str, Any]]:
-    # Try NewsAPI first
+async def _finnhub_news(symbol: str, limit: int = 30) -> List[Dict[str, Any]]:
+    if not FINNHUB_API_KEY: return []
+    try:
+        # Company news over recent window
+        end = dt.date.today()
+        start = end - dt.timedelta(days=30)
+        url = "https://finnhub.io/api/v1/company-news"
+        params = {"symbol": symbol, "from": start.isoformat(), "to": end.isoformat(), "token": FINNHUB_API_KEY}
+        async with httpx.AsyncClient(timeout=12) as client:
+            r = await client.get(url, params=params)
+        if r.status_code != 200: return []
+        data = r.json()
+        out=[]
+        for a in data[:limit]:
+            out.append({"title": a.get("headline"),
+                        "url": a.get("url"),
+                        "source": a.get("source"),
+                        "summary": a.get("summary") or "",
+                        "published_at": a.get("datetime")})
+        return out
+    except Exception:
+        return []
+
+async def _news_symbol(symbol: str, page_size: int = 30) -> List[Dict[str, Any]]:
+    # 1) Finnhub (if key)  2) NewsAPI (if key)  3) Yahoo fallback
+    first = await _finnhub_news(symbol, page_size)
+    if first: return first
+
     if NEWS_API_KEY:
         try:
             url="https://newsapi.org/v2/everything"
@@ -177,21 +196,36 @@ async def _news_symbol(symbol: str, page_size: int = 20) -> List[Dict[str, Any]]
             if r.status_code==200:
                 data=r.json(); out=[]
                 for a in data.get("articles", []):
-                    out.append({"title":a.get("title"),"url":a.get("url"),"source":(a.get("source") or {}).get("name"),
+                    out.append({"title":a.get("title"),"url":a.get("url"),
+                                "source":(a.get("source") or {}).get("name"),
                                 "summary":a.get("description"),"published_at":a.get("publishedAt")})
                 if out: return out
         except Exception:
             pass
-    # Fallback: Yahoo RSS for the symbol (works without a key)
-    q = symbol
-    if symbol in INDEX_MAP:  # nicer queries for indices
-        q = INDEX_MAP[symbol]
-    rss_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={httpx.QueryParams({'s': q}).get('s')}&region=US&lang=en-US"
-    rss = await _rss_parse(rss_url)
-    return rss or [{"title":"No recent headlines found.","url":"#","source":"News"}]
 
-async def _market_news(page_size: int = 20) -> List[Dict[str, Any]]:
-    # NewsAPI top-headlines if possible
+    yn = _yahoo_news(symbol, page_size)
+    return yn or [{"title":"No recent headlines found.","url":"#","source":"News"}]
+
+async def _market_news(page_size: int = 30) -> List[Dict[str, Any]]:
+    # Try Finnhub general news (category=general)
+    if FINNHUB_API_KEY:
+        try:
+            url="https://finnhub.io/api/v1/news"
+            params={"category":"general","minId":0,"token":FINNHUB_API_KEY}
+            async with httpx.AsyncClient(timeout=12) as client:
+                r=await client.get(url, params=params)
+            if r.status_code==200:
+                data=r.json()[:page_size]
+                out=[]
+                for a in data:
+                    out.append({"title":a.get("headline"), "url":a.get("url"),
+                                "source":a.get("source"), "summary":a.get("summary") or "",
+                                "published_at":a.get("datetime")})
+                if out: return out
+        except Exception:
+            pass
+
+    # NewsAPI top-headlines (optional)
     if NEWS_API_KEY:
         try:
             url="https://newsapi.org/v2/top-headlines"
@@ -202,16 +236,18 @@ async def _market_news(page_size: int = 20) -> List[Dict[str, Any]]:
             if r.status_code==200:
                 data=r.json(); out=[]
                 for a in data.get("articles", []):
-                    out.append({"title":a.get("title"),"url":a.get("url"),"source":(a.get("source") or {}).get("name"),
+                    out.append({"title":a.get("title"),"url":a.get("url"),
+                                "source":(a.get("source") or {}).get("name"),
                                 "summary":a.get("description"),"published_at":a.get("publishedAt")})
                 if out: return out
         except Exception:
             pass
-    # Fallback: Yahoo RSS using S&P + NASDAQ indexes combined
-    rss = await _rss_parse("https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EGSPC,%5EIXIC&region=US&lang=en-US")
-    return rss or [{"title":"No US market headlines right now.","url":"#","source":"News"}]
 
-# ---------------- Profile / Insights ----------------
+    # Fallback: SPY news
+    yn = _yahoo_news("SPY", page_size)
+    return yn or [{"title":"No US market headlines right now.","url":"#","source":"News"}]
+
+# ---------- Profile ----------
 def _trim_sentences(text: str, limit: int = 420) -> str:
     if not text: return ""
     text = " ".join(text.split())
@@ -222,6 +258,7 @@ def _trim_sentences(text: str, limit: int = 420) -> str:
     if last < 60: return cut.rstrip() + "…"
     return cut[:last+1]
 
+# ---------- Insights ----------
 def _period_return(series: pd.Series, days: int) -> Optional[float]:
     if series is None or series.empty: return None
     end = series.dropna()
@@ -229,13 +266,15 @@ def _period_return(series: pd.Series, days: int) -> Optional[float]:
     last_idx = end.index.max()
     start_idx = last_idx - pd.tseries.offsets.BDay(days)
     start_series = end[end.index <= start_idx]
-    if start_series.empty: return None
+    if start_series.empty:
+        return None
     start_price = start_series.iloc[-1]
     last_price = end.loc[last_idx]
     if start_price in (None, 0) or pd.isna(start_price): return None
     return float((last_price - start_price) / start_price * 100.0)
 
-def _seasonals(close: pd.Series) -> Dict[str, List[List[float]]]:
+def _seasonals_by_trading_day(close: pd.Series) -> Dict[str, List[List[float]]]:
+    """Return last 3 years as {YYYY: [[idx, pct], ...]} where idx = 1..N trading days since Jan-1."""
     if close is None or close.empty: return {}
     years = sorted(list(set(close.index.year)))[-3:]
     out: Dict[str, List[List[float]]] = {}
@@ -244,16 +283,14 @@ def _seasonals(close: pd.Series) -> Dict[str, List[List[float]]]:
         if seg.empty: continue
         base = float(seg.iloc[0])
         pts: List[List[float]] = []
-        for ts, val in seg.items():
-            doy = ts.timetuple().tm_yday
+        for n, (ts, val) in enumerate(seg.items(), start=1):
             pct = ((float(val) - base) / base) * 100.0 if base else 0.0
-            pts.append([doy, pct])
+            pts.append([n, pct])
         out[str(y)] = pts
     return out
 
 @app.get("/api/metrics")
 async def api_metrics(symbol: str = Query(...)):
-    """Performance + seasonals (3y)."""
     try:
         t = yf.Ticker(symbol)
         end = dt.datetime.utcnow()
@@ -274,12 +311,12 @@ async def api_metrics(symbol: str = Query(...)):
         ytd_seg = close[close.index.year == y]
         if not ytd_seg.empty:
             perf["YTD"] = float((close.iloc[-1] - ytd_seg.iloc[0]) / ytd_seg.iloc[0] * 100.0)
-        seasonals = _seasonals(close)
+        seasonals = _seasonals_by_trading_day(close)
         return JSONResponse({"symbol": symbol, "performance": perf, "seasonals": seasonals})
     except Exception:
         return JSONResponse({"symbol": symbol, "performance": {"1W":None,"1M":None,"3M":None,"6M":None,"YTD":None,"1Y":None}, "seasonals": {}})
 
-# ---------------- Routes ----------------
+# ---------- Routes ----------
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     idx = os.path.join(TEMPLATES_DIR, "index.html")
@@ -303,15 +340,14 @@ async def api_movers():
     return JSONResponse(_movers(rows))
 
 @app.get("/api/news")
-async def api_news(symbol: str = Query(...)):
-    return JSONResponse(await _news_symbol(symbol))
+async def api_news(symbol: str = Query(...)): return JSONResponse(await _news_symbol(symbol))
 
 @app.get("/api/market-news")
 async def api_market_news():
     now = _now(); c = CACHE["market_news"]
     if c["data"] and now - c["ts"] < TTL["market_news"]:
         return JSONResponse(c["data"])
-    data = await _market_news(30)
+    data = await _market_news(50)
     c["data"] = data; c["ts"] = now
     return JSONResponse(data)
 
@@ -320,7 +356,7 @@ async def api_sentiment(symbol: str = Query(...)):
     try:
         from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
         analyzer = SentimentIntensityAnalyzer()
-        news = await _news_symbol(symbol, page_size=20)
+        news = await _news_symbol(symbol, page_size=30)
         vals = []
         for n in news:
             txt = (n.get("title") or "") + ". " + (n.get("summary") or "")
