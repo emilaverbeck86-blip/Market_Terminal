@@ -1,130 +1,111 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" data-theme="dark">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="dark light" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Market Terminal</title>
   <link rel="stylesheet" href="/static/style.css" />
   <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
   <header class="topbar">
-    <div class="ticker-bar">
-      <div id="tickerScroll" class="ticker-scroll" aria-live="polite" aria-atomic="true"></div>
-    </div>
-
-    <div class="topbar-controls">
+    <div class="ticker" id="tickerScroll"></div>
+    <div class="right-actions">
       <div class="quick-links">
-        <!-- Use data-symbol for back-end, data-tv for TradingView symbol -->
-        <button class="ql" data-symbol="SPY" data-tv="TVC:SPX">S&amp;P 500</button>
-        <button class="ql" data-symbol="QQQ" data-tv="NASDAQ:QQQ">NASDAQ</button>
+        <button class="ql" id="btnSPX" title="S&P 500 (index chart)">S&amp;P 500</button>
+        <button class="ql" id="btnNasdaq" title="NASDAQ Composite (index chart)">NASDAQ</button>
       </div>
-      <div class="dropdown" id="settingsDropdown">
-        <button class="dropbtn" id="settingsBtn">Settings ▾</button>
-        <div class="dropdown-menu" id="settingsMenu" aria-labelledby="settingsBtn">
-          <div class="menu-row">
+      <div class="settings">
+        <button id="settingsBtn">Settings ▾</button>
+        <div id="settingsMenu" class="menu">
+          <div class="row">
             <span>Theme</span>
-            <div class="theme-toggle">
-              <svg class="icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M21.64 13a9 9 0 01-11.3-11.3A9 9 0 1021.64 13z"/></svg>
-              <label class="switch">
-                <input type="checkbox" id="themeToggle">
-                <span class="slider"></span>
-              </label>
-              <svg class="icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M6.76 4.84l-1.8-1.79L3.17 4.84l1.79 1.79 1.8-1.79zM12 4V1h0v3h0zm6 8h3v0h-3v0zM4 12H1v0h3v0zm11.24 7.16l1.8 1.79 1.79-1.79-1.79-1.79-1.8 1.79zM12 23v-3h0v3h0zM6.76 19.16l-1.8 1.79-1.79-1.79 1.79-1.79 1.8 1.79zM19.16 6.76l1.79-1.92-1.79-1.66-1.79 1.79 1.79 1.79zM12 7a5 5 0 100 10 5 5 0 000-10z"/></svg>
-            </div>
+            <label class="switch">
+              <input type="checkbox" id="themeToggle" />
+              <span class="slider"></span>
+            </label>
           </div>
-          <div class="menu-sep"></div>
-          <div class="menu-label">Tiles</div>
-          <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-chart" checked> Chart</label>
-          <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-insights" checked> Market Insights</label>
-          <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-company" checked> Company</label>
-          <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-news" checked> News</label>
-          <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-movers" checked> Movers</label>
-          <label class="menu-check"><input type="checkbox" class="tile-toggle" data-tile="tile-marketnews" checked> Market News</label>
+          <div class="hr"></div>
+          <div class="small muted">Toggle tiles via each card’s “–” button</div>
         </div>
       </div>
     </div>
   </header>
 
-  <!-- Grid uses fixed row units; tiles snap by row/column spans -->
-  <main class="grid" id="gridRoot">
-    <!-- Chart: three preset sizes -->
-    <section class="card span-2 row-6 resizable" id="tile-chart" data-cols="2" data-rows="6"
-             data-allowed="2x4,2x6,2x8">
-      <div class="card-hd" draggable="true"><h3 id="chartTitle">Chart</h3><button class="min-btn" data-hide="tile-chart">−</button></div>
-      <div class="card-body chart-body scrollable">
-        <div id="tv_container" class="chart-box"><div class="fallback-note">Loading chart…</div></div>
+  <main id="gridRoot" class="grid">
+    <!-- TradingView -->
+    <section id="tvCard" class="card span-2 row-4 resizable" data-allowed="1x3,1x4,2x3,2x4">
+      <div class="card-hd" draggable="true">
+        <h3 id="chartTitle">Chart</h3>
+        <button class="min-btn" data-hide="tvCard">–</button>
       </div>
-      <div class="resize-handle" data-axis="both"></div>
+      <div id="tv_container" class="tv-wrap"></div>
+      <div class="resize-handle" title="Resize"></div>
     </section>
 
-    <!-- Market Insights -->
-    <section class="card row-4 resizable" id="tile-insights" data-cols="1" data-rows="4" data-allowed="1x3,1x4,1x5">
-      <div class="card-hd" draggable="true"><h3 id="insightsTitle">Market Insights</h3><button class="min-btn" data-hide="tile-insights">−</button></div>
-      <div class="card-body scrollable">
-        <div class="perf-grid" id="perfGrid"></div>
-
-        <div class="seasonals-wrap">
-          <canvas id="seasonalsCanvas" width="900" height="220" aria-label="Seasonals"></canvas>
-          <div class="seasonals-legend"><span class="dot dot-2025"></span>2025 <span class="dot dot-2024"></span>2024 <span class="dot dot-2023"></span>2023</div>
+    <!-- Insights -->
+    <section id="insightsCard" class="card row-3 resizable" data-allowed="1x3,1x4,2x3">
+      <div class="card-hd" draggable="true">
+        <h3 id="insightsTitle">Market Insights</h3>
+        <button class="min-btn" data-hide="insightsCard">–</button>
+      </div>
+      <div class="insights">
+        <div id="perfGrid" class="perf-grid"></div>
+        <div class="seasonals">
+          <canvas id="seasonalsCanvas"></canvas>
+          <div class="legend"><span class="c2025">2025</span><span class="c2024">2024</span><span class="c2023">2023</span></div>
         </div>
-
-        <div class="gauge-wrap">
-          <canvas id="gaugeCanvas" width="360" height="120" aria-label="Sentiment gauge"></canvas>
+        <div class="gauge">
+          <canvas id="gaugeCanvas"></canvas>
           <div id="gaugeLabel" class="gauge-label">Neutral</div>
         </div>
       </div>
-      <div class="resize-handle" data-axis="v"></div>
-    </section>
-
-    <!-- Company -->
-    <section class="card row-3 resizable" id="tile-company" data-cols="1" data-rows="3" data-allowed="1x2,1x3,1x4">
-      <div class="card-hd" draggable="true"><h3>Company</h3><button class="min-btn" data-hide="tile-company">−</button></div>
-      <div class="card-body">
-        <div id="companyBox" class="company-box"><div class="muted">Select a ticker…</div></div>
-      </div>
-      <div class="resize-handle" data-axis="v"></div>
-    </section>
-
-    <!-- News -->
-    <section class="card row-4 resizable" id="tile-news" data-cols="1" data-rows="4" data-allowed="1x3,1x4,1x5">
-      <div class="card-hd" draggable="true"><h3>News</h3><button class="min-btn" data-hide="tile-news">−</button></div>
-      <div class="card-body scrollable">
-        <div id="newsList" class="news-list"><div class="fallback-note">Loading news…</div></div>
-      </div>
-      <div class="resize-handle" data-axis="v"></div>
+      <div class="resize-handle" title="Resize"></div>
     </section>
 
     <!-- Movers -->
-    <section class="card row-4 resizable" id="tile-movers" data-cols="1" data-rows="4" data-allowed="1x3,1x4,1x5">
-      <div class="card-hd" draggable="true"><h3>Top Movers (Watchlist)</h3><button class="min-btn" data-hide="tile-movers">−</button></div>
-      <div class="card-body">
-        <div class="two-col">
-          <div>
-            <div class="table-title">Top Gainers</div>
-            <table class="simple-table clickable"><tbody id="gainersBody"><tr><td class="muted">Loading…</td></tr></tbody></table>
-          </div>
-          <div>
-            <div class="table-title">Top Losers</div>
-            <table class="simple-table clickable"><tbody id="losersBody"><tr><td class="muted">Loading…</td></tr></tbody></table>
-          </div>
+    <section id="moversCard" class="card row-3">
+      <div class="card-hd" draggable="true">
+        <h3>Top Movers (Watchlist)</h3>
+        <button class="min-btn" data-hide="moversCard">–</button>
+      </div>
+      <div class="movers">
+        <div class="split">
+          <div><b>Top Gainers</b><table><tbody id="gainersBody"></tbody></table></div>
+          <div><b>Top Losers</b><table><tbody id="losersBody"></tbody></table></div>
         </div>
       </div>
-      <div class="resize-handle" data-axis="v"></div>
+    </section>
+
+    <!-- Company -->
+    <section id="companyCard" class="card row-2">
+      <div class="card-hd" draggable="true">
+        <h3>Company</h3>
+        <button class="min-btn" data-hide="companyCard">–</button>
+      </div>
+      <div id="companyBox" class="company-box"></div>
+    </section>
+
+    <!-- News -->
+    <section id="newsCard" class="card row-3 resizable" data-allowed="1x3,1x4,2x3,2x4">
+      <div class="card-hd" draggable="true">
+        <h3>News</h3>
+        <button class="min-btn" data-hide="newsCard">–</button>
+      </div>
+      <div id="newsList" class="news-list scrollable"></div>
+      <div class="resize-handle" title="Resize"></div>
     </section>
 
     <!-- Market news -->
-    <section class="card row-3 resizable" id="tile-marketnews" data-cols="1" data-rows="3" data-allowed="1x2,1x3,1x4">
-      <div class="card-hd" draggable="true"><h3>Market News (US)</h3><button class="min-btn" data-hide="tile-marketnews">−</button></div>
-      <div class="card-body scrollable">
-        <div id="marketNewsList" class="news-list"><div class="fallback-note">Loading market headlines…</div></div>
+    <section id="marketNewsCard" class="card row-2">
+      <div class="card-hd" draggable="true">
+        <h3>Market News (US)</h3>
+        <button class="min-btn" data-hide="marketNewsCard">–</button>
       </div>
-      <div class="resize-handle" data-axis="v"></div>
+      <div id="marketNewsList" class="news-list scrollable"></div>
     </section>
   </main>
 
-  <footer class="footer-muted">Market Terminal · Data: Yahoo (prices/news), Finnhub (optional), Stooq (backup)</footer>
-  <script type="module" src="/static/main.js"></script>
+  <script src="/static/main.js"></script>
 </body>
 </html>
