@@ -9,11 +9,13 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="ticker" id="tickerScroll"></div>
+    <div class="ticker" id="tickerWrap">
+      <div class="ticker-track" id="tickerTrack"></div>
+    </div>
     <div class="right-actions">
       <div class="quick-links">
-        <button class="ql" id="btnSPX" title="S&P 500 (index chart)">S&amp;P 500</button>
-        <button class="ql" id="btnNasdaq" title="NASDAQ Composite (index chart)">NASDAQ</button>
+        <button class="ql" id="btnSPX">S&amp;P 500</button>
+        <button class="ql" id="btnNasdaq">NASDAQ</button>
       </div>
       <div class="settings">
         <button id="settingsBtn">Settings ▾</button>
@@ -59,7 +61,7 @@
       <div class="resize-handle" title="Resize"></div>
     </section>
 
-    <section id="moversCard" class="card row-3">
+    <section id="moversCard" class="card row-3 resizable" data-allowed="1x3,1x2,2x2">
       <div class="card-hd" draggable="true">
         <h3>Top Movers (Watchlist)</h3>
         <button class="min-btn" data-hide="moversCard">–</button>
@@ -70,14 +72,16 @@
           <div><b>Top Losers</b><table><tbody id="losersBody"></tbody></table></div>
         </div>
       </div>
+      <div class="resize-handle" title="Resize"></div>
     </section>
 
-    <section id="companyCard" class="card row-2">
+    <section id="companyCard" class="card row-2 resizable" data-allowed="1x2,1x3,2x2">
       <div class="card-hd" draggable="true">
         <h3>Company</h3>
         <button class="min-btn" data-hide="companyCard">–</button>
       </div>
       <div id="companyBox" class="company-box"></div>
+      <div class="resize-handle" title="Resize"></div>
     </section>
 
     <section id="newsCard" class="card row-3 resizable" data-allowed="1x3,1x4,2x3,2x4">
@@ -89,12 +93,13 @@
       <div class="resize-handle" title="Resize"></div>
     </section>
 
-    <section id="marketNewsCard" class="card row-2">
+    <section id="marketNewsCard" class="card row-2 resizable" data-allowed="1x2,1x3,2x2">
       <div class="card-hd" draggable="true">
         <h3>Market News (US)</h3>
         <button class="min-btn" data-hide="marketNewsCard">–</button>
       </div>
       <div id="marketNewsList" class="news-list scrollable"></div>
+      <div class="resize-handle" title="Resize"></div>
     </section>
   </main>
 
