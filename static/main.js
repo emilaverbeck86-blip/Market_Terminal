@@ -1,4 +1,4 @@
-// Stable quotes, non-buggy drag/resize, black/white UI.
+// Better marquee ticker, stable movers, smooth resize, no drifting tiles.
 
 const ENDPOINTS={
   tickers:"/api/tickers", movers:"/api/movers", profile:"/api/profile",
@@ -6,8 +6,11 @@ const ENDPOINTS={
   sentiment:"/api/sentiment"
 };
 
-const $ = id => document.getElementById(id);
-const tickerScroll=$('tickerScroll'), tvContainer=$('tv_container'), chartTitle=$('chartTitle');
+const $=id=>document.getElementById(id);
+
+// DOM
+const tickerWrap=$('tickerWrap'), tickerTrack=$('tickerTrack');
+const tvContainer=$('tv_container'), chartTitle=$('chartTitle');
 const newsList=$('newsList'), marketNewsList=$('marketNewsList');
 const gainersBody=$('gainersBody'), losersBody=$('losersBody'), companyBox=$('companyBox');
 const gridRoot=$('gridRoot'), themeToggle=$('themeToggle'), settingsBtn=$('settingsBtn'), settingsMenu=$('settingsMenu');
@@ -17,17 +20,14 @@ const gaugeCanvas=$('gaugeCanvas'), gctx=gaugeCanvas.getContext('2d'), gaugeLabe
 
 let currentSymbol=null, currentTVOverride=null, lastSeasonals=null, lastCompound=0;
 
-function fetchJSON(url, {timeout=12000, params}={}){
-  const ctrl=new AbortController();
-  const id=setTimeout(()=>ctrl.abort(), timeout);
-  const full=params?`${url}?${new URLSearchParams(params)}`:url;
-  return fetch(full,{signal:ctrl.signal}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json();}).finally(()=>clearTimeout(id));
-}
+// helpers
+function fetchJSON(url,{timeout=12000,params}={}){const c=new AbortController();const t=setTimeout(()=>c.abort(),timeout);
+const u=params?`${url}?${new URLSearchParams(params)}`:url;return fetch(u,{signal:c.signal}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json();}).finally(()=>clearTimeout(t));}
 const fmtPrice=v=>(typeof v==='number'&&isFinite(v))?v.toFixed(2):'—';
 const fmtChange=v=>(v==null||!isFinite(v))?'—':`${v>0?'+':(v<0?'−':'')}${Math.abs(v).toFixed(2)}%`;
 function applyChangeClass(el,v){el.className='chg '+(v>0?'pos':(v<0?'neg':'neu'));}
 
-// THEME + SETTINGS
+// THEME + menu
 (()=>{let open=false;const close=()=>{settingsMenu.classList.remove('open');open=false;};
 settingsBtn.addEventListener('click',e=>{e.stopPropagation();open=!open;settingsMenu.classList.toggle('open',open);});
 document.addEventListener('click',e=>{if(!open)return;if(!settingsMenu.contains(e.target)&&e.target!==settingsBtn)close();});
@@ -35,7 +35,7 @@ const saved=localStorage.getItem('mt_theme')||'dark';document.documentElement.se
 themeToggle.checked=(saved==='light');themeToggle.addEventListener('change',()=>{const t=themeToggle.checked?'light':'dark';
 document.documentElement.setAttribute('data-theme',t);localStorage.setItem('mt_theme',t);if(currentSymbol)mountTradingView(currentSymbol,currentTVOverride);drawSeasonals(lastSeasonals);drawGauge(lastCompound);});})();
 
-// DRAG (header only)
+// DRAG
 (()=>{const key='mt_tile_order';const saved=JSON.parse(localStorage.getItem(key)||'[]');if(saved.length){saved.forEach(id=>{const el=$(id);if(el)gridRoot.appendChild(el);});}
 let dragEl=null, ph=null;
 gridRoot.addEventListener('dragstart',e=>{const hd=e.target.closest('.card-hd[draggable="true"]');if(!hd){e.preventDefault();return;}
@@ -44,45 +44,51 @@ gridRoot.addEventListener('dragover',e=>{if(!dragEl)return;e.preventDefault();co
 gridRoot.addEventListener('dragend',()=>{if(!dragEl)return;dragEl.classList.remove('dragging');if(ph){ph.replaceWith(dragEl);ph=null;}const ids=[...gridRoot.querySelectorAll('.card')].map(n=>n.id);localStorage.setItem(key,JSON.stringify(ids));dragEl=null;});
 function getAfter(c,y){const els=[...c.querySelectorAll('.card:not(.dragging)')];return els.reduce((cl,ch)=>{const b=ch.getBoundingClientRect();const off=y-b.top-b.height/2;if(off<0&&off>cl.offset){return {offset:off,element:ch};}return cl;},{offset:-1e9}).element;}})();
 
-// SNAP RESIZE (3 presets; accurate preview)
+// SMOOTH RESIZE (all .resizable)
 (()=>{const GAP=14, ROW_UNIT=90; function colW(){return (gridRoot.clientWidth-GAP)/2;}
-const cards=[...document.querySelectorAll('.resizable')];let outline=null;
+const cards=[...document.querySelectorAll('.resizable')];let outline=null, raf=null;
 cards.forEach(card=>{const h=card.querySelector('.resize-handle');if(!h)return;const presets=(card.dataset.allowed||"1x3,1x4,2x3,2x4").split(",").map(t=>{const [c,r]=t.split("x").map(Number);return{c,r};});
-let startRect=null,startX=0,startY=0;const onMove=e=>{const dx=e.clientX-startX,dy=e.clientY-startY;const estW=Math.max(280,startRect.width+dx),estH=Math.max(180,startRect.height+dy);
-const estC=(estW>colW()*1.25)?2:1;const estR=Math.max(2,Math.round(estH/ROW_UNIT));let best=presets[0],dmin=1e9;presets.forEach(p=>{const d=Math.abs(p.c-estC)*3+Math.abs(p.r-estR);if(d<dmin){dmin=d;best=p;}});
-const tW=best.c===2?(colW()*2+GAP):colW();const tH=best.r*ROW_UNIT;outline.style.width=`${tW}px`;outline.style.height=`${tH}px`;};
-const onUp=()=>{document.removeEventListener('pointermove',onMove);document.removeEventListener('pointerup',onUp);const ow=parseFloat(outline.style.width),oh=parseFloat(outline.style.height);
-const cols=(ow>colW()*1.25)?2:1;const rows=Math.max(2,Math.round(oh/ROW_UNIT));card.classList.toggle('span-2',cols===2);card.className=card.className.replace(/\brow-\d+\b/g,'').trim();card.classList.add(`row-${rows}`);
-document.body.removeChild(outline);outline=null;card.classList.remove('resizing');drawSeasonals(lastSeasonals);};
+let startRect=null,startX=0,startY=0,target={c:1,r:3};
+const onMove=e=>{const dx=e.clientX-startX,dy=e.clientY-startY;const estW=Math.max(260,startRect.width+dx),estH=Math.max(160,startRect.height+dy);
+const wantC=(estW>colW()*1.25)?2:1;const wantR=Math.max(2,Math.round(estH/ROW_UNIT));
+let best=presets[0],dmin=1e9;presets.forEach(p=>{const d=Math.abs(p.c-wantC)*3+Math.abs(p.r-wantR);if(d<dmin){dmin=d;best=p;}});target=best;
+if(!raf){raf=requestAnimationFrame(()=>{raf=null;const W=target.c===2?(colW()*2+GAP):colW();const H=target.r*ROW_UNIT;
+const left=Math.min(startRect.left, window.innerWidth - W - 8); const top=Math.min(startRect.top, window.innerHeight - H - 8);
+outline.style.left=`${Math.max(4,left)}px`; outline.style.top=`${Math.max(4,top)}px`; outline.style.width=`${W}px`; outline.style.height=`${H}px`;});}};
+const onUp=()=>{document.removeEventListener('pointermove',onMove);document.removeEventListener('pointerup',onUp);
+const W=parseFloat(outline.style.width); const cols=(W>colW()*1.25)?2:1; const rows=target.r;
+card.classList.toggle('span-2',cols===2); card.className=card.className.replace(/\brow-\d+\b/g,'').trim(); card.classList.add(`row-${rows}`);
+document.body.removeChild(outline); outline=null; card.classList.remove('resizing'); drawSeasonals(lastSeasonals); };
 h.addEventListener('pointerdown',e=>{startRect=card.getBoundingClientRect();startX=e.clientX;startY=e.clientY;card.classList.add('resizing');outline=document.createElement('div');outline.className='resize-outline';
 outline.style.left=`${startRect.left}px`;outline.style.top=`${startRect.top}px`;outline.style.width=`${startRect.width}px`;outline.style.height=`${startRect.height}px`;document.body.appendChild(outline);
 document.addEventListener('pointermove',onMove,{passive:false});document.addEventListener('pointerup',onUp,{passive:false});});});})();
 
 // TRADINGVIEW
-const TV_EXCHANGE={AAPL:"NASDAQ",MSFT:"NASDAQ",NVDA:"NASDAQ",AMZN:"NASDAQ",META:"NASDAQ",GOOGL:"NASDAQ",TSLA:"NASDAQ",AVGO:"NASDAQ",AMD:"NASDAQ",NFLX:"NASDAQ",ADBE:"NASDAQ",INTC:"NASDAQ",CSCO:"NASDAQ",QCOM:"NASDAQ",TXN:"NASDAQ",CRM:"NYSE",ORCL:"NYSE",IBM:"NYSE",NOW:"NYSE",SNOW:"NYSE",ABNB:"NASDAQ",SHOP:"NYSE",PYPL:"NASDAQ",JPM:"NYSE",BAC:"NYSE",WFC:"NYSE",GS:"NYSE",MS:"NYSE",V:"NYSE",MA:"NYSE",AXP:"NYSE","BRK-B":"NYSE",SCHW:"NYSE",KO:"NYSE",PEP:"NASDAQ",PG:"NYSE",MCD:"NYSE",COST:"NASDAQ",HD:"NYSE",LOW:"NYSE",DIS:"NYSE",NKE:"NYSE",SBUX:"NASDAQ",TGT:"NYSE",WMT:"NYSE",T:"NYSE",VZ:"NYSE",CMCSA:"NASDAQ",XOM:"NYSE",CVX:"NYSE",COP:"NYSE",CAT:"NYSE",BA:"NYSE",GE:"NYSE",UPS:"NYSE",FDX:"NYSE",DE:"NYSE",UNH:"NYSE",LLY:"NYSE",MRK:"NYSE",ABBV:"NYSE",JNJ:"NYSE",PFE:"NYSE",UBER:"NYSE",LYFT:"NASDAQ",BKNG:"NASDAQ",SPY:"AMEX",QQQ:"NASDAQ",DIA:"AMEX",IWM:"AMEX"};
+const TV_EXCHANGE={AAPL:"NASDAQ",MSFT:"NASDAQ",NVDA:"NASDAQ",AMZN:"NASDAQ",META:"NASDAQ",GOOGL:"NASDAQ",TSLA:"NASDAQ",AVGO:"NASDAQ",AMD:"NASDAQ",NFLX:"NASDAQ",ADBE:"NASDAQ",INTC:"NASDAQ",CSCO:"NASDAQ",QCOM:"NASDAQ",TXN:"NASDAQ",CRM:"NYSE",ORCL:"NYSE",IBM:"NYSE",NOW:"NYSE",SNOW:"NYSE",ABNB:"NASDAQ",SHOP:"NYSE",PYPL:"NASDAQ",JPM:"NYSE",BAC:"NYSE",WFC:"NYSE",GS:"NYSE",MS:"NYSE",V:"NYSE",MA:"NYSE",AXP:"NYSE","BRK-B":"NYSE",SCHW:"NYSE",KO:"NYSE",PEP:"NASDAQ",PG:"NYSE",MCD:"NYSE",COST:"NASDAQ",HD:"NYSE",LOW:"NYSE",DIS:"NYSE",NKE:"NYSE",SBUX:"NASDAQ",TGT:"NYSE",WMT:"NYSE",T:"NYSE",VZ:"NYSE",CMCSA:"NASDAQ",XOM:"NYSE",CVX:"NYSE",COP:"NYSE",CAT:"NYSE",BA:"NYSE",GE:"NYSE",UPS:"NYSE",FDX:"NYSE",DE:"NYSE",UNH:"NYSE",LLY:"NYSE",MRK:"NYSE",ABBV:"NYSE",JNJ:"NYSE",PFE:"NYSE",UBER:"NYSE",BKNG:"NASDAQ",SPY:"AMEX",QQQ:"NASDAQ",DIA:"AMEX",IWM:"AMEX"};
 const toTV=s=>`${(TV_EXCHANGE[s]||'NASDAQ')}:${s}`;
 function mountTradingView(symbol, tvOverride=null){
   chartTitle.textContent=`Chart – ${symbol}`;
   tvContainer.innerHTML="";
   if(typeof TradingView==="undefined"||!TradingView.widget){const w=document.createElement('div');w.className='muted';w.textContent='TradingView failed to load.';tvContainer.appendChild(w);return;}
   const theme=document.documentElement.getAttribute('data-theme')==='light'?'light':'dark';
-  new TradingView.widget({symbol: tvOverride||toTV(symbol), interval:'60', timezone:'Etc/UTC', theme, style:'1',
-    toolbar_bg:'transparent', locale:'en', enable_publishing:false, allow_symbol_change:false, container_id:'tv_container', autosize:true});
+  new TradingView.widget({symbol: tvOverride||toTV(symbol), interval:'60', timezone:'Etc/UTC', theme, style:'1', toolbar_bg:'transparent', locale:'en', enable_publishing:false, allow_symbol_change:false, container_id:'tv_container', autosize:true});
 }
 
-// TICKER BAR
+// TICKER MARQUEE
 const tmap=new Map();
-function renderTicker(items){
-  tickerScroll.innerHTML=''; tmap.clear();
-  const twice=[...items,...items];
-  twice.forEach(tk=>{
+function buildTickerRow(items){
+  tickerTrack.innerHTML=''; tmap.clear();
+  const row=document.createElement('div'); row.className='row'; const dup=document.createElement('div'); dup.className='row';
+  const fill=(container)=>items.forEach(tk=>{
     const el=document.createElement('div'); el.className='ticker-item'; el.dataset.sym=tk.symbol;
     const s=document.createElement('span'); s.className='sym'; s.textContent=tk.symbol;
     const p=document.createElement('span'); p.className='price'; p.textContent=fmtPrice(tk.price);
     const c=document.createElement('span'); c.className='chg'; applyChangeClass(c, tk.change_pct); c.textContent=fmtChange(tk.change_pct);
-    el.append(s,p,c); el.addEventListener('click',()=>onSymbolSelect(tk.symbol)); tickerScroll.appendChild(el);
-    if(!tmap.has(tk.symbol)) tmap.set(tk.symbol,{el, p, c, last:tk.price});
+    el.append(s,p,c); el.addEventListener('click',()=>onSymbolSelect(tk.symbol)); container.appendChild(el);
+    if(!tmap.has(tk.symbol)) tmap.set(tk.symbol,{el,p,c,last:tk.price});
   });
+  fill(row); fill(dup); tickerTrack.append(row,dup);
+  startMarquee();
   if(items.length && !currentSymbol) onSymbolSelect(items[0].symbol);
 }
 function updateTicker(items){
@@ -94,10 +100,23 @@ function updateTicker(items){
     applyChangeClass(n.c, tk.change_pct); n.c.textContent=fmtChange(tk.change_pct);
   });
 }
+function startMarquee(){
+  const trackWidth = tickerTrack.scrollWidth;
+  const wrapWidth  = tickerWrap.clientWidth;
+  const pxPerSec = 80; // speed
+  const duration = (trackWidth) / pxPerSec;
+  tickerTrack.style.setProperty('--marquee-distance', `-${trackWidth - wrapWidth}px`);
+  tickerTrack.style.setProperty('--marquee-duration', `${duration}s`);
+}
+window.addEventListener('resize', ()=>startMarquee());
+tickerWrap.addEventListener('mouseenter', ()=>tickerTrack.style.animationPlayState='paused');
+tickerWrap.addEventListener('mouseleave', ()=>tickerTrack.style.animationPlayState='running');
+
 async function loadTickers(){
   try{
-    const data=await fetchJSON(ENDPOINTS.tickers); if(!tickerScroll.childElementCount) renderTicker(data); else updateTicker(data);
-  }catch(e){ if(!tickerScroll.childElementCount) tickerScroll.innerHTML='<div class="muted">tickers unavailable</div>'; console.error(e); }
+    const data=await fetchJSON(ENDPOINTS.tickers);
+    if(!tickerTrack.childElementCount) buildTickerRow(data); else updateTicker(data);
+  }catch(e){ if(!tickerTrack.childElementCount) tickerTrack.innerHTML='<div class="muted" style="padding:4px 8px">tickers unavailable</div>'; console.error(e); }
 }
 
 // MOVERS
@@ -167,8 +186,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
   loadTickers(); setInterval(loadTickers, 45000);
   loadMovers();  setInterval(loadMovers,  60000);
   loadMarketNews(); setInterval(loadMarketNews, 180000);
-  setTimeout(()=>{ if(!currentSymbol) onSymbolSelect('AAPL'); }, 700);
+  // safe default selection
+  setTimeout(()=>{ if(!currentSymbol) onSymbolSelect('AAPL'); }, 800);
 });
 
-// surface any JS errors quickly
+// error surfacing
 window.addEventListener('error', e=>console.error('JS error:', e.message, e.filename, e.lineno));
