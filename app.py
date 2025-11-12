@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, io, csv, time, asyncio, datetime as dt
+import os, io, csv, time, datetime as dt
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-# ---------- Paths / App ----------
+# ---------- paths ----------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -27,11 +27,10 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
-# ---------- Settings ----------
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "").strip()
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "").strip()
 
-# Liquid watchlist to keep the ticker bar full
+# Big watchlist to always fill the bar
 WATCHLIST = [
     "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","AVGO","AMD","NFLX","ADBE",
     "INTC","CSCO","QCOM","TXN","CRM","ORCL","IBM","NOW","SNOW","ABNB","SHOP","PYPL",
@@ -43,7 +42,7 @@ WATCHLIST = [
     "UBER","LYFT","BKNG","SPY","QQQ","DIA","IWM"
 ]
 
-# ---------- Cache ----------
+# ---------- caching ----------
 def _now() -> float: return time.time()
 CACHE: Dict[str, Dict[str, Any]] = {
     "tickers": {"ts": 0.0, "data": None},
@@ -51,8 +50,8 @@ CACHE: Dict[str, Dict[str, Any]] = {
 }
 TTL = {"tickers": 45, "market_news": 180}
 
-# ---------- HTTP helper ----------
-UA = {"User-Agent": "MarketTerminal/1.2"}
+# ---------- http helper ----------
+UA = {"User-Agent": "MarketTerminal/1.3"}
 async def _get(url: str, params: Dict[str, Any] | None = None, timeout: float = 8.0):
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=4.0), headers=UA) as client:
@@ -63,27 +62,24 @@ async def _get(url: str, params: Dict[str, Any] | None = None, timeout: float = 
         pass
     return None
 
-# ---------- Stooq helpers ----------
+# ---------- Stooq quotes/history ----------
 def _stooq_symbol(sym: str) -> str:
     return f"{sym.lower().replace('.', '-').replace('_', '-')}.us"
 
 async def _stooq_bulk_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
-    """
-    One fast CSV for all symbols.
-    %change = (Close - Open) / Open to avoid needing prev-day data for speed.
-    """
+    # % change = (Close-Open)/Open — fast and single request
     url = "https://stooq.com/q/l/"
     s_param = ",".join([_stooq_symbol(s) for s in symbols])
     r = await _get(url, params={"s": s_param, "f": "sd2t2ohlc"})
-    out: List[Dict[str, Any]] = []
     if not r:
         return [{"symbol": s, "price": None, "change_pct": None} for s in symbols]
     rows = list(csv.reader(io.StringIO(r.text)))
     if rows and rows[0] and rows[0][0].lower().startswith("symbol"):
         rows = rows[1:]
+    out=[]
     for i, s in enumerate(symbols):
-        row = rows[i] if i < len(rows) else None
         price = chg = None
+        row = rows[i] if i < len(rows) else None
         try:
             close = float(row[6]) if row and row[6] not in ("-", "", None) else None
             opn   = float(row[3]) if row and row[3] not in ("-", "", None) else None
@@ -127,7 +123,7 @@ def _seasonals(close: pd.Series) -> Dict[str, List[List[float]]]:
         out[str(y)] = pts
     return out
 
-# ---------- News & sentiment ----------
+# ---------- news & sentiment ----------
 analyzer = SentimentIntensityAnalyzer()
 
 async def _finnhub_news(symbol: str, limit=30) -> List[Dict[str, Any]]:
@@ -186,35 +182,29 @@ def _sentiment_from_titles(items: List[Dict[str, Any]]) -> float:
         scores.append(s)
     return float(pd.Series(scores).mean()) if scores else 0.0
 
-# ---------- Profiles (short curated fallback) ----------
+# ---------- tiny profiles ----------
 CURATED_DESC = {
-    "AAPL":"Apple designs and sells iPhone, Mac, iPad and services like iCloud and the App Store.",
-    "MSFT":"Microsoft develops Windows, Office, Azure cloud, and enterprise software & services.",
-    "NVDA":"NVIDIA designs GPUs and AI/accelerator hardware and related software platforms.",
-    "AMZN":"Amazon operates e-commerce marketplaces, AWS cloud, and digital content services.",
-    "META":"Meta Platforms runs social apps including Facebook, Instagram and WhatsApp.",
-    "GOOGL":"Alphabet is Google’s parent, spanning Search, YouTube, Cloud and Android.",
-    "TSLA":"Tesla designs and manufactures electric vehicles, batteries, and energy products.",
-    "SPY":"SPDR S&P 500 ETF Trust tracks the S&P 500 index.",
-    "QQQ":"Invesco QQQ Trust tracks the Nasdaq-100 index."
+    "AAPL":"Apple designs iPhone, Mac and services like the App Store and iCloud.",
+    "MSFT":"Microsoft builds Windows, Office and Azure cloud services.",
+    "NVDA":"NVIDIA designs GPUs and AI accelerators.",
+    "AMZN":"Amazon runs e-commerce marketplaces and AWS cloud.",
+    "META":"Meta operates Facebook, Instagram and WhatsApp.",
+    "GOOGL":"Alphabet spans Search, YouTube, Android and Cloud.",
+    "TSLA":"Tesla manufactures EVs and energy products.",
+    "SPY":"ETF tracking the S&P 500 index.",
+    "QQQ":"ETF tracking the Nasdaq-100 index."
 }
 async def _profile(symbol: str) -> Dict[str, str]:
-    name = symbol
-    if symbol in ("SPY","QQQ"):  # quick names
-        return {"symbol":symbol, "name":CURATED_DESC.get(symbol, symbol).split(" ")[0], "description":CURATED_DESC[symbol]}
     if symbol in CURATED_DESC:
         return {"symbol":symbol, "name":symbol, "description":CURATED_DESC[symbol]}
-    return {"symbol":symbol, "name":symbol, "description":"A publicly traded U.S. company."}
+    return {"symbol":symbol, "name":symbol, "description":"Publicly traded U.S. company."}
 
-# ---------- Routes ----------
+# ---------- routes ----------
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     idx = os.path.join(TEMPLATES_DIR, "index.html")
     if not os.path.isfile(idx): return PlainTextResponse("templates/index.html not found.", status_code=500)
     return templates.TemplateResponse("index.html", {"request": request})
-
-@app.get("/api/health")
-async def health(): return JSONResponse({"ok": True})
 
 @app.get("/api/tickers")
 async def api_tickers():
@@ -239,10 +229,8 @@ async def api_metrics(symbol: str = Query(...)):
     try:
         close = await _stooq_history(symbol, days=800)
         if close is None or close.empty: raise RuntimeError("no history")
-        perf = {
-            "1W": _ret(close, 5), "1M": _ret(close, 21), "3M": _ret(close, 63),
-            "6M": _ret(close, 126), "YTD": None, "1Y": _ret(close, 252),
-        }
+        perf = {"1W": _ret(close, 5), "1M": _ret(close, 21), "3M": _ret(close, 63),
+                "6M": _ret(close, 126), "YTD": None, "1Y": _ret(close, 252)}
         y = dt.datetime.utcnow().year
         yseg = close[close.index.year == y]
         if not yseg.empty: perf["YTD"] = float((close.iloc[-1] - yseg.iloc[0]) / yseg.iloc[0] * 100.0)
