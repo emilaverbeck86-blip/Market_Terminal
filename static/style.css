@@ -23,7 +23,9 @@ body{ margin:0; background:var(--bg); color:var(--text); font-family:var(--font)
 /* Topbar */
 .topbar{ position:sticky; top:0; z-index:60; background:var(--bg); }
 .ticker-bar{ border-top:1px solid var(--border); border-bottom:1px solid var(--border); overflow:hidden; }
-.topbar-controls{ display:flex; justify-content:flex-end; padding:6px 14px; border-bottom:1px solid var(--border); }
+.topbar-controls{ display:flex; justify-content:flex-end; align-items:center; gap:10px; padding:6px 14px; border-bottom:1px solid var(--border); }
+.quick-links{ margin-right:auto; display:flex; gap:8px; }
+.ql-btn{ background:var(--card); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:.35rem .6rem; cursor:pointer; }
 
 /* Dropdown */
 .dropdown{ position:relative; }
@@ -45,7 +47,7 @@ body{ margin:0; background:var(--bg); color:var(--text); font-family:var(--font)
 .switch input:checked + .slider{ background:#2f8f2f; }
 .switch input:checked + .slider:before{ transform:translateX(20px); }
 
-/* Layout */
+/* Layout grid */
 .grid{ display:grid; grid-template-columns: 1.35fr 0.65fr; grid-auto-rows:minmax(140px, auto); gap:14px; padding:14px; transition:grid-template-columns .2s ease; }
 .card{ background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; transition: height .15s ease, width .15s ease; }
 .card-hd{ display:flex; align-items:center; justify-content:space-between; padding:.75rem .9rem; border-bottom:1px solid var(--border); cursor:move; }
@@ -86,14 +88,6 @@ body{ margin:0; background:var(--bg); color:var(--text); font-family:var(--font)
 .company-box .co-name{ font-size:1rem; margin-bottom:.35rem; }
 .company-box .co-desc{ margin:.2rem 0 0; line-height:1.5; }
 
-/* Sentiment */
-.senti-tile{ display:flex; flex-direction:column; gap:.6rem; }
-.senti-label{ font-weight:800; }
-.senti-bar{ height:12px; width:100%; border:1px solid var(--border); border-radius:999px; overflow:hidden; background:transparent; }
-.senti-fill{ height:100%; width:50%; transition: width .4s ease; background: linear-gradient(90deg, var(--neg), #ffd166, var(--pos)); }
-.senti-fill.neg{ filter:saturate(1.1); }
-.senti-fill.pos{ filter:saturate(1.1); }
-
 /* Insights */
 .perf-grid{ display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-bottom:.6rem; }
 .perf-box{ border:1px solid var(--border); border-radius:12px; padding:.6rem; text-align:center; }
@@ -101,12 +95,16 @@ body{ margin:0; background:var(--bg); color:var(--text); font-family:var(--font)
 .perf-box.neg .p-val{ color:var(--neg); font-weight:800; }
 .perf-box.neu .p-val{ color:var(--muted); font-weight:800; }
 .p-lbl{ color:var(--muted); font-size:.8rem; margin-top:.25rem; }
-.seasonals-wrap{ position:relative; }
-.seasonals-legend{ position:absolute; bottom:8px; left:10px; display:flex; gap:12px; font-size:.85rem; }
+
+.seasonals-wrap{ position:relative; padding-bottom:28px; }
+.seasonals-legend{ position:absolute; bottom:0; left:0; right:0; text-align:center; display:flex; gap:16px; justify-content:center; }
+.seasonals-legend-center{ justify-content:center; }
 .dot{ display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:middle; }
 .dot-2025{ background:var(--y2025); }
 .dot-2024{ background:var(--y2024); }
 .dot-2023{ background:var(--y2023); }
+
+.gauge-wrap{ display:flex; justify-content:center; margin-top:.6rem; }
 
 /* News & Movers */
 .news-list{ display:grid; gap:.45rem; }
