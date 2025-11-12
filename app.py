@@ -1,15 +1,17 @@
 from __future__ import annotations
-import os, io, csv, math, time, asyncio, datetime as dt
+import os, io, csv, time, asyncio, datetime as dt
 from typing import Any, Dict, List, Optional
 
 import httpx
 import pandas as pd
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from fastapi import FastAPI, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+# ---------- Paths / App ----------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -25,27 +27,23 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
-# ---------- BIG, liquid watchlist (fills the bar) ----------
+# ---------- Settings ----------
+NEWS_API_KEY = os.getenv("NEWS_API_KEY", "").strip()
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "").strip()
+
+# Liquid watchlist to keep the ticker bar full
 WATCHLIST = [
-    # mega/large-cap tech
     "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","AVGO","AMD","NFLX","ADBE",
     "INTC","CSCO","QCOM","TXN","CRM","ORCL","IBM","NOW","SNOW","ABNB","SHOP","PYPL",
-    # financials
     "JPM","BAC","WFC","GS","MS","V","MA","AXP","BRK-B","SCHW",
-    # consumer
     "KO","PEP","PG","MCD","COST","HD","LOW","DIS","NKE","SBUX","TGT","WMT",
-    # comms/telecom
     "T","VZ","CMCSA",
-    # energy/industrials
     "XOM","CVX","COP","CAT","BA","GE","UPS","FDX","DE",
-    # healthcare
     "UNH","LLY","MRK","ABBV","JNJ","PFE",
-    # travel / misc
-    "UBER","LYFT","BKNG","ABNB",
-    # ETFs for quick sanity
-    "SPY","QQQ","DIA","IWM"
+    "UBER","LYFT","BKNG","SPY","QQQ","DIA","IWM"
 ]
 
+# ---------- Cache ----------
 def _now() -> float: return time.time()
 CACHE: Dict[str, Dict[str, Any]] = {
     "tickers": {"ts": 0.0, "data": None},
@@ -53,59 +51,50 @@ CACHE: Dict[str, Dict[str, Any]] = {
 }
 TTL = {"tickers": 45, "market_news": 180}
 
-# ---------- HTTP helpers ----------
-UA = {"User-Agent": "MarketTerminal/1.1"}
+# ---------- HTTP helper ----------
+UA = {"User-Agent": "MarketTerminal/1.2"}
 async def _get(url: str, params: Dict[str, Any] | None = None, timeout: float = 8.0):
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=4.0), headers=UA) as client:
             r = await client.get(url, params=params)
-            if r.status_code == 200: return r
+            if r.status_code == 200:
+                return r
     except Exception:
         pass
     return None
 
-# ---------- Stooq: BULK QUOTES (super fast) ----------
+# ---------- Stooq helpers ----------
 def _stooq_symbol(sym: str) -> str:
     return f"{sym.lower().replace('.', '-').replace('_', '-')}.us"
 
 async def _stooq_bulk_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
     """
-    Uses: https://stooq.com/q/l/?s=aapl,msft&f=sd2t2ohlc  (CSV)
-    We compute % change = (Close - Open)/Open for a reliable, single-request snapshot.
+    One fast CSV for all symbols.
+    %change = (Close - Open) / Open to avoid needing prev-day data for speed.
     """
     url = "https://stooq.com/q/l/"
     s_param = ",".join([_stooq_symbol(s) for s in symbols])
     r = await _get(url, params={"s": s_param, "f": "sd2t2ohlc"})
     out: List[Dict[str, Any]] = []
-    if not r:  # all unknown
+    if not r:
         return [{"symbol": s, "price": None, "change_pct": None} for s in symbols]
-
     rows = list(csv.reader(io.StringIO(r.text)))
-    # header example: Symbol,Date,Time,Open,High,Low,Close
     if rows and rows[0] and rows[0][0].lower().startswith("symbol"):
         rows = rows[1:]
-
     for i, s in enumerate(symbols):
-        val = {"symbol": s, "price": None, "change_pct": None}
+        row = rows[i] if i < len(rows) else None
+        price = chg = None
         try:
-            row = rows[i]
-            # If Stooq had fewer rows (rare), guard:
-            if not row or len(row) < 7:
-                out.append(val); continue
-            # price = Close
-            close = float(row[6]) if row[6] not in ("-", "", None) else None
-            opn   = float(row[3]) if row[3] not in ("-", "", None) else None
-            chg = None
+            close = float(row[6]) if row and row[6] not in ("-", "", None) else None
+            opn   = float(row[3]) if row and row[3] not in ("-", "", None) else None
+            if close is not None: price = round(close, 2)
             if close is not None and opn not in (None, 0):
-                chg = (close - opn) / opn * 100.0
-            val["price"] = round(close, 2) if close is not None else None
-            val["change_pct"] = round(chg, 2) if chg is not None else None
+                chg = round((close - opn) / opn * 100.0, 2)
         except Exception:
             pass
-        out.append(val)
+        out.append({"symbol": s, "price": price, "change_pct": chg})
     return out
 
-# ---------- History for Insights (Stooq daily) ----------
 async def _stooq_history(sym: str, days: int = 800) -> pd.Series:
     r = await _get("https://stooq.com/q/d/l/", params={"s": _stooq_symbol(sym), "i": "d"})
     if not r: return pd.Series(dtype=float)
@@ -116,14 +105,14 @@ async def _stooq_history(sym: str, days: int = 800) -> pd.Series:
     if len(df) > days: df = df.iloc[-days:]
     return df["Close"].astype(float)
 
-def _period_return(close: pd.Series, bdays: int) -> Optional[float]:
+def _ret(close: pd.Series, bdays: int) -> Optional[float]:
     if close is None or close.empty or len(close) <= bdays: return None
     start = close.iloc[-(bdays+1)]
     last  = close.iloc[-1]
-    if start in (None, 0) or pd.isna(start): return None
+    if not start: return None
     return float((last - start) / start * 100.0)
 
-def _seasonals_by_trading_day(close: pd.Series) -> Dict[str, List[List[float]]]:
+def _seasonals(close: pd.Series) -> Dict[str, List[List[float]]]:
     if close is None or close.empty: return {}
     years = sorted(list(set(close.index.year)))[-3:]
     out: Dict[str, List[List[float]]] = {}
@@ -138,9 +127,8 @@ def _seasonals_by_trading_day(close: pd.Series) -> Dict[str, List[List[float]]]:
         out[str(y)] = pts
     return out
 
-# ---------- News (optional providers kept from previous step) ----------
-NEWS_API_KEY = os.getenv("NEWS_API_KEY", "").strip()
-FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "").strip()
+# ---------- News & sentiment ----------
+analyzer = SentimentIntensityAnalyzer()
 
 async def _finnhub_news(symbol: str, limit=30) -> List[Dict[str, Any]]:
     if not FINNHUB_API_KEY: return []
@@ -188,11 +176,35 @@ async def _market_news(limit=30)->List[Dict[str,Any]]:
                     for a in data.get("articles", [])]
     return []
 
-# ---------- Simple profile (fast) ----------
+def _sentiment_from_titles(items: List[Dict[str, Any]]) -> float:
+    if not items: return 0.0
+    scores=[]
+    for n in items[:25]:
+        text = (n.get("title") or "") + " " + (n.get("summary") or "")
+        if not text.strip(): continue
+        s = analyzer.polarity_scores(text)["compound"]
+        scores.append(s)
+    return float(pd.Series(scores).mean()) if scores else 0.0
+
+# ---------- Profiles (short curated fallback) ----------
+CURATED_DESC = {
+    "AAPL":"Apple designs and sells iPhone, Mac, iPad and services like iCloud and the App Store.",
+    "MSFT":"Microsoft develops Windows, Office, Azure cloud, and enterprise software & services.",
+    "NVDA":"NVIDIA designs GPUs and AI/accelerator hardware and related software platforms.",
+    "AMZN":"Amazon operates e-commerce marketplaces, AWS cloud, and digital content services.",
+    "META":"Meta Platforms runs social apps including Facebook, Instagram and WhatsApp.",
+    "GOOGL":"Alphabet is Google’s parent, spanning Search, YouTube, Cloud and Android.",
+    "TSLA":"Tesla designs and manufactures electric vehicles, batteries, and energy products.",
+    "SPY":"SPDR S&P 500 ETF Trust tracks the S&P 500 index.",
+    "QQQ":"Invesco QQQ Trust tracks the Nasdaq-100 index."
+}
 async def _profile(symbol: str) -> Dict[str, str]:
-    names={"SPY":"SPDR S&P 500 ETF Trust","QQQ":"Invesco QQQ Trust"}
-    return {"symbol":symbol, "name":names.get(symbol, symbol),
-            "description":"No profile available at this time."}
+    name = symbol
+    if symbol in ("SPY","QQQ"):  # quick names
+        return {"symbol":symbol, "name":CURATED_DESC.get(symbol, symbol).split(" ")[0], "description":CURATED_DESC[symbol]}
+    if symbol in CURATED_DESC:
+        return {"symbol":symbol, "name":symbol, "description":CURATED_DESC[symbol]}
+    return {"symbol":symbol, "name":symbol, "description":"A publicly traded U.S. company."}
 
 # ---------- Routes ----------
 @app.get("/", response_class=HTMLResponse)
@@ -219,20 +231,6 @@ async def api_movers():
     v.sort(key=lambda x: x["change_pct"], reverse=True)
     return JSONResponse({"gainers": v[:10], "losers": list(reversed(v[-10:]))})
 
-@app.get("/api/news")
-async def api_news(symbol: str = Query(...)):
-    data = await _finnhub_news(symbol, 40)
-    if not data: data = await _newsapi_news(symbol, 40)
-    return JSONResponse(data or [])
-
-@app.get("/api/market-news")
-async def api_market_news():
-    now=_now(); c=CACHE["market_news"]
-    if c["data"] and now-c["ts"]<TTL["market_news"]: return JSONResponse(c["data"])
-    data=await _market_news(60)
-    c["data"]=data; c["ts"]=now
-    return JSONResponse(data)
-
 @app.get("/api/profile")
 async def api_profile(symbol: str = Query(...)): return JSONResponse(await _profile(symbol))
 
@@ -242,22 +240,38 @@ async def api_metrics(symbol: str = Query(...)):
         close = await _stooq_history(symbol, days=800)
         if close is None or close.empty: raise RuntimeError("no history")
         perf = {
-            "1W": _period_return(close, 5),
-            "1M": _period_return(close, 21),
-            "3M": _period_return(close, 63),
-            "6M": _period_return(close, 126),
-            "YTD": None,
-            "1Y": _period_return(close, 252),
+            "1W": _ret(close, 5), "1M": _ret(close, 21), "3M": _ret(close, 63),
+            "6M": _ret(close, 126), "YTD": None, "1Y": _ret(close, 252),
         }
         y = dt.datetime.utcnow().year
         yseg = close[close.index.year == y]
         if not yseg.empty: perf["YTD"] = float((close.iloc[-1] - yseg.iloc[0]) / yseg.iloc[0] * 100.0)
-        seasonals = _seasonals_by_trading_day(close)
+        seasonals = _seasonals(close)
         return JSONResponse({"symbol": symbol, "performance": perf, "seasonals": seasonals})
     except Exception:
         return JSONResponse({"symbol": symbol,
                              "performance": {"1W":None,"1M":None,"3M":None,"6M":None,"YTD":None,"1Y":None},
                              "seasonals": {}})
+
+@app.get("/api/news")
+async def api_news(symbol: str = Query(...)):
+    data = await _finnhub_news(symbol, 40)
+    if not data: data = await _newsapi_news(symbol, 40)
+    return JSONResponse(data or [])
+
+@app.get("/api/sentiment")
+async def api_sentiment(symbol: str = Query(...)):
+    items = await _finnhub_news(symbol, 40) or await _newsapi_news(symbol, 40)
+    score = _sentiment_from_titles(items)
+    return JSONResponse({"symbol": symbol, "compound": score})
+
+@app.get("/api/market-news")
+async def api_market_news():
+    now=_now(); c=CACHE["market_news"]
+    if c["data"] and now-c["ts"]<TTL["market_news"]: return JSONResponse(c["data"])
+    data=await _market_news(60)
+    c["data"]=data; c["ts"]=now
+    return JSONResponse(data)
 
 if __name__ == "__main__":
     import uvicorn
