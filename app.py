@@ -35,7 +35,7 @@ WATCHLIST = [
     "JPM","BAC","WFC","GS","MS","V","MA","AXP","BRK-B","SCHW",
     "KO","PEP","PG","MCD","COST","HD","LOW","DIS","NKE","SBUX","TGT","WMT",
     "T","VZ","CMCSA","XOM","CVX","COP","CAT","BA","GE","UPS","FDX","DE",
-    "UNH","LLY","MRK","ABBV","JNJ","PFE","UBER","LYFT","BKNG","SPY","QQQ","DIA","IWM"
+    "UNH","LLY","MRK","ABBV","JNJ","PFE","UBER","BKNG","SPY","QQQ","DIA","IWM"
 ]
 
 def _now() -> float: return time.time()
@@ -65,15 +65,15 @@ def _stooq_symbol(sym: str) -> str:
 
 async def _stooq_bulk_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
     """
-    Robust: parse by 'Symbol' column so CSV order mismatches never break mapping.
-    change_pct = (Close - Open) / Open (intraday-ish)
+    Robust: parse by 'Symbol' key so CSV order mismatches never break mapping.
+    If 'Open' missing, set change_pct to 0.0 (so movers still populate).
     """
     url = "https://stooq.com/q/l/"
     s_param = ",".join([_stooq_symbol(s) for s in symbols])
     r = await _get(url, params={"s": s_param, "f": "sd2t2ohlc"})
     out: List[Dict[str, Any]] = []
     if not r:
-        return [{"symbol": s, "price": None, "change_pct": None} for s in symbols]
+        return [{"symbol": s, "price": None, "change_pct": 0.0} for s in symbols]
 
     reader = csv.DictReader(io.StringIO(r.text))
     rows_by_sym = { (row.get("Symbol") or "").strip().lower(): row for row in reader }
@@ -81,7 +81,8 @@ async def _stooq_bulk_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
     for s in symbols:
         key = _stooq_symbol(s)
         row = rows_by_sym.get(key)
-        price = chg = None
+        price = None
+        chg = 0.0
         try:
             if row:
                 c = None if row.get("Close") in (None, "", "-") else float(row["Close"])
