@@ -11,7 +11,6 @@ from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-# ---------- paths ----------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -30,19 +29,15 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "").strip()
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "").strip()
 
-# Big watchlist to always fill the bar
 WATCHLIST = [
     "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","AVGO","AMD","NFLX","ADBE",
     "INTC","CSCO","QCOM","TXN","CRM","ORCL","IBM","NOW","SNOW","ABNB","SHOP","PYPL",
     "JPM","BAC","WFC","GS","MS","V","MA","AXP","BRK-B","SCHW",
     "KO","PEP","PG","MCD","COST","HD","LOW","DIS","NKE","SBUX","TGT","WMT",
-    "T","VZ","CMCSA",
-    "XOM","CVX","COP","CAT","BA","GE","UPS","FDX","DE",
-    "UNH","LLY","MRK","ABBV","JNJ","PFE",
-    "UBER","LYFT","BKNG","SPY","QQQ","DIA","IWM"
+    "T","VZ","CMCSA","XOM","CVX","COP","CAT","BA","GE","UPS","FDX","DE",
+    "UNH","LLY","MRK","ABBV","JNJ","PFE","UBER","LYFT","BKNG","SPY","QQQ","DIA","IWM"
 ]
 
-# ---------- caching ----------
 def _now() -> float: return time.time()
 CACHE: Dict[str, Dict[str, Any]] = {
     "tickers": {"ts": 0.0, "data": None},
@@ -50,8 +45,11 @@ CACHE: Dict[str, Dict[str, Any]] = {
 }
 TTL = {"tickers": 45, "market_news": 180}
 
-# ---------- http helper ----------
-UA = {"User-Agent": "MarketTerminal/1.3"}
+UA = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+}
+
 async def _get(url: str, params: Dict[str, Any] | None = None, timeout: float = 8.0):
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=4.0), headers=UA) as client:
@@ -62,30 +60,35 @@ async def _get(url: str, params: Dict[str, Any] | None = None, timeout: float = 
         pass
     return None
 
-# ---------- Stooq quotes/history ----------
 def _stooq_symbol(sym: str) -> str:
     return f"{sym.lower().replace('.', '-').replace('_', '-')}.us"
 
 async def _stooq_bulk_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
-    # % change = (Close-Open)/Open — fast and single request
+    """
+    Robust: parse by 'Symbol' column so CSV order mismatches never break mapping.
+    change_pct = (Close - Open) / Open (intraday-ish)
+    """
     url = "https://stooq.com/q/l/"
     s_param = ",".join([_stooq_symbol(s) for s in symbols])
     r = await _get(url, params={"s": s_param, "f": "sd2t2ohlc"})
+    out: List[Dict[str, Any]] = []
     if not r:
         return [{"symbol": s, "price": None, "change_pct": None} for s in symbols]
-    rows = list(csv.reader(io.StringIO(r.text)))
-    if rows and rows[0] and rows[0][0].lower().startswith("symbol"):
-        rows = rows[1:]
-    out=[]
-    for i, s in enumerate(symbols):
+
+    reader = csv.DictReader(io.StringIO(r.text))
+    rows_by_sym = { (row.get("Symbol") or "").strip().lower(): row for row in reader }
+
+    for s in symbols:
+        key = _stooq_symbol(s)
+        row = rows_by_sym.get(key)
         price = chg = None
-        row = rows[i] if i < len(rows) else None
         try:
-            close = float(row[6]) if row and row[6] not in ("-", "", None) else None
-            opn   = float(row[3]) if row and row[3] not in ("-", "", None) else None
-            if close is not None: price = round(close, 2)
-            if close is not None and opn not in (None, 0):
-                chg = round((close - opn) / opn * 100.0, 2)
+            if row:
+                c = None if row.get("Close") in (None, "", "-") else float(row["Close"])
+                o = None if row.get("Open")  in (None, "", "-") else float(row["Open"])
+                if c is not None: price = round(c, 2)
+                if c is not None and o not in (None, 0):
+                    chg = round((c - o) / o * 100.0, 2)
         except Exception:
             pass
         out.append({"symbol": s, "price": price, "change_pct": chg})
@@ -123,7 +126,6 @@ def _seasonals(close: pd.Series) -> Dict[str, List[List[float]]]:
         out[str(y)] = pts
     return out
 
-# ---------- news & sentiment ----------
 analyzer = SentimentIntensityAnalyzer()
 
 async def _finnhub_news(symbol: str, limit=30) -> List[Dict[str, Any]]:
@@ -182,7 +184,6 @@ def _sentiment_from_titles(items: List[Dict[str, Any]]) -> float:
         scores.append(s)
     return float(pd.Series(scores).mean()) if scores else 0.0
 
-# ---------- tiny profiles ----------
 CURATED_DESC = {
     "AAPL":"Apple designs iPhone, Mac and services like the App Store and iCloud.",
     "MSFT":"Microsoft builds Windows, Office and Azure cloud services.",
@@ -199,7 +200,6 @@ async def _profile(symbol: str) -> Dict[str, str]:
         return {"symbol":symbol, "name":symbol, "description":CURATED_DESC[symbol]}
     return {"symbol":symbol, "name":symbol, "description":"Publicly traded U.S. company."}
 
-# ---------- routes ----------
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     idx = os.path.join(TEMPLATES_DIR, "index.html")
