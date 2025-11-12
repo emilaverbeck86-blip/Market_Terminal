@@ -1,36 +1,40 @@
-// Fast endpoints + robust UI. TV tile is movable (drag header) and resizable (corner handle).
+// Robust startup + pure black/white theme. Fixes ticker/movers/insights and TV interactions.
+
 const ENDPOINTS={
   tickers:"/api/tickers", movers:"/api/movers", profile:"/api/profile",
   metrics:"/api/metrics", news:"/api/news", mktnews:"/api/market-news",
   sentiment:"/api/sentiment"
 };
 
-const tickerScroll=document.getElementById('tickerScroll');
-const tvContainer=document.getElementById('tv_container');
-const chartTitle=document.getElementById('chartTitle');
-const newsList=document.getElementById('newsList');
-const marketNewsList=document.getElementById('marketNewsList');
-const gainersBody=document.getElementById('gainersBody');
-const losersBody=document.getElementById('losersBody');
-const companyBox=document.getElementById('companyBox');
-const gridRoot=document.getElementById('gridRoot');
-const themeToggle=document.getElementById('themeToggle');
-const settingsBtn=document.getElementById('settingsBtn');
-const settingsMenu=document.getElementById('settingsMenu');
-const nasdaqBtn=document.getElementById('btnNasdaq');
-const spxBtn=document.getElementById('btnSPX');
+const qs = id => document.getElementById(id);
 
-const perfGrid=document.getElementById('perfGrid');
-const seasonalsCanvas=document.getElementById('seasonalsCanvas');
-const insightsTitle=document.getElementById('insightsTitle');
-const gaugeCanvas=document.getElementById('gaugeCanvas');
+// DOM
+const tickerScroll=qs('tickerScroll');
+const tvContainer=qs('tv_container');
+const chartTitle=qs('chartTitle');
+const newsList=qs('newsList');
+const marketNewsList=qs('marketNewsList');
+const gainersBody=qs('gainersBody');
+const losersBody=qs('losersBody');
+const companyBox=qs('companyBox');
+const gridRoot=qs('gridRoot');
+const themeToggle=qs('themeToggle');
+const settingsBtn=qs('settingsBtn');
+const settingsMenu=qs('settingsMenu');
+const nasdaqBtn=qs('btnNasdaq');
+const spxBtn=qs('btnSPX');
+
+const perfGrid=qs('perfGrid');
+const seasonalsCanvas=qs('seasonalsCanvas');
+const insightsTitle=qs('insightsTitle');
+const gaugeCanvas=qs('gaugeCanvas');
 const gctx=gaugeCanvas.getContext('2d');
-const gaugeLabel=document.getElementById('gaugeLabel');
+const gaugeLabel=qs('gaugeLabel');
 
 let currentSymbol=null, currentTVOverride=null;
 let lastSeasonals=null, lastCompound=0;
 
-// ---------- helpers ----------
+// --- robust fetch with timeout ---
 function fetchJSON(url, {timeout=10000, params} = {}){
   const ctrl=new AbortController();
   const id=setTimeout(()=>ctrl.abort(), timeout);
@@ -43,8 +47,8 @@ const fmtPrice=v=>(typeof v==='number'&&isFinite(v))?v.toFixed(2):'—';
 const fmtChange=v=>(v==null||!isFinite(v))?'—':`${v>0?'+':(v<0?'−':'')}${Math.abs(v).toFixed(2)}%`;
 function applyChangeClass(el,v){ el.className='chg '+(v>0?'pos':(v<0?'neg':'neu')); }
 
-// ---------- theme + settings ----------
-(function(){
+// --- theme & settings ---
+(() => {
   let open=false;
   const close=()=>{ settingsMenu.classList.remove('open'); open=false; };
   settingsBtn.addEventListener('click',(e)=>{ e.stopPropagation(); open=!open; settingsMenu.classList.toggle('open', open); });
@@ -62,8 +66,8 @@ function applyChangeClass(el,v){ el.className='chg '+(v>0?'pos':(v<0?'neg':'neu'
   });
 })();
 
-// ---------- drag-order (header only) ----------
-(function(){
+// --- drag order (header only) ---
+(() => {
   const orderKey='mt_tile_order';
   const saved=JSON.parse(localStorage.getItem(orderKey)||'[]');
   if(saved.length){ saved.forEach(id=>{ const el=document.getElementById(id); if(el) gridRoot.appendChild(el); }); }
@@ -86,7 +90,7 @@ function applyChangeClass(el,v){ el.className='chg '+(v>0?'pos':(v<0?'neg':'neu'
     dragEl.classList.remove('dragging');
     if(placeholder){ placeholder.replaceWith(dragEl); placeholder=null; }
     const ids=[...gridRoot.querySelectorAll('.card')].map(n=>n.id);
-    localStorage.setItem('mt_tile_order', JSON.stringify(ids));
+    localStorage.setItem(orderKey, JSON.stringify(ids));
     dragEl=null;
   });
   function getAfter(container, y){
@@ -100,8 +104,8 @@ function applyChangeClass(el,v){ el.className='chg '+(v>0?'pos':(v<0?'neg':'neu'
   }
 })();
 
-// ---------- snap-resize (chart + insights resizable) ----------
-(function initSnapResize(){
+// --- snap-resize (chart & insights & news) ---
+(() => {
   const GAP=14, ROW_UNIT=90;
   const cards=[...document.querySelectorAll('.resizable')];
   let outline=null;
@@ -147,7 +151,7 @@ function applyChangeClass(el,v){ el.className='chg '+(v>0?'pos':(v<0?'neg':'neu'
   });
 })();
 
-// ---------- TradingView ----------
+// --- TradingView ---
 const TV_EXCHANGE={AAPL:"NASDAQ",MSFT:"NASDAQ",NVDA:"NASDAQ",AMZN:"NASDAQ",META:"NASDAQ",GOOGL:"NASDAQ",TSLA:"NASDAQ",AVGO:"NASDAQ",AMD:"NASDAQ",NFLX:"NASDAQ",ADBE:"NASDAQ",INTC:"NASDAQ",CSCO:"NASDAQ",QCOM:"NASDAQ",TXN:"NASDAQ",CRM:"NYSE",ORCL:"NYSE",IBM:"NYSE",NOW:"NYSE",SNOW:"NYSE",ABNB:"NASDAQ",SHOP:"NYSE",PYPL:"NASDAQ",JPM:"NYSE",BAC:"NYSE",WFC:"NYSE",GS:"NYSE",MS:"NYSE",V:"NYSE",MA:"NYSE",AXP:"NYSE","BRK-B":"NYSE",SCHW:"NYSE",KO:"NYSE",PEP:"NASDAQ",PG:"NYSE",MCD:"NYSE",COST:"NASDAQ",HD:"NYSE",LOW:"NYSE",DIS:"NYSE",NKE:"NYSE",SBUX:"NASDAQ",TGT:"NYSE",WMT:"NYSE",T:"NYSE",VZ:"NYSE",CMCSA:"NASDAQ",XOM:"NYSE",CVX:"NYSE",COP:"NYSE",CAT:"NYSE",BA:"NYSE",GE:"NYSE",UPS:"NYSE",FDX:"NYSE",DE:"NYSE",UNH:"NYSE",LLY:"NYSE",MRK:"NYSE",ABBV:"NYSE",JNJ:"NYSE",PFE:"NYSE",UBER:"NYSE",LYFT:"NASDAQ",BKNG:"NASDAQ",SPY:"AMEX",QQQ:"NASDAQ",DIA:"AMEX",IWM:"AMEX"};
 const toTV=s=>`${(TV_EXCHANGE[s]||'NASDAQ')}:${s}`;
 function mountTradingView(symbol, tvOverride=null){
@@ -172,7 +176,7 @@ function mountTradingView(symbol, tvOverride=null){
   });
 }
 
-// ---------- Ticker bar ----------
+// --- ticker bar ---
 const tickerNodes=new Map();
 function renderTicker(items){
   tickerScroll.innerHTML=''; tickerNodes.clear();
@@ -207,10 +211,13 @@ async function loadTickers(){
   try{
     const data=await fetchJSON(ENDPOINTS.tickers, {timeout: 12000});
     if(!tickerScroll.childElementCount) renderTicker(data); else updateTicker(data);
-  }catch(e){ if(!tickerScroll.childElementCount) renderTicker([{symbol:"AAPL"},{symbol:"MSFT"},{symbol:"NVDA"}]); }
+  }catch(e){
+    if(!tickerScroll.childElementCount) tickerScroll.innerHTML='<div class="muted">tickers unavailable</div>';
+    console.error("tickers", e);
+  }
 }
 
-// ---------- Movers ----------
+// --- movers ---
 function renderMovers(m){
   const fill=(tbody,arr)=>{
     tbody.innerHTML='';
@@ -219,17 +226,15 @@ function renderMovers(m){
       const tr=document.createElement('tr');
       tr.innerHTML=`<td>${r.symbol}</td><td>${fmtPrice(r.price)}</td><td class="${r.change_pct>0?'pos':(r.change_pct<0?'neg':'neu')}">${fmtChange(r.change_pct)}</td>`;
       tr.style.cursor='pointer';
-      tr.addEventListener('mouseenter',()=>tr.style.background='rgba(255,255,255,.04)');
-      tr.addEventListener('mouseleave',()=>tr.style.background='transparent');
       tr.addEventListener('click',()=>onSymbolSelect(r.symbol));
       tbody.appendChild(tr);
     });
   };
   fill(gainersBody, m.gainers||[]); fill(losersBody, m.losers||[]);
 }
-async function loadMovers(){ try{ renderMovers(await fetchJSON(ENDPOINTS.movers, {timeout: 12000})); }catch{ renderMovers({gainers:[],losers:[]}); } }
+async function loadMovers(){ try{ renderMovers(await fetchJSON(ENDPOINTS.movers, {timeout: 12000})); }catch(e){ console.error("movers", e); } }
 
-// ---------- Company ----------
+// --- company ---
 async function loadCompany(symbol){
   try{
     const p=await fetchJSON(ENDPOINTS.profile, {params:{symbol}, timeout: 8000});
@@ -237,7 +242,7 @@ async function loadCompany(symbol){
   }catch{ companyBox.innerHTML='<div class="muted">No profile available at this time.</div>'; }
 }
 
-// ---------- Insights ----------
+// --- insights (perf + seasonals + sentiment gauge) ---
 function renderPerf(perf){
   const labels=["1W","1M","3M","6M","YTD","1Y"]; perfGrid.innerHTML='';
   labels.forEach(k=>{
@@ -254,10 +259,9 @@ function drawSeasonals(seasonals){
   const ctx=seasonalsCanvas.getContext('2d'); seasonalsCanvas.width=W; seasonalsCanvas.height=H; ctx.clearRect(0,0,W,H);
   const keys=Object.keys(lastSeasonals).sort().reverse().slice(0,3);
   if(!keys.length) return;
-  const theme=document.documentElement.getAttribute('data-theme');
-  const gridColor = theme==='light' ? 'rgba(0,0,0,.12)' : 'rgba(255,255,255,.08)';
-  const axisColor = theme==='light' ? '#333' : '#ddd';
-  const colors={"2025":"#3b82f6","2024":"#22c55e","2023":"#f59e0b"};
+  const gridColor = 'rgba(255,255,255,.08)';
+  const axisColor = '#ddd';
+  const colors={"2025":"#fff","2024":"#aaa","2023":"#666"};
   let minX=1,maxX=1,minY=0,maxY=0;
   keys.forEach(k=> (lastSeasonals[k]||[]).forEach(([x,y])=>{minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);} ));
   if(minY===maxY){minY-=1;maxY+=1;}
@@ -265,13 +269,12 @@ function drawSeasonals(seasonals){
   ctx.strokeStyle=gridColor; ctx.beginPath(); [0.25,0.5,0.75].forEach(f=>{const x=pad+f*(W-2*pad); ctx.moveTo(x,pad); ctx.lineTo(x,H-pad);}); ctx.stroke();
   ctx.strokeStyle=axisColor; ctx.beginPath(); ctx.moveTo(pad,H-pad); ctx.lineTo(W-pad,H-pad); ctx.stroke();
   keys.forEach(k=>{ const pts=lastSeasonals[k]||[]; if(!pts.length) return;
-    const c=colors[k]||'#aaa'; ctx.strokeStyle=c; ctx.lineWidth=2; ctx.beginPath();
+    const c=colors[k]||'#fff'; ctx.strokeStyle=c; ctx.lineWidth=2; ctx.beginPath();
     pts.forEach(([x,y],i)=>{ const X=xS(x), Y=yS(y); if(i===0) ctx.moveTo(X,Y); else ctx.lineTo(X,Y); }); ctx.stroke();
   });
 }
 new ResizeObserver(()=>drawSeasonals(lastSeasonals)).observe(seasonalsCanvas.parentElement);
 
-let lastCompound=0;
 function drawGauge(comp=0){
   lastCompound=comp;
   const W=gaugeCanvas.clientWidth, H=gaugeCanvas.clientHeight;
@@ -279,13 +282,12 @@ function drawGauge(comp=0){
   const c=gctx; c.clearRect(0,0,W,H);
   const cx=W/2, cy=H*0.95, r=Math.min(W, H*1.9)/2 - 8;
   const grad=c.createLinearGradient(cx-r,0,cx+r,0);
-  grad.addColorStop(0,"#ff5a5f"); grad.addColorStop(0.5,"#ffd166"); grad.addColorStop(1,"#2ecc71");
+  grad.addColorStop(0,"#ff4d4d"); grad.addColorStop(0.5,"#bbbbbb"); grad.addColorStop(1,"#35d07f");
   c.lineWidth=10; c.strokeStyle=grad; c.beginPath(); c.arc(cx,cy,r,Math.PI,2*Math.PI); c.stroke();
   const angle = Math.PI + (comp+1)*Math.PI/2;
   const nx = cx + (r-6)*Math.cos(angle), ny = cy + (r-6)*Math.sin(angle);
-  c.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--text').trim()||'#fff';
-  c.lineWidth=3; c.beginPath(); c.moveTo(cx,cy); c.lineTo(nx,ny); c.stroke();
-  c.beginPath(); c.arc(cx,cy,4,0,2*Math.PI); c.fillStyle=c.strokeStyle; c.fill();
+  c.strokeStyle='#ffffff'; c.lineWidth=3; c.beginPath(); c.moveTo(cx,cy); c.lineTo(nx,ny); c.stroke();
+  c.beginPath(); c.arc(cx,cy,4,0,2*Math.PI); c.fillStyle='#ffffff'; c.fill();
   let label='Neutral'; if(comp>0.05) label=`Bullish ${(comp*100).toFixed(0)}%`; else if(comp<-0.05) label=`Bearish ${Math.abs(comp*100).toFixed(0)}%`;
   gaugeLabel.textContent=label;
 }
@@ -296,14 +298,14 @@ async function loadInsights(symbol){
   try{
     const m=await fetchJSON(ENDPOINTS.metrics, {params:{symbol}, timeout: 12000});
     renderPerf(m.performance); drawSeasonals(m.seasonals||{});
-  }catch{}
+  }catch(e){ console.error("metrics", e); }
   try{
     const s=await fetchJSON(ENDPOINTS.sentiment, {params:{symbol}, timeout: 12000});
     drawGauge(typeof s.compound==='number'?s.compound:0);
-  }catch{}
+  }catch(e){ console.error("sentiment", e); }
 }
 
-// ---------- News ----------
+// --- news ---
 function renderNews(container, items){
   container.innerHTML='';
   if(!Array.isArray(items)||!items.length){ container.innerHTML='<div class="muted">No headlines.</div>'; return; }
@@ -317,7 +319,7 @@ function renderNews(container, items){
 async function loadNews(symbol){
   newsList.innerHTML='<div class="fallback-note">Loading news…</div>';
   try{ renderNews(newsList, await fetchJSON(ENDPOINTS.news, {params:{symbol}, timeout: 12000})); }
-  catch{ newsList.innerHTML='<div class="muted">Failed to load news.</div>'; }
+  catch(e){ newsList.innerHTML='<div class="muted">Failed to load news.</div>'; }
 }
 async function loadMarketNews(){
   marketNewsList.innerHTML='<div class="fallback-note">Loading market headlines…</div>';
@@ -325,21 +327,24 @@ async function loadMarketNews(){
   catch{ marketNewsList.innerHTML='<div class="muted">Failed to load market headlines.</div>'; }
 }
 
-// ---------- Selection ----------
+// --- selection ---
 async function onSymbolSelect(symbol, tvOverride=null){
   currentSymbol=symbol; currentTVOverride=tvOverride;
   mountTradingView(symbol, tvOverride);
   await Promise.allSettled([ loadCompany(symbol), loadInsights(symbol), loadNews(symbol) ]);
 }
 
-// ---------- Shortcuts (index values, data via ETFs) ----------
+// --- shortcuts ---
 nasdaqBtn.addEventListener('click', ()=> onSymbolSelect('QQQ', 'NASDAQ:IXIC'));
 spxBtn.addEventListener('click', ()=> onSymbolSelect('SPY',  'TVC:SPX'));
 
-// ---------- Boot ----------
+// --- startup ---
 document.addEventListener('DOMContentLoaded', ()=>{
   loadTickers(); setInterval(loadTickers, 45_000);
   loadMovers();  setInterval(loadMovers,  60_000);
   loadMarketNews(); setInterval(loadMarketNews, 180_000);
   setTimeout(()=>{ if(!currentSymbol) onSymbolSelect('NVDA'); }, 700);
 });
+
+// helpful: surface any JS error instead of silently blocking UI
+window.addEventListener('error', e=>{ console.error('JS error:', e.message, e.filename, e.lineno); });
