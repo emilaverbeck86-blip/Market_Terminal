@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+# --- paths / app ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -29,6 +30,7 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "").strip()
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "").strip()
 
+# A big, liquid watchlist to keep ticker bar full
 WATCHLIST = [
     "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","AVGO","AMD","NFLX","ADBE",
     "INTC","CSCO","QCOM","TXN","CRM","ORCL","IBM","NOW","SNOW","ABNB","SHOP","PYPL",
@@ -38,12 +40,13 @@ WATCHLIST = [
     "UNH","LLY","MRK","ABBV","JNJ","PFE","UBER","BKNG","SPY","QQQ","DIA","IWM"
 ]
 
+# --- caching ---
 def _now() -> float: return time.time()
 CACHE: Dict[str, Dict[str, Any]] = {
     "tickers": {"ts": 0.0, "data": None},
     "market_news": {"ts": 0.0, "data": None},
 }
-TTL = {"tickers": 45, "market_news": 180}
+TTL = {"tickers": 25, "market_news": 180}
 
 UA = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -60,29 +63,55 @@ async def _get(url: str, params: Dict[str, Any] | None = None, timeout: float = 
         pass
     return None
 
+# ---------- Quotes: Yahoo primary, Stooq fallback ----------
+async def _yahoo_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
+    # Yahoo public quote endpoint (no key)
+    out: List[Dict[str, Any]] = []
+    if not symbols: return out
+    # batch up to ~40 symbols per call
+    chunks = [symbols[i:i+40] for i in range(0, len(symbols), 40)]
+    for ch in chunks:
+        r = await _get("https://query1.finance.yahoo.com/v7/finance/quote",
+                       params={"symbols": ",".join(ch)})
+        if not r:
+            continue
+        data = r.json().get("quoteResponse", {}).get("result", [])
+        by_sym = {d.get("symbol", "").upper(): d for d in data}
+        for s in ch:
+            q = by_sym.get(s.upper()) or by_sym.get(s.replace(".", "-").upper())
+            price = q.get("regularMarketPrice") if q else None
+            chg = q.get("regularMarketChangePercent") if q else None
+            if price is not None:
+                try: price = round(float(price), 2)
+                except Exception: price = None
+            if chg is not None:
+                try: chg = round(float(chg), 2)
+                except Exception: chg = None
+            out.append({"symbol": s, "price": price, "change_pct": chg})
+    # make sure length matches
+    seen = {o["symbol"] for o in out}
+    for s in symbols:
+        if s not in seen:
+            out.append({"symbol": s, "price": None, "change_pct": None})
+    return out
+
 def _stooq_symbol(sym: str) -> str:
     return f"{sym.lower().replace('.', '-').replace('_', '-')}.us"
 
-async def _stooq_bulk_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
-    """
-    Robust: parse by 'Symbol' key so CSV order mismatches never break mapping.
-    If 'Open' missing, set change_pct to 0.0 (so movers still populate).
-    """
+async def _stooq_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
     url = "https://stooq.com/q/l/"
     s_param = ",".join([_stooq_symbol(s) for s in symbols])
     r = await _get(url, params={"s": s_param, "f": "sd2t2ohlc"})
-    out: List[Dict[str, Any]] = []
+    out: List[Dict[str, Any]] = [{"symbol": s, "price": None, "change_pct": None} for s in symbols]
     if not r:
-        return [{"symbol": s, "price": None, "change_pct": 0.0} for s in symbols]
-
+        return out
     reader = csv.DictReader(io.StringIO(r.text))
     rows_by_sym = { (row.get("Symbol") or "").strip().lower(): row for row in reader }
-
+    mapped: Dict[str, Dict[str, Any]] = {}
     for s in symbols:
         key = _stooq_symbol(s)
         row = rows_by_sym.get(key)
-        price = None
-        chg = 0.0
+        price, chg = None, None
         try:
             if row:
                 c = None if row.get("Close") in (None, "", "-") else float(row["Close"])
@@ -92,9 +121,21 @@ async def _stooq_bulk_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
                     chg = round((c - o) / o * 100.0, 2)
         except Exception:
             pass
-        out.append({"symbol": s, "price": price, "change_pct": chg})
-    return out
+        mapped[s] = {"symbol": s, "price": price, "change_pct": chg}
+    return [mapped[s] for s in symbols]
 
+async def _stable_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
+    data = await _yahoo_quotes(symbols)
+    # if Yahoo failed entirely (rare), try Stooq
+    if all(d.get("price") is None for d in data):
+        data = await _stooq_quotes(symbols)
+    # final guard: set change_pct to 0 if missing but price present (keeps movers alive)
+    for d in data:
+        if d["price"] is not None and d.get("change_pct") is None:
+            d["change_pct"] = 0.0
+    return data
+
+# ---------- Metrics & profile ----------
 async def _stooq_history(sym: str, days: int = 800) -> pd.Series:
     r = await _get("https://stooq.com/q/d/l/", params={"s": _stooq_symbol(sym), "i": "d"})
     if not r: return pd.Series(dtype=float)
@@ -112,21 +153,23 @@ def _ret(close: pd.Series, bdays: int) -> Optional[float]:
     if not start: return None
     return float((last - start) / start * 100.0)
 
-def _seasonals(close: pd.Series) -> Dict[str, List[List[float]]]:
-    if close is None or close.empty: return {}
-    years = sorted(list(set(close.index.year)))[-3:]
-    out: Dict[str, List[List[float]]] = {}
-    for y in years:
-        seg = close[close.index.year == y].dropna()
-        if seg.empty: continue
-        base = float(seg.iloc[0]) or 0.0
-        pts=[]
-        for n, (_, v) in enumerate(seg.items(), start=1):
-            pct = ((float(v) - base) / base * 100.0) if base else 0.0
-            pts.append([n, pct])
-        out[str(y)] = pts
-    return out
+CURATED_DESC = {
+    "AAPL":"Apple designs iPhone, Mac and services like the App Store and iCloud.",
+    "MSFT":"Microsoft builds Windows, Office and Azure cloud services.",
+    "NVDA":"NVIDIA designs GPUs and AI accelerators.",
+    "AMZN":"Amazon runs e-commerce marketplaces and AWS cloud.",
+    "META":"Meta operates Facebook, Instagram and WhatsApp.",
+    "GOOGL":"Alphabet spans Search, YouTube, Android and Cloud.",
+    "TSLA":"Tesla manufactures EVs and energy products.",
+    "SPY":"ETF tracking the S&P 500 index.",
+    "QQQ":"ETF tracking the Nasdaq-100 index."
+}
+async def _profile(symbol: str) -> Dict[str, str]:
+    if symbol in CURATED_DESC:
+        return {"symbol":symbol, "name":symbol, "description":CURATED_DESC[symbol]}
+    return {"symbol":symbol, "name":symbol, "description":"Publicly traded U.S. company."}
 
+# ---------- News ----------
 analyzer = SentimentIntensityAnalyzer()
 
 async def _finnhub_news(symbol: str, limit=30) -> List[Dict[str, Any]]:
@@ -175,32 +218,7 @@ async def _market_news(limit=30)->List[Dict[str,Any]]:
                     for a in data.get("articles", [])]
     return []
 
-def _sentiment_from_titles(items: List[Dict[str, Any]]) -> float:
-    if not items: return 0.0
-    scores=[]
-    for n in items[:25]:
-        text = (n.get("title") or "") + " " + (n.get("summary") or "")
-        if not text.strip(): continue
-        s = analyzer.polarity_scores(text)["compound"]
-        scores.append(s)
-    return float(pd.Series(scores).mean()) if scores else 0.0
-
-CURATED_DESC = {
-    "AAPL":"Apple designs iPhone, Mac and services like the App Store and iCloud.",
-    "MSFT":"Microsoft builds Windows, Office and Azure cloud services.",
-    "NVDA":"NVIDIA designs GPUs and AI accelerators.",
-    "AMZN":"Amazon runs e-commerce marketplaces and AWS cloud.",
-    "META":"Meta operates Facebook, Instagram and WhatsApp.",
-    "GOOGL":"Alphabet spans Search, YouTube, Android and Cloud.",
-    "TSLA":"Tesla manufactures EVs and energy products.",
-    "SPY":"ETF tracking the S&P 500 index.",
-    "QQQ":"ETF tracking the Nasdaq-100 index."
-}
-async def _profile(symbol: str) -> Dict[str, str]:
-    if symbol in CURATED_DESC:
-        return {"symbol":symbol, "name":symbol, "description":CURATED_DESC[symbol]}
-    return {"symbol":symbol, "name":symbol, "description":"Publicly traded U.S. company."}
-
+# ---------- routes ----------
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     idx = os.path.join(TEMPLATES_DIR, "index.html")
@@ -211,13 +229,13 @@ async def home(request: Request):
 async def api_tickers():
     now=_now(); c=CACHE["tickers"]
     if c["data"] and now-c["ts"]<TTL["tickers"]: return JSONResponse(c["data"])
-    data=await _stooq_bulk_quotes(WATCHLIST)
+    data=await _stable_quotes(WATCHLIST)
     c["data"]=data; c["ts"]=now
     return JSONResponse(data)
 
 @app.get("/api/movers")
 async def api_movers():
-    rows = CACHE["tickers"]["data"] or (await _stooq_bulk_quotes(WATCHLIST))
+    rows = CACHE["tickers"]["data"] or (await _stable_quotes(WATCHLIST))
     v = [r for r in rows if isinstance(r.get("change_pct"), (int,float))]
     v.sort(key=lambda x: x["change_pct"], reverse=True)
     return JSONResponse({"gainers": v[:10], "losers": list(reversed(v[-10:]))})
@@ -235,24 +253,18 @@ async def api_metrics(symbol: str = Query(...)):
         y = dt.datetime.utcnow().year
         yseg = close[close.index.year == y]
         if not yseg.empty: perf["YTD"] = float((close.iloc[-1] - yseg.iloc[0]) / yseg.iloc[0] * 100.0)
-        seasonals = _seasonals(close)
-        return JSONResponse({"symbol": symbol, "performance": perf, "seasonals": seasonals})
+        prof = await _profile(symbol)
+        return JSONResponse({"symbol": symbol, "performance": perf, "profile": prof})
     except Exception:
         return JSONResponse({"symbol": symbol,
                              "performance": {"1W":None,"1M":None,"3M":None,"6M":None,"YTD":None,"1Y":None},
-                             "seasonals": {}})
+                             "profile": await _profile(symbol)})
 
 @app.get("/api/news")
 async def api_news(symbol: str = Query(...)):
     data = await _finnhub_news(symbol, 40)
     if not data: data = await _newsapi_news(symbol, 40)
     return JSONResponse(data or [])
-
-@app.get("/api/sentiment")
-async def api_sentiment(symbol: str = Query(...)):
-    items = await _finnhub_news(symbol, 40) or await _newsapi_news(symbol, 40)
-    score = _sentiment_from_titles(items)
-    return JSONResponse({"symbol": symbol, "compound": score})
 
 @app.get("/api/market-news")
 async def api_market_news():
