@@ -1,103 +1,184 @@
 <!doctype html>
 <html lang="en" data-theme="dark">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Market Terminal</title>
-  <link rel="stylesheet" href="/static/style.css" />
-  <script src="https://s3.tradingview.com/tv.js"></script>
-</head>
-<body>
-  <header class="topbar">
-    <div class="brand">Market&nbsp;Terminal</div>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Market Terminal</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <script src="https://s3.tradingview.com/tv.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Market&nbsp;Terminal</div>
 
-    <div class="ticker" id="tickerWrap">
-      <div class="ticker-track" id="tickerTrack"></div>
-    </div>
-
-    <div class="right-actions">
-      <div class="quick-links">
-        <button class="ql" id="btnSPX">S&P 500</button>
-        <button class="ql" id="btnNasdaq">NASDAQ</button>
+      <div class="ticker" id="tickerWrap">
+        <div class="ticker-track" id="tickerTrack"></div>
       </div>
-      <div class="settings">
-        <button id="settingsBtn">Settings ▾</button>
-        <div id="settingsMenu" class="menu">
-          <div class="row between">
-            <span>Theme</span>
-            <label class="switch">
-              <span class="icon left">☀️</span>
-              <input type="checkbox" id="themeToggle" />
-              <span class="slider"></span>
-              <span class="icon right">🌙</span>
-            </label>
+
+      <div class="right-actions">
+        <div class="quick-links">
+          <button class="ql" id="btnSPX">S&amp;P 500</button>
+          <button class="ql" id="btnNasdaq">NASDAQ</button>
+        </div>
+        <div class="settings">
+          <button id="settingsBtn">Settings ▾</button>
+          <div id="settingsMenu" class="menu">
+            <div class="row between">
+              <span>Theme</span>
+              <label class="switch">
+                <span class="icon left">☀️</span>
+                <input type="checkbox" id="themeToggle" />
+                <span class="slider"></span>
+                <span class="icon right">🌙</span>
+              </label>
+            </div>
+            <div class="row section">Tiles</div>
+            <div class="row">
+              <label>
+                <input
+                  type="checkbox"
+                  class="tile-toggle"
+                  data-target="tvCard"
+                  checked
+                />
+                Chart
+              </label>
+            </div>
+            <div class="row">
+              <label>
+                <input
+                  type="checkbox"
+                  class="tile-toggle"
+                  data-target="insightsCard"
+                  checked
+                />
+                Market Insights
+              </label>
+            </div>
+            <div class="row">
+              <label>
+                <input
+                  type="checkbox"
+                  class="tile-toggle"
+                  data-target="moversCard"
+                  checked
+                />
+                Top Movers
+              </label>
+            </div>
+            <div class="row">
+              <label>
+                <input
+                  type="checkbox"
+                  class="tile-toggle"
+                  data-target="newsCard"
+                  checked
+                />
+                News
+              </label>
+            </div>
+            <div class="row">
+              <label>
+                <input
+                  type="checkbox"
+                  class="tile-toggle"
+                  data-target="marketNewsCard"
+                  checked
+                />
+                Market News
+              </label>
+            </div>
           </div>
-          <div class="row section">Tiles</div>
-          <div class="row"><label><input type="checkbox" class="tile-toggle" data-target="tvCard" checked> Chart</label></div>
-          <div class="row"><label><input type="checkbox" class="tile-toggle" data-target="insightsCard" checked> Market Insights</label></div>
-          <div class="row"><label><input type="checkbox" class="tile-toggle" data-target="moversCard" checked> Top Movers</label></div>
-          <div class="row"><label><input type="checkbox" class="tile-toggle" data-target="newsCard" checked> News</label></div>
-          <div class="row"><label><input type="checkbox" class="tile-toggle" data-target="marketNewsCard" checked> Market News</label></div>
         </div>
       </div>
-    </div>
-  </header>
+    </header>
 
-  <main id="board" class="board">
-    <section id="tvCard" class="card resizable movable lane-left" style="width:62%;height:460px">
-      <div class="card-hd" draggable="true">
-        <h3 id="chartTitle">Chart</h3>
-        <button class="min-btn" data-hide="tvCard">–</button>
-      </div>
-      <div id="tv_container" class="tv-wrap"></div>
-      <div class="resize-handle" title="Resize"></div>
-    </section>
-
-    <section id="insightsCard" class="card resizable movable lane-right" style="width:36%;min-width:340px;height:320px">
-      <div class="card-hd" draggable="true">
-        <h3 id="insightsTitle">Market Insights</h3>
-        <button class="min-btn" data-hide="insightsCard">–</button>
-      </div>
-      <div class="insights lite">
-        <div id="perfGrid" class="perf-grid"></div>
-        <div id="coDesc" class="co-desc"></div>
-      </div>
-      <div class="resize-handle" title="Resize"></div>
-    </section>
-
-    <section id="moversCard" class="card resizable movable lane-right" style="width:36%;min-width:340px;height:320px">
-      <div class="card-hd" draggable="true">
-        <h3>Top Movers (Watchlist)</h3>
-        <button class="min-btn" data-hide="moversCard">–</button>
-      </div>
-      <div class="movers">
-        <div class="split">
-          <div><b>Top Gainers</b><table><tbody id="gainersBody"></tbody></table></div>
-          <div><b>Top Losers</b><table><tbody id="losersBody"></tbody></table></div>
+    <main id="board" class="board">
+      <!-- Chart -->
+      <section
+        id="tvCard"
+        class="card resizable movable lane-left"
+        style="width: 62%; height: 460px"
+      >
+        <div class="card-hd" draggable="true">
+          <h3 id="chartTitle">Chart</h3>
+          <button class="min-btn" data-hide="tvCard">−</button>
         </div>
-      </div>
-      <div class="resize-handle" title="Resize"></div>
-    </section>
+        <div id="tv_container" class="tv-wrap"></div>
+        <div class="resize-handle" title="Resize"></div>
+      </section>
 
-    <section id="newsCard" class="card resizable movable lane-left" style="width:62%;min-width:380px;height:360px">
-      <div class="card-hd" draggable="true">
-        <h3>News</h3>
-        <button class="min-btn" data-hide="newsCard">–</button>
-      </div>
-      <div id="newsList" class="news-list scrollable"></div>
-      <div class="resize-handle" title="Resize"></div>
-    </section>
+      <!-- Market Insights -->
+      <section
+        id="insightsCard"
+        class="card resizable movable lane-right"
+        style="width: 36%; min-width: 340px; height: 320px"
+      >
+        <div class="card-hd" draggable="true">
+          <h3 id="insightsTitle">Market Insights</h3>
+          <button class="min-btn" data-hide="insightsCard">−</button>
+        </div>
+        <div class="insights lite">
+          <div id="perfGrid" class="perf-grid"></div>
+          <div id="coDesc" class="co-desc"></div>
+        </div>
+        <div class="resize-handle" title="Resize"></div>
+      </section>
 
-    <section id="marketNewsCard" class="card resizable movable lane-left" style="width:62%;min-width:380px;height:320px">
-      <div class="card-hd" draggable="true">
-        <h3>Market News (US)</h3>
-        <button class="min-btn" data-hide="marketNewsCard">–</button>
-      </div>
-      <div id="marketNewsList" class="news-list scrollable"></div>
-      <div class="resize-handle" title="Resize"></div>
-    </section>
-  </main>
+      <!-- Top Movers -->
+      <section
+        id="moversCard"
+        class="card resizable movable lane-right"
+        style="width: 36%; min-width: 340px; height: 320px"
+      >
+        <div class="card-hd" draggable="true">
+          <h3>Top Movers (Watchlist)</h3>
+          <button class="min-btn" data-hide="moversCard">−</button>
+        </div>
+        <div class="movers">
+          <div class="split">
+            <div>
+              <b>Top Gainers</b>
+              <table><tbody id="gainersBody"></tbody></table>
+            </div>
+            <div>
+              <b>Top Losers</b>
+              <table><tbody id="losersBody"></tbody></table>
+            </div>
+          </div>
+        </div>
+        <div class="resize-handle" title="Resize"></div>
+      </section>
 
-  <script src="/static/main.js"></script>
-</body>
+      <!-- News -->
+      <section
+        id="newsCard"
+        class="card resizable movable lane-left"
+        style="width: 62%; min-width: 380px; height: 360px"
+      >
+        <div class="card-hd" draggable="true">
+          <h3>News</h3>
+          <button class="min-btn" data-hide="newsCard">−</button>
+        </div>
+        <div id="newsList" class="news-list scrollable"></div>
+        <div class="resize-handle" title="Resize"></div>
+      </section>
+
+      <!-- Market News -->
+      <section
+        id="marketNewsCard"
+        class="card resizable movable lane-left"
+        style="width: 62%; min-width: 380px; height: 320px"
+      >
+        <div class="card-hd" draggable="true">
+          <h3>Market News (US)</h3>
+          <button class="min-btn" data-hide="marketNewsCard">−</button>
+        </div>
+        <div id="marketNewsList" class="news-list scrollable"></div>
+        <div class="resize-handle" title="Resize"></div>
+      </section>
+    </main>
+
+    <script src="/static/main.js"></script>
+  </body>
 </html>
