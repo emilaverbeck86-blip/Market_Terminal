@@ -32,23 +32,19 @@
     </div>
   </header>
 
-  <!-- BOARD: flex wrap so other tiles flow around during live resize -->
+  <!-- Free board: two lanes, snap-under behavior -->
   <main id="board" class="board">
-    <!-- CHART -->
     <section id="tvCard" class="card resizable movable" style="width:100%;height:420px">
       <div class="card-hd" draggable="true">
         <h3 id="chartTitle">Chart</h3>
-        <button class="min-btn" data-hide="tvCard">–</button>
       </div>
       <div id="tv_container" class="tv-wrap"></div>
       <div class="resize-handle" title="Resize"></div>
     </section>
 
-    <!-- MARKET INSIGHTS (recoded: perf + company description only) -->
-    <section id="insightsCard" class="card resizable movable" style="width:48%;min-width:360px;height:320px">
+    <section id="insightsCard" class="card resizable movable lane-right" style="width:38%;min-width:360px;height:320px">
       <div class="card-hd" draggable="true">
         <h3 id="insightsTitle">Market Insights</h3>
-        <button class="min-btn" data-hide="insightsCard">–</button>
       </div>
       <div class="insights lite">
         <div id="perfGrid" class="perf-grid"></div>
@@ -57,11 +53,9 @@
       <div class="resize-handle" title="Resize"></div>
     </section>
 
-    <!-- MOVERS -->
-    <section id="moversCard" class="card resizable movable" style="width:48%;min-width:360px;height:320px">
+    <section id="moversCard" class="card resizable movable lane-right" style="width:38%;min-width:360px;height:320px">
       <div class="card-hd" draggable="true">
         <h3>Top Movers (Watchlist)</h3>
-        <button class="min-btn" data-hide="moversCard">–</button>
       </div>
       <div class="movers">
         <div class="split">
@@ -72,23 +66,17 @@
       <div class="resize-handle" title="Resize"></div>
     </section>
 
-    <!-- COMPANY (removed; merged into insights) -->
-
-    <!-- NEWS -->
-    <section id="newsCard" class="card resizable movable" style="width:60%;min-width:380px;height:360px">
+    <section id="newsCard" class="card resizable movable lane-left" style="width:58%;min-width:380px;height:360px">
       <div class="card-hd" draggable="true">
         <h3>News</h3>
-        <button class="min-btn" data-hide="newsCard">–</button>
       </div>
       <div id="newsList" class="news-list scrollable"></div>
       <div class="resize-handle" title="Resize"></div>
     </section>
 
-    <!-- MARKET NEWS -->
-    <section id="marketNewsCard" class="card resizable movable" style="width:38%;min-width:300px;height:360px">
+    <section id="marketNewsCard" class="card resizable movable lane-left" style="width:58%;min-width:380px;height:320px">
       <div class="card-hd" draggable="true">
         <h3>Market News (US)</h3>
-        <button class="min-btn" data-hide="marketNewsCard">–</button>
       </div>
       <div id="marketNewsList" class="news-list scrollable"></div>
       <div class="resize-handle" title="Resize"></div>
