@@ -32,8 +32,10 @@
     </div>
   </header>
 
-  <main id="gridRoot" class="grid">
-    <section id="tvCard" class="card span-2 row-4 resizable" data-allowed="1x3,1x4,2x3,2x4">
+  <!-- BOARD: flex wrap so other tiles flow around during live resize -->
+  <main id="board" class="board">
+    <!-- CHART -->
+    <section id="tvCard" class="card resizable movable" style="width:100%;height:420px">
       <div class="card-hd" draggable="true">
         <h3 id="chartTitle">Chart</h3>
         <button class="min-btn" data-hide="tvCard">–</button>
@@ -42,26 +44,21 @@
       <div class="resize-handle" title="Resize"></div>
     </section>
 
-    <section id="insightsCard" class="card row-3 resizable" data-allowed="1x3,1x4,2x3">
+    <!-- MARKET INSIGHTS (recoded: perf + company description only) -->
+    <section id="insightsCard" class="card resizable movable" style="width:48%;min-width:360px;height:320px">
       <div class="card-hd" draggable="true">
         <h3 id="insightsTitle">Market Insights</h3>
         <button class="min-btn" data-hide="insightsCard">–</button>
       </div>
-      <div class="insights">
+      <div class="insights lite">
         <div id="perfGrid" class="perf-grid"></div>
-        <div class="seasonals">
-          <canvas id="seasonalsCanvas"></canvas>
-          <div class="legend"><span class="c2025">2025</span><span class="c2024">2024</span><span class="c2023">2023</span></div>
-        </div>
-        <div class="gauge">
-          <canvas id="gaugeCanvas"></canvas>
-          <div id="gaugeLabel" class="gauge-label">Neutral</div>
-        </div>
+        <div id="coDesc" class="co-desc"></div>
       </div>
       <div class="resize-handle" title="Resize"></div>
     </section>
 
-    <section id="moversCard" class="card row-3 resizable" data-allowed="1x3,1x2,2x2">
+    <!-- MOVERS -->
+    <section id="moversCard" class="card resizable movable" style="width:48%;min-width:360px;height:320px">
       <div class="card-hd" draggable="true">
         <h3>Top Movers (Watchlist)</h3>
         <button class="min-btn" data-hide="moversCard">–</button>
@@ -75,16 +72,10 @@
       <div class="resize-handle" title="Resize"></div>
     </section>
 
-    <section id="companyCard" class="card row-2 resizable" data-allowed="1x2,1x3,2x2">
-      <div class="card-hd" draggable="true">
-        <h3>Company</h3>
-        <button class="min-btn" data-hide="companyCard">–</button>
-      </div>
-      <div id="companyBox" class="company-box"></div>
-      <div class="resize-handle" title="Resize"></div>
-    </section>
+    <!-- COMPANY (removed; merged into insights) -->
 
-    <section id="newsCard" class="card row-3 resizable" data-allowed="1x3,1x4,2x3,2x4">
+    <!-- NEWS -->
+    <section id="newsCard" class="card resizable movable" style="width:60%;min-width:380px;height:360px">
       <div class="card-hd" draggable="true">
         <h3>News</h3>
         <button class="min-btn" data-hide="newsCard">–</button>
@@ -93,7 +84,8 @@
       <div class="resize-handle" title="Resize"></div>
     </section>
 
-    <section id="marketNewsCard" class="card row-2 resizable" data-allowed="1x2,1x3,2x2">
+    <!-- MARKET NEWS -->
+    <section id="marketNewsCard" class="card resizable movable" style="width:38%;min-width:300px;height:360px">
       <div class="card-hd" draggable="true">
         <h3>Market News (US)</h3>
         <button class="min-btn" data-hide="marketNewsCard">–</button>
