@@ -13,9 +13,11 @@
     <div class="top-left">
       <span class="brand">MARKET TERMINAL</span>
     </div>
+
     <div class="ticker-wrap">
       <div id="tickerScroll" class="ticker-scroll"></div>
     </div>
+
     <div class="top-right">
       <button id="sp500Button" class="top-btn">S&P 500</button>
       <button id="nasdaqButton" class="top-btn">NASDAQ</button>
@@ -65,6 +67,7 @@
     </div>
   </header>
 
+  <!-- heatmap overlay -->
   <div id="heatmapOverlay" class="heatmap-overlay">
     <div class="heatmap-inner">
       <button id="heatmapClose" class="heatmap-close">✕</button>
@@ -72,8 +75,10 @@
     </div>
   </div>
 
+  <!-- MAIN GRID: 2x2, always filled -->
   <main id="gridRoot" class="grid-root">
-    <section class="tile" id="tile-chart">
+    <!-- row 1 left -->
+    <section class="tile" id="tile-chart" data-row="1">
       <div class="tile-header">
         <span id="chartTitle">Chart – AAPL</span>
         <button class="tile-close" data-tile-close="tile-chart">–</button>
@@ -81,9 +86,11 @@
       <div class="tile-body chart-body">
         <div id="tv_container" class="tv-container"></div>
       </div>
+      <div class="resize-handle"></div>
     </section>
 
-    <section class="tile" id="tile-insights">
+    <!-- row 1 right -->
+    <section class="tile" id="tile-insights" data-row="1">
       <div class="tile-header">
         <span id="insightsTitle">Market Insights: AAPL</span>
         <button class="tile-close" data-tile-close="tile-insights">–</button>
@@ -119,9 +126,11 @@
           Loading description…
         </p>
       </div>
+      <div class="resize-handle"></div>
     </section>
 
-    <section class="tile" id="tile-movers">
+    <!-- row 2 left -->
+    <section class="tile" id="tile-movers" data-row="2">
       <div class="tile-header">
         <span>Top Movers (Watchlist)</span>
         <button class="tile-close" data-tile-close="tile-movers">–</button>
@@ -142,9 +151,11 @@
           </div>
         </div>
       </div>
+      <div class="resize-handle"></div>
     </section>
 
-    <section class="tile" id="tile-news">
+    <!-- row 2 right -->
+    <section class="tile" id="tile-news" data-row="2">
       <div class="tile-header">
         <span>News</span>
         <button class="tile-close" data-tile-close="tile-news">–</button>
@@ -152,6 +163,7 @@
       <div class="tile-body news-body" id="newsList">
         Loading news…
       </div>
+      <div class="resize-handle"></div>
     </section>
   </main>
 </body>
