@@ -38,13 +38,10 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
 
 # -------------------------------------------------
-# Config / environment
+# Config / watchlist
 # -------------------------------------------------
-NEWS_API_KEY = os.getenv("NEWS_API_KEY", "").strip()
-FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "").strip()
-TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY", "").strip()
 
-# NASAQ / S&P etc. watchlist
+# Large US-centric watchlist for ticker bar + movers
 WATCHLIST: List[str] = [
     "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "AVGO", "AMD", "NFLX",
     "ADBE", "INTC", "CSCO", "QCOM", "TXN",
@@ -55,6 +52,7 @@ WATCHLIST: List[str] = [
     "XOM", "CVX", "COP", "CAT", "BA", "GE", "UPS", "FDX", "DE",
     "UNH", "LLY", "MRK", "ABBV", "JNJ", "PFE",
     "UBER", "BKNG",
+    # index ETFs (for shortcuts / bar)
     "SPY", "QQQ", "DIA", "IWM",
 ]
 
@@ -68,14 +66,19 @@ CACHE: Dict[str, Dict[str, Any]] = {
     "tickers": {"ts": 0.0, "data": None},
     "mktnews": {"ts": 0.0, "data": None},
 }
-TTL = {"tickers": 25, "mktnews": 180}
+TTL = {"tickers": 5, "mktnews": 180}  # ticker refresh every 5s
 
 
 def now() -> float:
     return time.time()
 
 
-async def _get(url: str, params: Dict[str, Any] | None = None, timeout: float = 10.0):
+async def _get(
+    url: str, params: Dict[str, Any] | None = None, timeout: float = 10.0
+) -> httpx.Response | None:
+    """
+    Basic GET helper with reasonable timeout and user-agent.
+    """
     try:
         async with httpx.AsyncClient(
             headers=BASE_HEADERS, timeout=httpx.Timeout(timeout, connect=4)
@@ -89,16 +92,20 @@ async def _get(url: str, params: Dict[str, Any] | None = None, timeout: float = 
 
 
 # -------------------------------------------------
-# Quote providers: Yahoo → Stooq → TwelveData
+# Quote providers: Yahoo (primary) → Stooq (fallback)
 # -------------------------------------------------
 def _stooq_code(sym: str) -> str:
+    # US stocks on Stooq usually end with .us
     return f"{sym.lower().replace('.', '-')}.us"
 
 
-async def _from_yahoo(symbols: List[str]) -> List[Dict[str, Any]]:
+async def quotes_from_yahoo(symbols: List[str]) -> List[Dict[str, Any]]:
+    """
+    Fetch quotes from Yahoo Finance quote endpoint.
+    """
     out: List[Dict[str, Any]] = []
-    for i in range(0, len(symbols), 35):
-        chunk = symbols[i : i + 35]
+    for i in range(0, len(symbols), 50):
+        chunk = symbols[i : i + 50]
         resp = await _get(
             "https://query1.finance.yahoo.com/v7/finance/quote",
             {"symbols": ",".join(chunk)},
@@ -111,19 +118,38 @@ async def _from_yahoo(symbols: List[str]) -> List[Dict[str, Any]]:
             for d in items
             if d.get("symbol")
         }
+
         for s in chunk:
             d = by_sym.get(s.upper())
             price = None
+            change_pct = None
             if d:
+                # price
                 for key in ("regularMarketPrice", "postMarketPrice", "bid"):
                     if d.get(key) is not None:
                         price = float(d[key])
                         break
-            change_pct = None
-            if d:
-                for key in ("regularMarketChangePercent", "postMarketChangePercent"):
+                # % change
+                for key in (
+                    "regularMarketChangePercent",
+                    "postMarketChangePercent",
+                    "regularMarketChange",
+                ):
                     if d.get(key) is not None:
-                        change_pct = float(d[key])
+                        try:
+                            # for regularMarketChange, need to divide by prev close
+                            if key == "regularMarketChange" and d.get(
+                                "regularMarketPreviousClose"
+                            ):
+                                change_pct = (
+                                    float(d[key])
+                                    / float(d["regularMarketPreviousClose"])
+                                    * 100
+                                )
+                            else:
+                                change_pct = float(d[key])
+                        except Exception:
+                            change_pct = None
                         break
             out.append(
                 {
@@ -137,7 +163,10 @@ async def _from_yahoo(symbols: List[str]) -> List[Dict[str, Any]]:
     return out
 
 
-async def _from_stooq(symbols: List[str]) -> List[Dict[str, Any]]:
+async def quotes_from_stooq(symbols: List[str]) -> List[Dict[str, Any]]:
+    """
+    Daily snapshot from Stooq, used as fallback and for simple % calculations.
+    """
     resp = await _get(
         "https://stooq.com/q/l/",
         {"s": ",".join(_stooq_code(s) for s in symbols), "f": "sd2t2ohlc"},
@@ -168,64 +197,37 @@ async def _from_stooq(symbols: List[str]) -> List[Dict[str, Any]]:
     return out
 
 
-async def _from_twelvedata(symbols: List[str]) -> List[Dict[str, Any]]:
-    out = [{"symbol": s, "price": None, "change_pct": None} for s in symbols]
-    if not TWELVEDATA_API_KEY:
-        return out
-    resp = await _get(
-        "https://api.twelvedata.com/quote",
-        {"symbol": ",".join(symbols), "apikey": TWELVEDATA_API_KEY},
-    )
-    if not resp:
-        return out
-    js = resp.json()
-    for i, s in enumerate(symbols):
-        node = js.get(s) if isinstance(js, dict) else None
-        if not node:
-            continue
-        try:
-            price = float(node.get("price")) if node.get("price") else None
-            pct = node.get("percent_change") or node.get("change_percent")
-            change_pct = float(pct) if pct not in (None, "") else None
-        except Exception:
-            price, change_pct = None, None
-        out[i].update(
-            {
-                "price": round(price, 2) if price is not None else None,
-                "change_pct": round(change_pct, 2)
-                if change_pct is not None
-                else None,
-            }
-        )
-    return out
-
-
 async def stable_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
     """
-    Fetch quotes from Yahoo → Stooq → TwelveData with a strict normalization step
-    so every requested symbol has a row and any missing change_pct becomes 0.0.
+    Core quote function: Yahoo → Stooq, then normalize.
+    Returns list of {symbol, price, change_pct} with change_pct=0 when unknown.
     """
-    # 1) Yahoo
-    data = await _from_yahoo(symbols)
+    data = await quotes_from_yahoo(symbols)
+    # if absolutely nothing has a price, fall back fully to Stooq
     if all(d["price"] is None for d in data):
-        # 2) Stooq
-        data = await _from_stooq(symbols)
-    if all(d["price"] is None for d in data):
-        # 3) TwelveData
-        data = await _from_twelvedata(symbols)
+        data = await quotes_from_stooq(symbols)
+    else:
+        # fill missing rows or missing prices from Stooq
+        stooq = await quotes_from_stooq(symbols)
+        by_s = {d["symbol"].upper(): d for d in stooq}
+        for i, d in enumerate(data):
+            if d["price"] is None:
+                alt = by_s.get(d["symbol"].upper())
+                if alt:
+                    data[i]["price"] = alt["price"]
+                    data[i]["change_pct"] = alt["change_pct"]
 
+    # normalize & ensure change_pct is usable
     norm: List[Dict[str, Any]] = []
+    by_symbol = {(d["symbol"] or "").upper(): d for d in data}
     for s in symbols:
-        row = next(
-            (d for d in data if (d.get("symbol") or "").upper() == s.upper()), None
-        )
-        price = row.get("price") if row else None
-        change_pct = row.get("change_pct") if row else None
-
+        d = by_symbol.get(s.upper(), {"symbol": s, "price": None, "change_pct": None})
+        price = d.get("price")
+        change_pct = d.get("change_pct")
         if price is None:
-            change_pct = None
+            change_pct = None  # we really don't know
         elif change_pct is None:
-            change_pct = 0.0
+            change_pct = 0.0   # treat as flat if we have price but no % info
 
         norm.append(
             {
@@ -240,7 +242,7 @@ async def stable_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
 
 
 # -------------------------------------------------
-# History / metrics
+# History / performance metrics (Stooq)
 # -------------------------------------------------
 async def stooq_history(sym: str, days: int = 800) -> pd.Series:
     resp = await _get(
@@ -268,167 +270,83 @@ def pct(close: pd.Series, bdays: int):
 
 
 CURATED: Dict[str, str] = {
-    "AAPL": "Apple designs iPhone, Mac and services like the App Store, Music and iCloud. "
-    "It drives retention with tight hardware–software integration and is rolling out "
-    "on-device AI to deepen engagement.",
-    "MSFT": "Microsoft runs Windows, Office and Azure. Cloud subscriptions are the main "
-    "growth engine, and Copilot brings AI into productivity and developer tools.",
-    "NVDA": "NVIDIA builds GPUs and full AI platforms used to train and run large models. "
-    "Its CUDA software ecosystem and data-center chips are a major competitive moat.",
-    "AMZN": "Amazon combines a massive logistics network with the high-margin AWS cloud "
-    "business. Ads and subscriptions like Prime add recurring, sticky revenue.",
-    "META": "Meta operates Facebook, Instagram and WhatsApp. Ads remain core, supported "
-    "by AI-driven feed ranking, while messaging continues to deepen user engagement.",
-    "GOOGL": "Alphabet spans Search, YouTube, Android and Google Cloud. Search and ads "
-    "fund heavy investment into cloud and AI products across the portfolio.",
+    "AAPL": (
+        "Apple designs the iPhone, Mac, iPad and services such as the App Store, "
+        "Apple Music and iCloud. Its tight hardware–software integration creates "
+        "an ecosystem that keeps users inside the platform, and the company is "
+        "gradually layering in more on-device AI to deepen engagement and services revenue."
+    ),
+    "MSFT": (
+        "Microsoft operates the Windows and Office franchises and runs Azure, one of the "
+        "largest public clouds. Subscriptions like Microsoft 365 add recurring revenue, "
+        "and Copilot brings AI into productivity and developer workflows across the stack."
+    ),
+    "NVDA": (
+        "NVIDIA builds GPUs and full platforms used to train and deploy large AI models. "
+        "Its CUDA software ecosystem and data-center hardware give it a deep competitive "
+        "moat as demand for accelerated computing and generative AI expands."
+    ),
+    "AMZN": (
+        "Amazon combines a global e-commerce and logistics network with AWS, a leading "
+        "cloud infrastructure provider. Advertising and subscription services such as "
+        "Prime add high-margin, recurring revenue on top of the retail footprint."
+    ),
+    "META": (
+        "Meta Platforms operates Facebook, Instagram and WhatsApp. The business is driven "
+        "by targeted advertising, supported by large-scale AI ranking systems, while "
+        "messaging and short-form video continue to deepen user engagement."
+    ),
+    "GOOGL": (
+        "Alphabet owns Google Search, YouTube, Android and Google Cloud. Search and YouTube "
+        "ads fund heavy investment into cloud infrastructure and AI products across the "
+        "consumer and enterprise ecosystem."
+    ),
 }
 
 
 async def profile(symbol: str) -> Dict[str, str]:
     desc = CURATED.get(
         symbol.upper(),
-        "U.S. listed company. A detailed profile is not available, but this placeholder "
-        "keeps the panel readable and consistent across tickers.",
+        "U.S. listed company. A concise profile is not available, but this placeholder "
+        "keeps the layout consistent while the terminal focuses on prices and news.",
     )
     return {"symbol": symbol, "name": symbol, "description": desc}
 
 
 # -------------------------------------------------
-# News (symbol + market)
+# News (ticker + market) via Yahoo finance search
 # -------------------------------------------------
+def _map_yahoo_news_item(n: Dict[str, Any]) -> Dict[str, Any]:
+    link = n.get("link") or {}
+    return {
+        "title": n.get("title"),
+        "url": link.get("url") or link.get("href"),
+        "source": n.get("publisher") or "Yahoo Finance",
+        "summary": "",
+        "published_at": "",
+    }
+
+
 async def symbol_news(symbol: str, limit: int = 30) -> List[Dict[str, Any]]:
-    # 1) Finnhub company news (last 7 days)
-    if FINNHUB_API_KEY:
-        today = dt.date.today()
-        frm = (today - dt.timedelta(days=7)).isoformat()
-        resp = await _get(
-            "https://finnhub.io/api/v1/company-news",
-            {
-                "symbol": symbol,
-                "from": frm,
-                "to": today.isoformat(),
-                "token": FINNHUB_API_KEY,
-            },
-        )
-        if resp:
-            js = resp.json()
-            return [
-                {
-                    "title": a.get("headline"),
-                    "url": a.get("url"),
-                    "source": a.get("source"),
-                    "summary": a.get("summary") or "",
-                    "published_at": a.get("datetime"),
-                }
-                for a in js[:limit]
-            ]
-
-    # 2) NewsAPI (keyword search)
-    if NEWS_API_KEY:
-        resp = await _get(
-            "https://newsapi.org/v2/everything",
-            {
-                "q": symbol,
-                "language": "en",
-                "pageSize": limit,
-                "apiKey": NEWS_API_KEY,
-            },
-        )
-        if resp:
-            data = resp.json()
-            return [
-                {
-                    "title": a.get("title"),
-                    "url": a.get("url"),
-                    "source": (a.get("source") or {}).get("name"),
-                    "summary": a.get("description"),
-                    "published_at": a.get("publishedAt"),
-                }
-                for a in data.get("articles", [])
-            ]
-
-    # 3) Yahoo search (no key)
     resp = await _get(
         "https://query1.finance.yahoo.com/v1/finance/search",
         {"q": symbol, "quotesCount": 0, "newsCount": limit},
     )
-    if resp:
-        news = resp.json().get("news", [])
-        return [
-            {
-                "title": n.get("title"),
-                "url": (n.get("link") or {}).get("url"),
-                "source": n.get("publisher") or "Yahoo",
-                "summary": "",
-                "published_at": "",
-            }
-            for n in news
-        ]
-    return []
+    if not resp:
+        return []
+    news = resp.json().get("news", []) or []
+    return [_map_yahoo_news_item(n) for n in news[:limit]]
 
 
 async def market_news(limit: int = 40) -> List[Dict[str, Any]]:
-    # 1) Finnhub general news
-    if FINNHUB_API_KEY:
-        resp = await _get(
-            "https://finnhub.io/api/v1/news",
-            {"category": "general", "minId": 0, "token": FINNHUB_API_KEY},
-        )
-        if resp:
-            js = resp.json()[:limit]
-            return [
-                {
-                    "title": a.get("headline"),
-                    "url": a.get("url"),
-                    "source": a.get("source"),
-                    "summary": a.get("summary") or "",
-                    "published_at": a.get("datetime"),
-                }
-                for a in js
-            ]
-
-    # 2) NewsAPI business headlines
-    if NEWS_API_KEY:
-        resp = await _get(
-            "https://newsapi.org/v2/top-headlines",
-            {
-                "country": "us",
-                "category": "business",
-                "pageSize": limit,
-                "apiKey": NEWS_API_KEY,
-            },
-        )
-        if resp:
-            js = resp.json().get("articles", [])
-            return [
-                {
-                    "title": a.get("title"),
-                    "url": a.get("url"),
-                    "source": (a.get("source") or {}).get("name"),
-                    "summary": a.get("description"),
-                    "published_at": a.get("publishedAt"),
-                }
-                for a in js
-            ]
-
-    # 3) Yahoo "markets" search
     resp = await _get(
         "https://query1.finance.yahoo.com/v1/finance/search",
         {"q": "markets", "quotesCount": 0, "newsCount": limit},
     )
-    if resp:
-        news = resp.json().get("news", [])
-        return [
-            {
-                "title": n.get("title"),
-                "url": (n.get("link") or {}).get("url"),
-                "source": n.get("publisher") or "Yahoo",
-                "summary": "",
-                "published_at": "",
-            }
-            for n in news
-        ]
-    return []
+    if not resp:
+        return []
+    news = resp.json().get("news", []) or []
+    return [_map_yahoo_news_item(n) for n in news[:limit]]
 
 
 # -------------------------------------------------
@@ -459,18 +377,9 @@ async def api_movers():
     rows = CACHE["tickers"]["data"] or (await stable_quotes(WATCHLIST))
     valid = [r for r in rows if r.get("price") is not None]
 
-    need_recalc = [v for v in valid if v.get("change_pct") is None]
-    # compute 1-day change from last two closes for those missing
-    for v in need_recalc:
-        try:
-            series = await stooq_history(v["symbol"], days=3)
-            if len(series) >= 2 and series.iloc[-2] != 0:
-                v["change_pct"] = round(
-                    (series.iloc[-1] - series.iloc[-2]) / series.iloc[-2] * 100, 2
-                )
-            else:
-                v["change_pct"] = 0.0
-        except Exception:
+    # Ensure every row has a numeric change_pct for ranking
+    for v in valid:
+        if v.get("change_pct") is None:
             v["change_pct"] = 0.0
 
     valid.sort(key=lambda x: (x.get("change_pct") or 0.0), reverse=True)
