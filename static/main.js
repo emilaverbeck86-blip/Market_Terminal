@@ -1,318 +1,86 @@
-// Endpoints
-const TICKER_ENDPOINT = "/api/tickers";
-const MOVERS_ENDPOINT = "/api/movers";
-const METRICS_ENDPOINT = "/api/metrics";
-const NEWS_ENDPOINT = "/api/news";
-const MKT_NEWS_ENDPOINT = "/api/market-news";
+// Endpoints -----------------------------------------------------------
 
-// DOM
+const TICKERS_ENDPOINT = "/api/tickers";
+const INSIGHTS_ENDPOINT = "/api/insights";
+const MOVERS_ENDPOINT = "/api/movers";
+const NEWS_ENDPOINT = "/api/news";
+const MARKET_NEWS_ENDPOINT = "/api/market-news";
+
+// DOM -----------------------------------------------------------------
+
 const tickerScroll = document.getElementById("tickerScroll");
 const tvContainer = document.getElementById("tvContainer");
 const chartTitle = document.getElementById("chartTitle");
 const insightsTitle = document.getElementById("insightsTitle");
+const companyDescription = document.getElementById("companyDescription");
+
 const perfEls = {
   "1W": document.getElementById("perf1W"),
   "1M": document.getElementById("perf1M"),
   "3M": document.getElementById("perf3M"),
   "6M": document.getElementById("perf6M"),
   YTD: document.getElementById("perfYTD"),
-  "1Y": document.getElementById("perf1Y")
+  "1Y": document.getElementById("perf1Y"),
 };
-const companyDescription = document.getElementById("companyDescription");
+
 const gainersBody = document.getElementById("gainersBody");
 const losersBody = document.getElementById("losersBody");
 const newsList = document.getElementById("newsList");
 const marketNewsList = document.getElementById("marketNewsList");
 
+const themeToggle = document.getElementById("themeToggle");
 const settingsBtn = document.getElementById("settingsBtn");
 const settingsMenu = document.getElementById("settingsMenu");
-const themeToggle = document.getElementById("themeToggle");
-const spxShortcut = document.getElementById("spxShortcut");
-const nasdaqShortcut = document.getElementById("nasdaqShortcut");
+
+// State ---------------------------------------------------------------
 
 let currentSymbol = "AAPL";
-let tickersData = [];
-let tvWidget = null;
+let tickerNodes = new Map();
 
-// TradingView symbol mapping (capital.com for indices)
-function tvSymbol(sym) {
-  if (sym === "SPY") return "CAPITALCOM:US500";
-  if (sym === "QQQ") return "CAPITALCOM:US100";
-  return sym;
+// Helpers -------------------------------------------------------------
+
+async function fetchJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
 }
-
-// Helpers ----------------------------------------------------------
 
 function fmtPct(v) {
-  if (v == null || !isFinite(v)) return "—";
-  const s = v > 0 ? "+" : v < 0 ? "−" : "";
-  return `${s}${Math.abs(v).toFixed(2)}%`;
+  if (v == null || isNaN(v)) return "0.00%";
+  const sign = v > 0 ? "+" : v < 0 ? "−" : "";
+  return `${sign}${Math.abs(v).toFixed(2)}%`;
 }
 
-function applyPerfClass(el, v) {
-  el.classList.remove("pos", "neg", "muted");
-  if (v == null || !isFinite(v)) {
-    el.classList.add("muted");
-    return;
-  }
-  if (v > 0.05) el.classList.add("pos");
-  else if (v < -0.05) el.classList.add("neg");
-  else el.classList.add("muted");
+function fmtPctNoSign(v) {
+  if (v == null || isNaN(v)) return "—";
+  const sign = v > 0 ? "+" : v < 0 ? "−" : "";
+  return `${sign}${Math.abs(v).toFixed(2)}%`;
 }
 
-// TradingView ------------------------------------------------------
-
-function mountTradingView(symbol) {
-  chartTitle.textContent = `Chart – ${symbol}`;
-  tvContainer.innerHTML = "";
-
-  if (typeof TradingView === "undefined" || !TradingView.widget) {
-    const msg = document.createElement("div");
-    msg.className = "muted";
-    msg.style.padding = "10px";
-    msg.textContent =
-      "TradingView widget could not be loaded (script blocked or offline).";
-    tvContainer.appendChild(msg);
-    return;
-  }
-
-  tvWidget = new TradingView.widget({
-    symbol: tvSymbol(symbol),
-    interval: "60",
-    timezone: "Etc/UTC",
-    theme: document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark",
-    style: "1",
-    locale: "en",
-    toolbar_bg: "#000000",
-    container_id: "tvContainer",
-    autosize: true,
-    hide_top_toolbar: false,
-    hide_legend: false
-  });
+function clearChildren(el) {
+  while (el.firstChild) el.removeChild(el.firstChild);
 }
 
-// Ticker bar -------------------------------------------------------
+// Theme ---------------------------------------------------------------
 
-function buildTickerBar(items) {
-  tickersData = items;
-  tickerScroll.innerHTML = "";
-
-  const twice = [...items, ...items]; // duplicate for smooth scroll
-  twice.forEach((row) => {
-    const item = document.createElement("div");
-    item.className = "ticker-item";
-    item.dataset.symbol = row.symbol;
-
-    const sym = document.createElement("span");
-    sym.className = "ticker-symbol";
-    sym.textContent = row.symbol;
-
-    const price = document.createElement("span");
-    price.className = "ticker-price";
-    price.textContent =
-      row.price == null || !isFinite(row.price)
-        ? "—"
-        : row.price.toFixed(2);
-
-    const chg = document.createElement("span");
-    chg.className = "ticker-change";
-    const pct = row.change_pct || 0;
-    if (pct > 0.05) chg.classList.add("chg-pos");
-    else if (pct < -0.05) chg.classList.add("chg-neg");
-    chg.textContent = fmtPct(pct);
-
-    item.append(sym, price, chg);
-    item.addEventListener("click", () => onSymbolSelect(row.symbol));
-    tickerScroll.appendChild(item);
-  });
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("mt_theme", theme);
+  themeToggle.checked = theme === "light";
 }
-
-async function loadTickers(init = false) {
-  try {
-    const r = await fetch(TICKER_ENDPOINT);
-    const data = await r.json();
-    if (!Array.isArray(data)) return;
-    if (init || tickersData.length === 0) {
-      buildTickerBar(data);
-      if (init && data.length) {
-        currentSymbol = "AAPL";
-        onSymbolSelect(currentSymbol);
-      }
-    } else {
-      tickersData = data;
-      // simple refresh: rebuild items with updated pct/price
-      buildTickerBar(data);
-    }
-  } catch (e) {
-    // ignore
-  }
-}
-
-// Movers -----------------------------------------------------------
-
-function renderMovers(data) {
-  gainersBody.innerHTML = "";
-  losersBody.innerHTML = "";
-
-  const renderSide = (tbody, rows) => {
-    if (!rows || !rows.length) {
-      const tr = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = 3;
-      td.className = "muted";
-      td.textContent = "No data.";
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-      return;
-    }
-
-    rows.forEach((r) => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${r.symbol}</td>
-        <td style="text-align:right">${r.price != null ? r.price.toFixed(2) : "—"}</td>
-        <td style="text-align:right" class="${
-          r.change_pct > 0.05 ? "chg-pos" : r.change_pct < -0.05 ? "chg-neg" : ""
-        }">${fmtPct(r.change_pct)}</td>
-      `;
-      tr.addEventListener("click", () => onSymbolSelect(r.symbol));
-      tbody.appendChild(tr);
-    });
-  };
-
-  renderSide(gainersBody, data.gainers);
-  renderSide(losersBody, data.losers);
-}
-
-async function loadMovers() {
-  try {
-    const r = await fetch(MOVERS_ENDPOINT);
-    const data = await r.json();
-    renderMovers(data);
-  } catch (e) {
-    gainersBody.innerHTML =
-      '<tr><td class="muted">Failed to load.</td></tr>';
-    losersBody.innerHTML =
-      '<tr><td class="muted">Failed to load.</td></tr>';
-  }
-}
-
-// Metrics / Insights -----------------------------------------------
-
-function renderMetrics(symbol, data) {
-  insightsTitle.textContent = `Market Insights: ${symbol}`;
-  const perf = data.performance || {};
-
-  const map = {
-    "1W": "1W",
-    "1M": "1M",
-    "3M": "3M",
-    "6M": "6M",
-    YTD: "YTD",
-    "1Y": "1Y"
-  };
-
-  Object.entries(map).forEach(([key, label]) => {
-    const el = perfEls[label];
-    if (!el) return;
-    const v = perf[key];
-    el.textContent = fmtPct(v);
-    applyPerfClass(el, v);
-  });
-
-  const desc = ((data.profile || {}).description || "").trim();
-  companyDescription.textContent =
-    desc || "No profile available at this time.";
-}
-
-async function loadMetrics(symbol) {
-  try {
-    const r = await fetch(`${METRICS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
-    const data = await r.json();
-    renderMetrics(symbol, data);
-  } catch (e) {
-    companyDescription.textContent = "Failed to load company profile.";
-  }
-}
-
-// News -------------------------------------------------------------
-
-function renderNewsList(container, articles) {
-  container.innerHTML = "";
-  if (!articles || !articles.length) {
-    const div = document.createElement("div");
-    div.className = "muted";
-    div.textContent = "No headlines.";
-    container.appendChild(div);
-    return;
-  }
-
-  articles.forEach((n) => {
-    const item = document.createElement("div");
-    item.className = "news-item";
-
-    const a = document.createElement("a");
-    a.href = n.url || "#";
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.textContent = n.title || "(untitled)";
-
-    const meta = document.createElement("div");
-    meta.className = "news-meta";
-    meta.textContent = `${n.source || "Source"}${
-      n.published_at ? " · " + n.published_at : ""
-    }`;
-
-    item.append(a, meta);
-    container.appendChild(item);
-  });
-}
-
-async function loadNews(symbol) {
-  newsList.innerHTML = '<div class="muted">Loading…</div>';
-  try {
-    const r = await fetch(`${NEWS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
-    const data = await r.json();
-    renderNewsList(newsList, data);
-  } catch (e) {
-    newsList.innerHTML = '<div class="muted">Failed to load news.</div>';
-  }
-}
-
-async function loadMarketNews() {
-  marketNewsList.innerHTML = '<div class="muted">Loading…</div>';
-  try {
-    const r = await fetch(MKT_NEWS_ENDPOINT);
-    const data = await r.json();
-    renderNewsList(marketNewsList, data);
-  } catch (e) {
-    marketNewsList.innerHTML =
-      '<div class="muted">Failed to load market news.</div>';
-  }
-}
-
-// Symbol selection -------------------------------------------------
-
-async function onSymbolSelect(symbol) {
-  currentSymbol = symbol;
-  mountTradingView(symbol);
-  await Promise.all([loadMetrics(symbol), loadNews(symbol)]);
-}
-
-// Theme / settings -------------------------------------------------
 
 function initTheme() {
   const stored = localStorage.getItem("mt_theme");
-  if (stored === "light") {
-    document.documentElement.setAttribute("data-theme", "light");
-    themeToggle.checked = true;
-  } else {
-    document.documentElement.setAttribute("data-theme", "dark");
-    themeToggle.checked = false;
-  }
+  const theme = stored === "light" ? "light" : "dark";
+  applyTheme(theme);
+  themeToggle.addEventListener("change", () => {
+    applyTheme(themeToggle.checked ? "light" : "dark");
+  });
 }
 
-function bindSettings() {
+// Settings menu -------------------------------------------------------
+
+function initSettingsMenu() {
   settingsBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     settingsMenu.classList.toggle("open");
@@ -324,64 +92,371 @@ function bindSettings() {
     }
   });
 
-  themeToggle.addEventListener("change", () => {
-    const mode = themeToggle.checked ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", mode);
-    localStorage.setItem("mt_theme", mode);
-    // re-mount TV chart so it picks up theme
-    mountTradingView(currentSymbol);
+  // Tile toggles
+  const toggles = settingsMenu.querySelectorAll("[data-tile-toggle]");
+  toggles.forEach((toggle) => {
+    const name = toggle.dataset.tileToggle;
+    const tile = document.querySelector(`.tile[data-tile="${name}"]`);
+    if (!tile) return;
+
+    toggle.addEventListener("change", () => {
+      tile.classList.toggle("hidden", !toggle.checked);
+    });
   });
 
-  // tile toggles
-  document
-    .querySelectorAll("[data-tile-toggle]")
-    .forEach((checkbox) => {
-      checkbox.addEventListener("change", (e) => {
-        const tile = e.target.getAttribute("data-tile-toggle");
-        const el = document.querySelector(`[data-tile="${tile}"]`);
-        if (!el) return;
-        el.classList.toggle("hidden", !e.target.checked);
-      });
-    });
-
-  // tile close buttons sync with toggles
-  document.querySelectorAll("[data-tile-close]").forEach((btn) => {
+  // Tile close buttons
+  const closes = document.querySelectorAll("[data-tile-close]");
+  closes.forEach((btn) => {
+    const name = btn.dataset.tileClose;
+    const tile = document.querySelector(`.tile[data-tile="${name}"]`);
+    const toggle = settingsMenu.querySelector(
+      `[data-tile-toggle="${name}"]`
+    );
+    if (!tile) return;
     btn.addEventListener("click", () => {
-      const tile = btn.getAttribute("data-tile-close");
-      const el = document.querySelector(`[data-tile="${tile}"]`);
-      if (!el) return;
-      el.classList.add("hidden");
-      const toggle = document.querySelector(
-        `[data-tile-toggle="${tile}"]`
-      );
+      tile.classList.add("hidden");
       if (toggle) toggle.checked = false;
     });
   });
 }
 
-// Shortcuts --------------------------------------------------------
+// TradingView ---------------------------------------------------------
 
-function bindShortcuts() {
-  spxShortcut.addEventListener("click", () => {
-    onSymbolSelect("SPY");
-  });
-  nasdaqShortcut.addEventListener("click", () => {
-    onSymbolSelect("QQQ");
+function tradingViewSymbol(sym) {
+  // Most US stocks: plain symbol works.
+  // Shortcuts for indices:
+  if (sym === "SPX_INDEX") return "CAPITALCOM:US500";
+  if (sym === "NDX_INDEX") return "CAPITALCOM:US100";
+  return sym;
+}
+
+function mountTradingView(symbol) {
+  chartTitle.textContent = `Chart – ${symbol}`;
+  tvContainer.innerHTML = "";
+
+  if (typeof TradingView === "undefined" || !TradingView.widget) {
+    const div = document.createElement("div");
+    div.className = "muted";
+    div.style.padding = "8px";
+    div.textContent =
+      "TradingView widget could not load (check adblock or network).";
+    tvContainer.appendChild(div);
+    return;
+  }
+
+  new TradingView.widget({
+    symbol: tradingViewSymbol(symbol),
+    interval: "60",
+    timezone: "Etc/UTC",
+    theme:
+      document.documentElement.getAttribute("data-theme") === "light"
+        ? "light"
+        : "dark",
+    style: "1",
+    toolbar_bg: "#000000",
+    locale: "en",
+    enable_publishing: false,
+    allow_symbol_change: false,
+    container_id: "tvContainer",
+    autosize: true,
   });
 }
 
-// Boot -------------------------------------------------------------
+// Ticker bar ----------------------------------------------------------
 
-document.addEventListener("DOMContentLoaded", () => {
+function buildTickerBar(data) {
+  clearChildren(tickerScroll);
+  tickerNodes.clear();
+
+  // duplicate row for seamless loop
+  const extended = data.concat(data);
+
+  extended.forEach((row) => {
+    const item = document.createElement("div");
+    item.className = "ticker-item";
+    item.dataset.symbol = row.symbol;
+
+    const symSpan = document.createElement("span");
+    symSpan.className = "ticker-symbol";
+    symSpan.textContent = row.symbol;
+
+    const priceSpan = document.createElement("span");
+    priceSpan.className = "ticker-price";
+    priceSpan.textContent =
+      row.price != null ? row.price.toFixed(2) : "—";
+
+    const chgSpan = document.createElement("span");
+    chgSpan.className = "ticker-change";
+    const chg = row.change_pct ?? 0;
+    if (chg > 0) chgSpan.classList.add("chg-pos");
+    else if (chg < 0) chgSpan.classList.add("chg-neg");
+    chgSpan.textContent = fmtPct(chg);
+
+    item.appendChild(symSpan);
+    item.appendChild(priceSpan);
+    item.appendChild(chgSpan);
+
+    item.addEventListener("click", () =>
+      onSymbolSelect(row.symbol)
+    );
+
+    tickerScroll.appendChild(item);
+
+    // Only track first occurrence (original row)
+    if (!tickerNodes.has(row.symbol)) {
+      tickerNodes.set(row.symbol, { priceSpan, chgSpan });
+    }
+  });
+}
+
+function updateTickerBar(data) {
+  data.forEach((row) => {
+    const nodes = tickerNodes.get(row.symbol);
+    if (!nodes) return;
+    if (row.price != null) {
+      nodes.priceSpan.textContent = row.price.toFixed(2);
+    }
+    const chg = row.change_pct ?? 0;
+    nodes.chgSpan.textContent = fmtPct(chg);
+    nodes.chgSpan.classList.remove("chg-pos", "chg-neg");
+    if (chg > 0) nodes.chgSpan.classList.add("chg-pos");
+    else if (chg < 0) nodes.chgSpan.classList.add("chg-neg");
+  });
+}
+
+async function loadTickers(initial = false) {
+  try {
+    const data = await fetchJSON(TICKERS_ENDPOINT);
+    if (initial || tickerNodes.size === 0) {
+      buildTickerBar(data);
+      if (initial && data.length) {
+        currentSymbol = data[0].symbol;
+        onSymbolSelect(currentSymbol);
+      }
+    } else {
+      updateTickerBar(data);
+    }
+  } catch (err) {
+    // silent fail for ticker bar
+    console.error("tickers error", err);
+  }
+}
+
+// Insights ------------------------------------------------------------
+
+function renderInsights(perf, description) {
+  const keys = ["1W", "1M", "3M", "6M", "YTD", "1Y"];
+
+  keys.forEach((k) => {
+    const el = perfEls[k];
+    if (!el) return;
+    const v = perf[k];
+    el.classList.remove("pos", "neg");
+    if (v == null || isNaN(v)) {
+      el.textContent = "—";
+      return;
+    }
+    el.textContent = fmtPctNoSign(v);
+    if (v > 0) el.classList.add("pos");
+    else if (v < 0) el.classList.add("neg");
+  });
+
+  companyDescription.textContent =
+    description || "No company profile available at this time.";
+}
+
+async function loadInsights(symbol) {
+  try {
+    const data = await fetchJSON(
+      `${INSIGHTS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`
+    );
+    insightsTitle.textContent = `Market Insights: ${data.symbol || symbol}`;
+    renderInsights(data.performance || {}, data.description || "");
+  } catch (err) {
+    console.error("insights error", err);
+    renderInsights({}, "");
+  }
+}
+
+// Movers --------------------------------------------------------------
+
+function renderMovers(data) {
+  const gainers = data.gainers || [];
+  const losers = data.losers || [];
+
+  clearChildren(gainersBody);
+  clearChildren(losersBody);
+
+  function addRow(tbody, row) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${row.symbol}</td>
+      <td style="text-align:right">${row.price?.toFixed(2) ?? "—"}</td>
+      <td style="text-align:right">${fmtPct(row.change_pct)}</td>
+    `;
+    tr.addEventListener("click", () =>
+      onSymbolSelect(row.symbol)
+    );
+    tbody.appendChild(tr);
+  }
+
+  gainers.forEach((r) => addRow(gainersBody, r));
+  losers.forEach((r) => addRow(losersBody, r));
+
+  if (!gainers.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td colspan="3" class="muted">No data.</td>';
+    gainersBody.appendChild(tr);
+  }
+  if (!losers.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td colspan="3" class="muted">No data.</td>';
+    losersBody.appendChild(tr);
+  }
+}
+
+async function loadMovers() {
+  try {
+    const data = await fetchJSON(MOVERS_ENDPOINT);
+    renderMovers(data);
+  } catch (err) {
+    console.error("movers error", err);
+    clearChildren(gainersBody);
+    clearChildren(losersBody);
+    const tr1 = document.createElement("tr");
+    tr1.innerHTML =
+      '<td colspan="3" class="muted">Failed to load.</td>';
+    gainersBody.appendChild(tr1);
+    const tr2 = document.createElement("tr");
+    tr2.innerHTML =
+      '<td colspan="3" class="muted">Failed to load.</td>';
+    losersBody.appendChild(tr2);
+  }
+}
+
+// News ---------------------------------------------------------------
+
+function renderNewsList(container, articles, emptyText) {
+  clearChildren(container);
+  if (!articles || !articles.length) {
+    const div = document.createElement("div");
+    div.className = "muted";
+    div.textContent = emptyText;
+    container.appendChild(div);
+    return;
+  }
+
+  articles.forEach((a) => {
+    const item = document.createElement("div");
+    item.className = "news-item";
+
+    const link = document.createElement("a");
+    link.href = a.url || "#";
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = a.title || "(untitled)";
+
+    const meta = document.createElement("div");
+    meta.className = "news-meta";
+    const src = a.source || "Unknown";
+    const ts = a.published_at || "";
+    meta.textContent = ts ? `${src} · ${ts}` : src;
+
+    item.appendChild(link);
+    item.appendChild(meta);
+    container.appendChild(item);
+  });
+}
+
+async function loadNews(symbol) {
+  newsList.innerHTML =
+    '<div class="muted">Loading news…</div>';
+  try {
+    const data = await fetchJSON(
+      `${NEWS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`
+    );
+    renderNewsList(newsList, data, "No headlines.");
+  } catch (err) {
+    console.error("news error", err);
+    renderNewsList(
+      newsList,
+      [],
+      "Failed to load news."
+    );
+  }
+}
+
+async function loadMarketNews() {
+  marketNewsList.innerHTML =
+    '<div class="muted">Loading market headlines…</div>';
+  try {
+    const data = await fetchJSON(MARKET_NEWS_ENDPOINT);
+    renderNewsList(
+      marketNewsList,
+      data,
+      "No headlines."
+    );
+  } catch (err) {
+    console.error("market news error", err);
+    renderNewsList(
+      marketNewsList,
+      [],
+      "Failed to load market headlines."
+    );
+  }
+}
+
+// Symbol selection & shortcuts --------------------------------------
+
+async function onSymbolSelect(symbol) {
+  currentSymbol = symbol;
+
+  // Update titles
+  chartTitle.textContent = `Chart – ${symbol}`;
+  insightsTitle.textContent = `Market Insights: ${symbol}`;
+
+  mountTradingView(symbol);
+
+  await Promise.all([
+    loadInsights(symbol),
+    loadNews(symbol),
+  ]);
+}
+
+function initShortcuts() {
+  const buttons = document.querySelectorAll(
+    ".shortcut-btn"
+  );
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const type = btn.dataset.shortcut;
+      if (type === "spx") {
+        onSymbolSelect("SPX_INDEX");
+      } else if (type === "nasdaq") {
+        onSymbolSelect("NDX_INDEX");
+      }
+    });
+  });
+}
+
+// Boot ----------------------------------------------------------------
+
+async function init() {
   initTheme();
-  bindSettings();
-  bindShortcuts();
+  initSettingsMenu();
+  initShortcuts();
 
-  loadTickers(true);
-  loadMovers();
-  loadMarketNews();
+  // Initial data
+  await loadTickers(true);
+  await loadMovers();
+  await loadMarketNews();
 
-  setInterval(() => loadTickers(false), 60000); // 60s
-  setInterval(loadMovers, 120000); // 2 min
-  setInterval(loadMarketNews, 300000); // 5 min
-});
+  // Periodic refresh
+  setInterval(() => loadTickers(false), 60_000);
+  setInterval(loadMovers, 120_000);
+  setInterval(loadMarketNews, 300_000);
+}
+
+document.addEventListener("DOMContentLoaded", init);
