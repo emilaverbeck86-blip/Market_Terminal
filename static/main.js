@@ -68,7 +68,6 @@ const clsFor = v => (v > 0 ? 'pos' : v < 0 ? 'neg' : 'neu');
     }
   });
 
-  // theme
   const saved = localStorage.getItem('mt_theme') || 'dark';
   document.documentElement.setAttribute('data-theme', saved);
   themeToggle.checked = saved === 'light';
@@ -79,7 +78,6 @@ const clsFor = v => (v > 0 ? 'pos' : v < 0 ? 'neg' : 'neu');
     if (currentSymbol) mountTV(currentSymbol, tvOverride);
   });
 
-  // tile visibility
   const vis = JSON.parse(localStorage.getItem('mt_tiles') || '{}');
   document.querySelectorAll('.tile-toggle').forEach(chk => {
     if (vis.hasOwnProperty(chk.dataset.target)) chk.checked = !!vis[chk.dataset.target];
@@ -99,7 +97,6 @@ const clsFor = v => (v > 0 ? 'pos' : v < 0 ? 'neg' : 'neu');
     });
   });
 
-  // dash button in each card header
   document.querySelectorAll('.min-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.hide;
@@ -122,12 +119,13 @@ const clsFor = v => (v > 0 ? 'pos' : v < 0 ? 'neg' : 'neu');
 spxBtn.addEventListener('click', () => onSelect('SPY', 'CAPITALCOM:US500'));
 ndxBtn.addEventListener('click', () => onSelect('QQQ', 'CAPITALCOM:US100'));
 
-// ---------------- layout: two lanes, left flexible, right locked ----------------
+// ---------------- layout: two lanes that always fill width --------
 const LAYOUT_KEY = 'mt_layout_v3';
-let lanePct = 60; // % width of left lane
+let lanePct = 60; // left lane percentage
 
 function setLaneWidths(pct) {
-  lanePct = Math.max(30, Math.min(85, pct || 60));
+  // keep some margin so cards never wrap
+  lanePct = Math.max(30, Math.min(80, pct || 60));
   const leftW = `${lanePct}%`;
   const rightW = `${100 - lanePct - 2}%`;
   document.querySelectorAll('.lane-left').forEach(n => (n.style.width = leftW));
@@ -163,13 +161,11 @@ function restoreLayout() {
       });
     }
     if (typeof st.pct === 'number') lanePct = st.pct;
-  } catch (e) {
-    // ignore
-  }
+  } catch (e) {}
   setLaneWidths(lanePct);
 }
 
-// drag to move cards
+// drag to move cards between lanes, auto snap
 (() => {
   let dragging = null;
   let placeholder = null;
@@ -229,9 +225,9 @@ function restoreLayout() {
   board.addEventListener('dragend', endDrag);
 })();
 
-// resize cards: left lane controls lane width, right lane only height
+// resize cards: all tiles can resize H & V, but grid never goes out of screen
 (() => {
-  const MIN_W = 300;
+  const MIN_W = 260;
   const MIN_H = 220;
 
   board.querySelectorAll('.card.resizable .resize-handle').forEach(handle => {
@@ -239,52 +235,50 @@ function restoreLayout() {
     let startW = 0,
       startH = 0,
       sx = 0,
-      sy = 0;
+      sy = 0,
+      lane = 'left',
+      startLeft = 0;
 
     const move = e => {
       const br = board.getBoundingClientRect();
       const cr = card.getBoundingClientRect();
-      const lane = card.classList.contains('lane-right') ? 'right' : 'left';
-
       let nw = startW + (e.clientX - sx);
       let nh = startH + (e.clientY - sy);
 
-      const maxW = br.width - 16;
-      const maxH = window.innerHeight - cr.top - 24;
+      const maxW = br.width - 24;
+      const maxH = window.innerHeight - cr.top - 32;
 
+      nw = Math.max(MIN_W, Math.min(maxW, nw));
       nh = Math.max(MIN_H, Math.min(maxH, nh));
 
+      // horizontal: adjust lane percentage so lanes always fill full width
       if (lane === 'left') {
-        nw = Math.max(MIN_W, Math.min(maxW, nw));
-        const pct = (nw / br.width) * 100;
-        setLaneWidths(pct);
+        const newPct = (nw / br.width) * 100;
+        setLaneWidths(newPct);
       } else {
-        nw = startW; // right lane width locked
+        // right lane: compute right lane width and infer left lane width
+        const rightWidthPx = nw;
+        const newPct = 100 - (rightWidthPx / br.width) * 100 - 2;
+        setLaneWidths(newPct);
       }
 
+      // vertical: card height + row neighbours match
       card.style.height = nh + 'px';
 
       const laneClass = lane === 'right' ? 'lane-right' : 'lane-left';
-      const nbrs = [...board.querySelectorAll(`.${laneClass}.movable`)].filter(
-        n => n !== card,
-      );
       const cardTop = cr.top;
-      let best = null;
-      let delta = 12;
-      nbrs.forEach(n => {
+      const sameLane = [...board.querySelectorAll(`.${laneClass}.movable`)].filter(
+        n => n !== card && getComputedStyle(n).display !== 'none',
+      );
+
+      sameLane.forEach(n => {
         const r = n.getBoundingClientRect();
-        const diff = Math.abs(cardTop + nh - r.bottom);
-        if (diff < delta) {
-          delta = diff;
-          best = r;
+        if (Math.abs(r.top - cardTop) < 16) {
+          // same row → match height
+          n.style.height = nh + 'px';
         }
       });
-      if (best) {
-        nh = best.bottom - cardTop;
-        card.style.height = nh + 'px';
-      }
 
-      reflowBoard();
       saveLayout();
     };
 
@@ -296,10 +290,13 @@ function restoreLayout() {
     handle.addEventListener('pointerdown', e => {
       e.preventDefault();
       const r = card.getBoundingClientRect();
+      const br = board.getBoundingClientRect();
       startW = r.width;
       startH = r.height;
+      startLeft = r.left - br.left;
       sx = e.clientX;
       sy = e.clientY;
+      lane = card.classList.contains('lane-right') ? 'right' : 'left';
       document.addEventListener('pointermove', move, { passive: false });
       document.addEventListener('pointerup', up, { passive: false });
     });
@@ -409,8 +406,8 @@ function mountTV(symbol, override = null) {
   });
 }
 
-// ---------------- ticker bar (clickable, smooth marquee, 5s updates) ---------
-const tickerNodes = new Map(); // sym -> {priceEls:[], chgEls:[], last:number}
+// ---------------- ticker bar ----------------
+const tickerNodes = new Map();
 let marqueeId = 0;
 let offsetX = 0;
 let halfWidth = 0;
@@ -419,7 +416,7 @@ function buildTicker(items) {
   tickerTrack.innerHTML = '';
   tickerNodes.clear();
 
-  const doubled = [...items, ...items]; // continuous scroll
+  const doubled = [...items, ...items];
   doubled.forEach(tk => {
     const item = document.createElement('div');
     item.className = 'ticker-item';
@@ -484,7 +481,7 @@ function updateTicker(items) {
 
 function startMarquee() {
   cancelAnimationFrame(marqueeId);
-  const speed = 60; // px/s
+  const speed = 60;
   let last = performance.now();
 
   const step = t => {
@@ -629,7 +626,7 @@ async function onSelect(symbol, override = null) {
 // ---------------- boot ----------------
 document.addEventListener('DOMContentLoaded', () => {
   loadTickers();
-  setInterval(loadTickers, 5000); // 5s
+  setInterval(loadTickers, 5000);
 
   loadMovers();
   setInterval(loadMovers, 30000);
@@ -637,7 +634,6 @@ document.addEventListener('DOMContentLoaded', () => {
   loadMarketNews();
   setInterval(loadMarketNews, 180000);
 
-  // default symbol
   setTimeout(() => {
     if (!currentSymbol) onSelect('AAPL');
   }, 300);
