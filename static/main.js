@@ -1,435 +1,397 @@
-// Endpoints -----------------------------------------------------------
-
-const TICKERS_ENDPOINT = "/api/tickers";
-const INSIGHTS_ENDPOINT = "/api/insights";
+// Endpoints
+const TICKER_ENDPOINT = "/api/tickers";
 const MOVERS_ENDPOINT = "/api/movers";
+const QUOTE_ENDPOINT = "/api/quote";
+const INSIGHTS_ENDPOINT = "/api/insights";
 const NEWS_ENDPOINT = "/api/news";
+const MARKET_NEWS_ENDPOINT = "/api/market-news";
 
-// DOM -----------------------------------------------------------------
-
+// DOM
 const tickerScroll = document.getElementById("tickerScroll");
-const tvContainer = document.getElementById("tvContainer");
 const chartTitle = document.getElementById("chartTitle");
 const insightsTitle = document.getElementById("insightsTitle");
-const companyDescription = document.getElementById("companyDescription");
-
-const perfEls = {
-  "1W": document.getElementById("perf1W"),
-  "1M": document.getElementById("perf1M"),
-  "3M": document.getElementById("perf3M"),
-  "6M": document.getElementById("perf6M"),
-  YTD: document.getElementById("perfYTD"),
-  "1Y": document.getElementById("perf1Y"),
-};
-
+const insightsDescription = document.getElementById("insightsDescription");
+const newsList = document.getElementById("newsList");
 const gainersBody = document.getElementById("gainersBody");
 const losersBody = document.getElementById("losersBody");
-const newsList = document.getElementById("newsList");
-
-const themeToggle = document.getElementById("themeToggle");
-const settingsBtn = document.getElementById("settingsBtn");
-const settingsMenu = document.getElementById("settingsMenu");
-
-// State ---------------------------------------------------------------
 
 let currentSymbol = "AAPL";
-let tickerNodes = new Map();
+let tickerData = [];
+let tickerAnimationRunning = false;
+let heatmapLoaded = false;
+let heatmapRefreshTimer = null;
 
-// Helpers -------------------------------------------------------------
+const perfIds = ["1W", "1M", "3M", "6M", "YTD", "1Y"];
 
-async function fetchJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return await res.json();
-}
-
+// ---------------------- helpers ----------------------
 function fmtPct(v) {
-  if (v == null || isNaN(v)) return "0.00%";
+  if (v === null || v === undefined || !isFinite(v)) return "—";
   const sign = v > 0 ? "+" : v < 0 ? "−" : "";
   return `${sign}${Math.abs(v).toFixed(2)}%`;
 }
 
-function fmtPctNoSign(v) {
-  if (v == null || isNaN(v)) return "—";
-  const sign = v > 0 ? "+" : v < 0 ? "−" : "";
-  return `${sign}${Math.abs(v).toFixed(2)}%`;
+function classForChange(v) {
+  if (v > 0) return "pos";
+  if (v < 0) return "neg";
+  return "";
 }
 
-function clearChildren(el) {
-  while (el.firstChild) el.removeChild(el.firstChild);
+async function getJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
 }
 
-// Theme ---------------------------------------------------------------
-
-function applyTheme(theme) {
-  document.documentElement.setAttribute("data-theme", theme);
-  localStorage.setItem("mt_theme", theme);
-  themeToggle.checked = theme === "light";
-}
-
-function initTheme() {
-  const stored = localStorage.getItem("mt_theme");
-  const theme = stored === "light" ? "light" : "dark";
-  applyTheme(theme);
-  themeToggle.addEventListener("change", () => {
-    applyTheme(themeToggle.checked ? "light" : "dark");
-  });
-}
-
-// Settings menu -------------------------------------------------------
-
-function initSettingsMenu() {
-  settingsBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    settingsMenu.classList.toggle("open");
-  });
-
-  document.addEventListener("click", (e) => {
-    if (!settingsMenu.contains(e.target) && e.target !== settingsBtn) {
-      settingsMenu.classList.remove("open");
-    }
-  });
-
-  // Tile toggles
-  const toggles = settingsMenu.querySelectorAll("[data-tile-toggle]");
-  toggles.forEach((toggle) => {
-    const name = toggle.dataset.tileToggle;
-    const tile = document.querySelector(`.tile[data-tile="${name}"]`);
-    if (!tile) return;
-
-    toggle.addEventListener("change", () => {
-      tile.classList.toggle("hidden", !toggle.checked);
-    });
-  });
-
-  // Tile close buttons
-  const closes = document.querySelectorAll("[data-tile-close]");
-  closes.forEach((btn) => {
-    const name = btn.dataset.tileClose;
-    const tile = document.querySelector(`.tile[data-tile="${name}"]`);
-    const toggle = settingsMenu.querySelector(
-      `[data-tile-toggle="${name}"]`
-    );
-    if (!tile) return;
-    btn.addEventListener("click", () => {
-      tile.classList.add("hidden");
-      if (toggle) toggle.checked = false;
-    });
-  });
-}
-
-// TradingView ---------------------------------------------------------
-
-function tradingViewSymbol(sym) {
-  if (sym === "SPX_INDEX") return "CAPITALCOM:US500";
-  if (sym === "NDX_INDEX") return "CAPITALCOM:US100";
-  return sym;
+// ---------------------- TradingView ----------------------
+function tvSymbol(symbol) {
+  // assume most are NASDAQ; works for ^GSPC, ^NDX automatically
+  if (symbol === "SP500") return "CURRENCYCOM:US500";
+  if (symbol === "NASDAQ") return "CURRENCYCOM:US100";
+  return `NASDAQ:${symbol}`;
 }
 
 function mountTradingView(symbol) {
+  const container = document.getElementById("tv_container");
+  container.innerHTML = "";
   chartTitle.textContent = `Chart – ${symbol}`;
-  tvContainer.innerHTML = "";
-
   if (typeof TradingView === "undefined" || !TradingView.widget) {
-    const div = document.createElement("div");
-    div.className = "muted";
-    div.style.padding = "8px";
-    div.textContent =
-      "TradingView widget could not load (check adblock or network).";
-    tvContainer.appendChild(div);
+    container.textContent = "TradingView failed to load.";
     return;
   }
-
   new TradingView.widget({
-    symbol: tradingViewSymbol(symbol),
+    container_id: "tv_container",
+    symbol: tvSymbol(symbol),
     interval: "60",
     timezone: "Etc/UTC",
-    theme:
-      document.documentElement.getAttribute("data-theme") === "light"
-        ? "light"
-        : "dark",
+    theme: document.body.classList.contains("theme-dark") ? "dark" : "light",
     style: "1",
-    toolbar_bg: "#000000",
-    locale: "en",
-    enable_publishing: false,
+    toolbar_bg: "rgba(0,0,0,0)",
+    hide_side_toolbar: false,
+    hide_top_toolbar: false,
     allow_symbol_change: false,
-    container_id: "tvContainer",
     autosize: true,
   });
 }
 
-// Ticker bar ----------------------------------------------------------
+// ---------------------- ticker tape ----------------------
+function buildTickerTape(data) {
+  tickerScroll.innerHTML = "";
+  const row = document.createElement("div");
+  row.className = "ticker-row";
 
-function buildTickerBar(data) {
-  clearChildren(tickerScroll);
-  tickerNodes.clear();
-
-  const extended = data.concat(data);
-
-  extended.forEach((row) => {
+  data.forEach((tk) => {
     const item = document.createElement("div");
     item.className = "ticker-item";
-    item.dataset.symbol = row.symbol;
+    item.dataset.sym = tk.symbol;
 
-    const symSpan = document.createElement("span");
-    symSpan.className = "ticker-symbol";
-    symSpan.textContent = row.symbol;
+    const s = document.createElement("span");
+    s.className = "sym";
+    s.textContent = tk.symbol;
 
-    const priceSpan = document.createElement("span");
-    priceSpan.className = "ticker-price";
-    priceSpan.textContent =
-      row.price != null ? row.price.toFixed(2) : "—";
+    const p = document.createElement("span");
+    p.className = "price";
+    p.textContent =
+      tk.price !== null && tk.price !== undefined ? tk.price.toFixed(2) : "—";
 
-    const chgSpan = document.createElement("span");
-    chgSpan.className = "ticker-change";
-    const chg = row.change_pct ?? 0;
-    if (chg > 0) chgSpan.classList.add("chg-pos");
-    else if (chg < 0) chgSpan.classList.add("chg-neg");
-    chgSpan.textContent = fmtPct(chg);
+    const c = document.createElement("span");
+    c.className = `chg ${classForChange(tk.change_pct)}`;
+    c.textContent = fmtPct(tk.change_pct);
 
-    item.appendChild(symSpan);
-    item.appendChild(priceSpan);
-    item.appendChild(chgSpan);
+    item.appendChild(s);
+    item.appendChild(p);
+    item.appendChild(c);
 
-    item.addEventListener("click", () =>
-      onSymbolSelect(row.symbol)
-    );
+    item.addEventListener("click", () => {
+      onSymbolSelect(tk.symbol);
+    });
 
-    tickerScroll.appendChild(item);
-
-    if (!tickerNodes.has(row.symbol)) {
-      tickerNodes.set(row.symbol, { priceSpan, chgSpan });
-    }
+    row.appendChild(item);
   });
+
+  // Duplicate row for smooth scrolling
+  const row2 = row.cloneNode(true);
+  tickerScroll.appendChild(row);
+  tickerScroll.appendChild(row2);
+
+  // trigger animation
+  tickerScroll.classList.remove("animate");
+  void tickerScroll.offsetWidth;
+  tickerScroll.classList.add("animate");
 }
 
-function updateTickerBar(data) {
-  data.forEach((row) => {
-    const nodes = tickerNodes.get(row.symbol);
-    if (!nodes) return;
-    if (row.price != null) {
-      nodes.priceSpan.textContent = row.price.toFixed(2);
-    }
-    const chg = row.change_pct ?? 0;
-    nodes.chgSpan.textContent = fmtPct(chg);
-    nodes.chgSpan.classList.remove("chg-pos", "chg-neg");
-    if (chg > 0) nodes.chgSpan.classList.add("chg-pos");
-    else if (chg < 0) nodes.chgSpan.classList.add("chg-neg");
-  });
-}
-
-async function loadTickers(initial = false) {
+async function loadTickers() {
   try {
-    const data = await fetchJSON(TICKERS_ENDPOINT);
-    if (initial || tickerNodes.size === 0) {
-      if (data.length && !initial) {
-        currentSymbol = currentSymbol || data[0].symbol;
-      }
-      buildTickerBar(data);
-    } else {
-      updateTickerBar(data);
-    }
-  } catch (err) {
-    console.error("tickers error", err);
+    const data = await getJSON(TICKER_ENDPOINT);
+    if (!Array.isArray(data) || !data.length) return;
+    tickerData = data;
+    buildTickerTape(data);
+  } catch (e) {
+    // quietly ignore; keep last values
   }
 }
 
-// Insights ------------------------------------------------------------
+// ---------------------- movers ----------------------
+function renderMovers(movers) {
+  gainersBody.innerHTML = "";
+  losersBody.innerHTML = "";
 
-function renderInsights(perf, description) {
-  const keys = ["1W", "1M", "3M", "6M", "YTD", "1Y"];
-
-  keys.forEach((k) => {
-    const el = perfEls[k];
-    if (!el) return;
-    const v = perf[k];
-    el.classList.remove("pos", "neg");
-    if (v == null || isNaN(v)) {
-      el.textContent = "—";
-      return;
-    }
-    el.textContent = fmtPctNoSign(v);
-    if (v > 0) el.classList.add("pos");
-    else if (v < 0) el.classList.add("neg");
-  });
-
-  companyDescription.textContent =
-    description || "No company profile available at this time.";
-}
-
-async function loadInsights(symbol) {
-  try {
-    const data = await fetchJSON(
-      `${INSIGHTS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`
-    );
-    insightsTitle.textContent = `Market Insights: ${
-      data.symbol || symbol
-    }`;
-    renderInsights(data.performance || {}, data.description || "");
-  } catch (err) {
-    console.error("insights error", err);
-    renderInsights({}, "");
-  }
-}
-
-// Movers --------------------------------------------------------------
-
-function renderMovers(data) {
-  const gainers = data.gainers || [];
-  const losers = data.losers || [];
-
-  clearChildren(gainersBody);
-  clearChildren(losersBody);
-
-  function addRow(tbody, row) {
+  (movers.gainers || []).forEach((g) => {
     const tr = document.createElement("tr");
+    tr.className = "click-row";
     tr.innerHTML = `
-      <td>${row.symbol}</td>
-      <td style="text-align:right">${row.price?.toFixed(2) ?? "—"}</td>
-      <td style="text-align:right">${fmtPct(row.change_pct)}</td>
+      <td>${g.symbol}</td>
+      <td class="num">${g.price ? g.price.toFixed(2) : "—"}</td>
+      <td class="num ${classForChange(g.change_pct)}">${fmtPct(
+      g.change_pct
+    )}</td>
     `;
-    tr.addEventListener("click", () =>
-      onSymbolSelect(row.symbol)
-    );
-    tbody.appendChild(tr);
-  }
-
-  gainers.forEach((r) => addRow(gainersBody, r));
-  losers.forEach((r) => addRow(losersBody, r));
-
-  if (!gainers.length) {
-    const tr = document.createElement("tr");
-    tr.innerHTML =
-      '<td colspan="3" class="muted">No data.</td>';
+    tr.addEventListener("click", () => onSymbolSelect(g.symbol));
     gainersBody.appendChild(tr);
-  }
-  if (!losers.length) {
+  });
+
+  (movers.losers || []).forEach((l) => {
     const tr = document.createElement("tr");
-    tr.innerHTML =
-      '<td colspan="3" class="muted">No data.</td>';
+    tr.className = "click-row";
+    tr.innerHTML = `
+      <td>${l.symbol}</td>
+      <td class="num">${l.price ? l.price.toFixed(2) : "—"}</td>
+      <td class="num ${classForChange(l.change_pct)}">${fmtPct(
+      l.change_pct
+    )}</td>
+    `;
+    tr.addEventListener("click", () => onSymbolSelect(l.symbol));
     losersBody.appendChild(tr);
-  }
+  });
 }
 
 async function loadMovers() {
   try {
-    const data = await fetchJSON(MOVERS_ENDPOINT);
+    const data = await getJSON(`${MOVERS_ENDPOINT}?limit=5`);
     renderMovers(data);
-  } catch (err) {
-    console.error("movers error", err);
-    clearChildren(gainersBody);
-    clearChildren(losersBody);
-    const tr1 = document.createElement("tr");
-    tr1.innerHTML =
-      '<td colspan="3" class="muted">Failed to load.</td>';
-    gainersBody.appendChild(tr1);
-    const tr2 = document.createElement("tr");
-    tr2.innerHTML =
-      '<td colspan="3" class="muted">Failed to load.</td>';
-    losersBody.appendChild(tr2);
+  } catch (e) {
+    // ignore
   }
 }
 
-// News ---------------------------------------------------------------
+// ---------------------- insights ----------------------
+function renderInsights(data) {
+  insightsTitle.textContent = `Market Insights: ${data.symbol}`;
+  perfIds.forEach((id) => {
+    const el = document.getElementById(`perf-${id}`);
+    if (!el) return;
+    const v = data.periods[id];
+    el.textContent = fmtPct(v);
+    el.className = `value ${classForChange(v)}`;
+  });
+  insightsDescription.textContent = data.description || "No profile available.";
+}
 
-function renderNewsList(container, articles, emptyText) {
-  clearChildren(container);
+async function loadInsights(symbol) {
+  try {
+    const data = await getJSON(
+      `${INSIGHTS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`
+    );
+    renderInsights(data);
+  } catch (e) {
+    insightsDescription.textContent = "Could not load insights.";
+  }
+}
+
+// ---------------------- news ----------------------
+function renderNews(articles) {
+  newsList.innerHTML = "";
   if (!articles || !articles.length) {
-    const div = document.createElement("div");
-    div.className = "muted";
-    div.textContent = emptyText;
-    container.appendChild(div);
+    newsList.textContent = "No headlines.";
     return;
   }
-
-  articles.forEach((a) => {
+  articles.forEach((n) => {
     const item = document.createElement("div");
     item.className = "news-item";
-
-    const link = document.createElement("a");
-    link.href = a.url || "#";
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = a.title || "(untitled)";
+    const a = document.createElement("a");
+    a.href = n.url || "#";
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.textContent = n.title || "(untitled)";
 
     const meta = document.createElement("div");
     meta.className = "news-meta";
-    const src = a.source || "Unknown";
-    const ts = a.published_at || "";
-    meta.textContent = ts ? `${src} · ${ts}` : src;
+    meta.textContent = `${n.source || "Source"}${
+      n.published_at ? " · " + n.published_at : ""
+    }`;
 
-    item.appendChild(link);
+    item.appendChild(a);
     item.appendChild(meta);
-    container.appendChild(item);
+    newsList.appendChild(item);
   });
 }
 
 async function loadNews(symbol) {
-  newsList.innerHTML =
-    '<div class="muted">Loading news…</div>';
+  newsList.textContent = "Loading news...";
   try {
-    const data = await fetchJSON(
+    const data = await getJSON(
       `${NEWS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`
     );
-    renderNewsList(newsList, data, "No headlines.");
-  } catch (err) {
-    console.error("news error", err);
-    renderNewsList(
-      newsList,
-      [],
-      "Failed to load news."
-    );
+    renderNews(data);
+  } catch (e) {
+    newsList.textContent = "Failed to load news.";
   }
 }
 
-// Symbol selection & shortcuts --------------------------------------
-
+// ---------------------- selection ----------------------
 async function onSymbolSelect(symbol) {
   currentSymbol = symbol;
-
-  chartTitle.textContent = `Chart – ${symbol}`;
-  insightsTitle.textContent = `Market Insights: ${symbol}`;
-
   mountTradingView(symbol);
-
-  await Promise.all([
-    loadInsights(symbol),
-    loadNews(symbol),
-  ]);
+  await Promise.all([loadInsights(symbol), loadNews(symbol)]);
 }
 
-function initShortcuts() {
-  const buttons = document.querySelectorAll(
-    ".shortcut-btn"
-  );
-  buttons.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const type = btn.dataset.shortcut;
-      if (type === "spx") {
-        onSymbolSelect("SPX_INDEX");
-      } else if (type === "nasdaq") {
-        onSymbolSelect("NDX_INDEX");
-      }
+// ---------------------- theme + menu ----------------------
+function initTheme() {
+  const toggle = document.getElementById("themeToggle");
+  if (!toggle) return;
+
+  const stored = localStorage.getItem("mt-theme");
+  if (stored === "light") {
+    document.body.classList.remove("theme-dark");
+    document.body.classList.add("theme-light");
+    toggle.checked = false;
+  } else {
+    document.body.classList.add("theme-dark");
+    toggle.checked = true;
+  }
+
+  toggle.addEventListener("change", () => {
+    if (toggle.checked) {
+      document.body.classList.remove("theme-light");
+      document.body.classList.add("theme-dark");
+      localStorage.setItem("mt-theme", "dark");
+    } else {
+      document.body.classList.remove("theme-dark");
+      document.body.classList.add("theme-light");
+      localStorage.setItem("mt-theme", "light");
+    }
+    // remount chart with new theme
+    mountTradingView(currentSymbol);
+  });
+}
+
+function initMenu() {
+  const btn = document.getElementById("settingsButton");
+  const menu = document.getElementById("settingsMenu");
+  if (!btn || !menu) return;
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menu.classList.toggle("hidden");
+  });
+
+  document.addEventListener("click", () => {
+    menu.classList.add("hidden");
+  });
+
+  menu.addEventListener("click", (e) => e.stopPropagation());
+
+  // tile toggles
+  const checks = menu.querySelectorAll("input[type=checkbox][data-tile]");
+  checks.forEach((ch) => {
+    ch.addEventListener("change", () => {
+      const tileId = ch.getAttribute("data-tile");
+      const tile = document.getElementById(tileId);
+      if (!tile) return;
+      tile.style.display = ch.checked ? "" : "none";
+    });
+  });
+
+  // tile close buttons
+  const closeBtns = document.querySelectorAll("[data-tile-close]");
+  closeBtns.forEach((b) => {
+    b.addEventListener("click", () => {
+      const id = b.getAttribute("data-tile-close");
+      const tile = document.getElementById(id);
+      if (!tile) return;
+      tile.style.display = "none";
+      // uncheck in menu
+      const chk = menu.querySelector(`input[data-tile="${id}"]`);
+      if (chk) chk.checked = false;
     });
   });
 }
 
-// Boot ----------------------------------------------------------------
+// ---------------------- heatmap ----------------------
+function showHeatmap() {
+  const overlay = document.getElementById("heatmapOverlay");
+  overlay.classList.add("visible");
 
-function init() {
-  initTheme();
-  initSettingsMenu();
-  initShortcuts();
+  const container = document.getElementById("heatmapWidget");
+  if (!heatmapLoaded) {
+    container.innerHTML = "";
+    const script = document.createElement("script");
+    script.src =
+      "https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js";
+    script.type = "text/javascript";
+    script.async = true;
+    script.innerHTML = `
+    {
+      "dataSource": "SPX500",
+      "grouping": "sector",
+      "blockSize": "market_cap_basic",
+      "blockColor": "change",
+      "locale": "en",
+      "colorTheme": "${
+        document.body.classList.contains("theme-dark") ? "dark" : "light"
+      }",
+      "symbolUrl": "",
+      "hasTopBar": true,
+      "isZoomEnabled": true,
+      "width": "100%",
+      "height": "100%"
+    }`;
+    container.appendChild(script);
+    heatmapLoaded = true;
+  }
 
-  // Always show something, even if /api/tickers has issues
-  onSymbolSelect(currentSymbol).catch(console.error);
-
-  // Fire-and-forget background loads
-  loadTickers(true).catch(console.error);
-  loadMovers().catch(console.error);
-
-  setInterval(() => loadTickers(false).catch(console.error), 60_000);
-  setInterval(() => loadMovers().catch(console.error), 120_000);
+  if (heatmapRefreshTimer) clearInterval(heatmapRefreshTimer);
+  heatmapRefreshTimer = setInterval(() => {
+    heatmapLoaded = false;
+    showHeatmap();
+  }, 60 * 60 * 1000);
 }
 
-document.addEventListener("DOMContentLoaded", init);
+function hideHeatmap() {
+  const overlay = document.getElementById("heatmapOverlay");
+  overlay.classList.remove("visible");
+}
+
+// ---------------------- shortcuts ----------------------
+function initShortcuts() {
+  const spBtn = document.getElementById("sp500Button");
+  const ndBtn = document.getElementById("nasdaqButton");
+  if (spBtn)
+    spBtn.addEventListener("click", () => {
+      onSymbolSelect("SP500");
+    });
+  if (ndBtn)
+    ndBtn.addEventListener("click", () => {
+      onSymbolSelect("NASDAQ");
+    });
+
+  const hBtn = document.getElementById("heatmapButton");
+  const hClose = document.getElementById("heatmapClose");
+  if (hBtn) hBtn.addEventListener("click", showHeatmap);
+  if (hClose) hClose.addEventListener("click", hideHeatmap);
+}
+
+// ---------------------- boot ----------------------
+document.addEventListener("DOMContentLoaded", () => {
+  initTheme();
+  initMenu();
+  initShortcuts();
+
+  loadTickers();
+  setInterval(loadTickers, 15000);
+  loadMovers();
+  setInterval(loadMovers, 30000);
+
+  onSymbolSelect(currentSymbol);
+
+  // pause ticker animation on hover is handled by CSS
+});
