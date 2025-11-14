@@ -120,10 +120,10 @@ const clsFor = v => (v > 0 ? 'pos' : v < 0 ? 'neg' : 'neu');
 
 // ---------------- quick shortcuts ----------------
 spxBtn.addEventListener('click', () => onSelect('SPY', 'CAPITALCOM:US500'));
-ndxBtn.addEventListener('click', () => onSelect('QQQ', 'OANDA:NAS100USD'));
+ndxBtn.addEventListener('click', () => onSelect('QQQ', 'CAPITALCOM:US100'));
 
 // ---------------- layout: two lanes, left flexible, right locked ----------------
-const LAYOUT_KEY = 'mt_layout_v2';
+const LAYOUT_KEY = 'mt_layout_v3';
 let lanePct = 60; // % width of left lane
 
 function setLaneWidths(pct) {
@@ -409,7 +409,7 @@ function mountTV(symbol, override = null) {
   });
 }
 
-// ---------------- ticker bar (all items clickable, smooth marquee) ----------------
+// ---------------- ticker bar (clickable, smooth marquee, 5s updates) ---------
 const tickerNodes = new Map(); // sym -> {priceEls:[], chgEls:[], last:number}
 let marqueeId = 0;
 let offsetX = 0;
@@ -629,7 +629,7 @@ async function onSelect(symbol, override = null) {
 // ---------------- boot ----------------
 document.addEventListener('DOMContentLoaded', () => {
   loadTickers();
-  setInterval(loadTickers, 25000);
+  setInterval(loadTickers, 5000); // 5s
 
   loadMovers();
   setInterval(loadMovers, 30000);
