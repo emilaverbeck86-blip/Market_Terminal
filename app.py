@@ -14,7 +14,6 @@ from fastapi.staticfiles import StaticFiles
 # -------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
-INDEX_FILE = BASE_DIR / "index.html"
 
 app = FastAPI(title="Market Terminal")
 
@@ -44,7 +43,6 @@ async def _shutdown_client():
 # -------------------------------------------------------------------
 
 TICKERS: List[str] = [
-    # Mega & large cap US stocks
     "AAPL",
     "MSFT",
     "NVDA",
@@ -146,7 +144,10 @@ async def _download_quotes(symbols: List[str]) -> Dict[str, Dict[str, float]]:
         out: Dict[str, Dict[str, float]] = {}
 
         # yfinance returns different shapes for 1 vs many tickers
-        if isinstance(data.columns, yf.pandas.MultiIndex):  # type: ignore[attr-defined]
+        if getattr(data, "columns", None) is not None and hasattr(
+            data.columns, "levels"
+        ):
+            # MultiIndex (many tickers)
             for sym in symbols:
                 if sym not in data.columns.levels[0]:
                     continue
@@ -157,6 +158,7 @@ async def _download_quotes(symbols: List[str]) -> Dict[str, Dict[str, float]]:
                 prev = float(df["Close"].iloc[-2]) if len(df) > 1 else last
                 out[sym] = {"last": last, "prev": prev}
         else:
+            # single symbol
             df = data.dropna()
             if len(df) > 0:
                 last = float(df["Close"].iloc[-1])
@@ -171,8 +173,7 @@ async def _download_quotes(symbols: List[str]) -> Dict[str, Dict[str, float]]:
 
 async def _get_ticker_rows() -> List[Dict[str, Any]]:
     """
-    Return list of {symbol, price, change_pct}, cached for ~60s
-    so the free Yahoo backend isn't hammered.
+    Return list of {symbol, price, change_pct}, cached for ~60s.
     """
     now = time.time()
     if now - _quotes_cache["ts"] < 60 and _quotes_cache["rows"]:
@@ -317,7 +318,6 @@ async def symbol_metrics(symbol: str) -> Dict[str, Any]:
     """
 
     def _run_hist() -> Dict[str, Any]:
-        # 2y of daily data for performance
         hist = yf.download(
             symbol,
             period="2y",
@@ -339,11 +339,12 @@ async def symbol_metrics(symbol: str) -> Dict[str, Any]:
         last_date = closes.index[-1]
         last_price = float(closes.iloc[-1])
 
+        from datetime import timedelta, datetime
+
         def pct_from(days: int) -> Optional[float]:
             if days <= 0:
                 return None
-            cutoff = last_date - yf.utils._datetime.timedelta(days=days)  # type: ignore[attr-defined]
-            # get first date >= cutoff
+            cutoff = last_date - timedelta(days=days)
             past = closes[closes.index >= cutoff]
             if past.empty:
                 return None
@@ -363,8 +364,8 @@ async def symbol_metrics(symbol: str) -> Dict[str, Any]:
 
         # YTD: price from first trading day of the year
         try:
-            year_start = yf.utils._datetime.datetime(  # type: ignore[attr-defined]
-                last_date.year, 1, 1, tzinfo=last_date.tz
+            year_start = datetime(
+                last_date.year, 1, 1, tzinfo=getattr(last_date, "tzinfo", None)
             )
             past = closes[closes.index >= year_start]
             if not past.empty:
@@ -399,60 +400,46 @@ async def symbol_metrics(symbol: str) -> Dict[str, Any]:
 async def root():
     """
     Serve the main SPA HTML.
+    We search for index.html in several common locations so the app
+    still works if the file is in templates/ or static/.
     """
-    if not INDEX_FILE.exists():
-        return HTMLResponse("<h1>index.html not found</h1>", status_code=500)
-    return INDEX_FILE.read_text(encoding="utf-8")
+    candidates = [
+        BASE_DIR / "index.html",
+        BASE_DIR / "templates" / "index.html",
+        BASE_DIR / "static" / "index.html",
+        BASE_DIR / "public" / "index.html",
+    ]
+
+    for path in candidates:
+        if path.exists():
+            return HTMLResponse(path.read_text(encoding="utf-8"))
+
+    # If nothing found, show a clear error
+    msg = "<h1>index.html not found</h1><p>Looked in:</p><ul>"
+    for p in candidates:
+        msg += f"<li>{p}</li>"
+    msg += "</ul>"
+    return HTMLResponse(msg, status_code=500)
 
 
 @app.get("/api/tickers")
 async def api_tickers():
-    """
-    List of tickers for the scrolling bar:
-    [
-      { "symbol": "AAPL", "price": 173.42, "change_pct": 0.48 },
-      ...
-    ]
-    """
     rows = await _get_ticker_rows()
     return JSONResponse(rows)
 
 
 @app.get("/api/movers")
 async def api_movers():
-    """
-    Top gainers / losers from the same universe.
-    {
-      "gainers": [...],
-      "losers": [...]
-    }
-    """
     rows = await _get_ticker_rows()
-    # filter out rows with no price
     valid = [r for r in rows if r["price"] is not None]
-    # sort by % change
     sorted_rows = sorted(valid, key=lambda r: r["change_pct"])
     losers = sorted_rows[:5]
     gainers = sorted_rows[-5:][::-1]
-
-    return JSONResponse(
-        {
-            "gainers": gainers,
-            "losers": losers,
-        }
-    )
+    return JSONResponse({"gainers": gainers, "losers": losers})
 
 
 @app.get("/api/metrics")
 async def api_metrics(symbol: str = Query(...)):
-    """
-    Market Insights panel:
-    {
-      "symbol": "AAPL",
-      "performance": { "1W": float|None, ... },
-      "profile": { "description": str }
-    }
-    """
     try:
         data = await symbol_metrics(symbol)
     except Exception:
@@ -463,10 +450,6 @@ async def api_metrics(symbol: str = Query(...)):
 
 @app.get("/api/news")
 async def api_news(symbol: str = Query(...)):
-    """
-    Symbol-specific news (Yahoo search). Falls back to generic
-    market news if nothing is found.
-    """
     try:
         data = await symbol_news(symbol, limit=30)
     except Exception:
@@ -476,9 +459,6 @@ async def api_news(symbol: str = Query(...)):
 
 @app.get("/api/market-news")
 async def api_market_news():
-    """
-    General US stock market headlines.
-    """
     try:
         data = await market_news(limit=40)
     except Exception:
@@ -487,7 +467,7 @@ async def api_market_news():
 
 
 # -------------------------------------------------------------------
-# Local dev entrypoint (not used on Render, but handy if you run uvicorn manually)
+# Local dev entrypoint
 # -------------------------------------------------------------------
 
 if __name__ == "__main__":
