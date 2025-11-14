@@ -38,7 +38,7 @@ async function getJSON(url) {
   return r.json();
 }
 
-// TradingView
+/* TradingView symbol mapping */
 function tvSymbol(symbol) {
   if (symbol === "SP500") return "CURRENCYCOM:US500";
   if (symbol === "NASDAQ") return "CURRENCYCOM:US100";
@@ -68,11 +68,12 @@ function mountTradingView(symbol) {
   });
 }
 
-// ticker tape
+/* ticker tape */
+
 function buildTickerTape(data) {
   tickerScroll.innerHTML = "";
-  const row = document.createElement("div");
-  row.className = "ticker-row";
+  const row1 = document.createElement("div");
+  row1.className = "ticker-row";
 
   data.forEach((tk) => {
     const item = document.createElement("div");
@@ -100,11 +101,12 @@ function buildTickerTape(data) {
       onSymbolSelect(tk.symbol);
     });
 
-    row.appendChild(item);
+    row1.appendChild(item);
   });
 
-  const row2 = row.cloneNode(true);
-  tickerScroll.appendChild(row);
+  const row2 = row1.cloneNode(true);
+
+  tickerScroll.appendChild(row1);
   tickerScroll.appendChild(row2);
 
   tickerScroll.classList.remove("animate");
@@ -119,11 +121,12 @@ async function loadTickers() {
     tickerData = data;
     buildTickerTape(data);
   } catch (e) {
-    // keep old ticker tape
+    // keep old tape
   }
 }
 
-// movers
+/* movers */
+
 function renderMovers(movers) {
   gainersBody.innerHTML = "";
   losersBody.innerHTML = "";
@@ -166,7 +169,8 @@ async function loadMovers() {
   }
 }
 
-// insights
+/* insights */
+
 function renderInsights(data) {
   insightsTitle.textContent = `Market Insights: ${data.symbol}`;
   perfIds.forEach((id) => {
@@ -190,7 +194,8 @@ async function loadInsights(symbol) {
   }
 }
 
-// news
+/* news */
+
 function renderNews(articles) {
   newsList.innerHTML = "";
   if (!articles || !articles.length) {
@@ -230,14 +235,16 @@ async function loadNews(symbol) {
   }
 }
 
-// selection
+/* selection */
+
 async function onSymbolSelect(symbol) {
   currentSymbol = symbol;
   mountTradingView(symbol);
   await Promise.all([loadInsights(symbol), loadNews(symbol)]);
 }
 
-// theme + menu
+/* theme + menu */
+
 function initTheme() {
   const toggle = document.getElementById("themeToggle");
   if (!toggle) return;
@@ -305,7 +312,8 @@ function initMenu() {
   });
 }
 
-// heatmap
+/* heatmap */
+
 function showHeatmap() {
   const overlay = document.getElementById("heatmapOverlay");
   overlay.classList.add("visible");
@@ -350,7 +358,8 @@ function hideHeatmap() {
   overlay.classList.remove("visible");
 }
 
-// shortcuts
+/* shortcuts */
+
 function initShortcuts() {
   const spBtn = document.getElementById("sp500Button");
   const ndBtn = document.getElementById("nasdaqButton");
@@ -369,14 +378,63 @@ function initShortcuts() {
   if (hClose) hClose.addEventListener("click", hideHeatmap);
 }
 
-// boot
+/* smooth vertical resizing, row-wide */
+
+function initResizing() {
+  const handles = document.querySelectorAll(".resize-handle");
+  let active = null;
+
+  handles.forEach((handle) => {
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const tile = handle.closest(".tile");
+      if (!tile) return;
+
+      const row = tile.dataset.row;
+      const rowTiles = Array.from(
+        document.querySelectorAll(`.tile[data-row="${row}"]`)
+      );
+
+      const startY = e.clientY;
+      const startHeight = tile.getBoundingClientRect().height;
+
+      function onMove(ev) {
+        const dy = ev.clientY - startY;
+        let newH = startHeight + dy;
+        const min = 200;
+        const max = window.innerHeight - 220;
+        if (newH < min) newH = min;
+        if (newH > max) newH = max;
+
+        rowTiles.forEach((t) => {
+          t.style.height = newH + "px";
+        });
+      }
+
+      function onUp() {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        active = null;
+      }
+
+      active = { onMove, onUp };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  });
+}
+
+/* boot */
+
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
   initMenu();
   initShortcuts();
+  initResizing();
 
   loadTickers();
   setInterval(loadTickers, 15000);
+
   loadMovers();
   setInterval(loadMovers, 30000);
 
