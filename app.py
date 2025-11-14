@@ -41,7 +41,6 @@ templates = Jinja2Templates(directory=TEMPLATE_DIR)
 # Config / watchlist
 # -------------------------------------------------
 
-# Large US-centric watchlist for ticker bar + movers
 WATCHLIST: List[str] = [
     "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "AVGO", "AMD", "NFLX",
     "ADBE", "INTC", "CSCO", "QCOM", "TXN",
@@ -52,7 +51,6 @@ WATCHLIST: List[str] = [
     "XOM", "CVX", "COP", "CAT", "BA", "GE", "UPS", "FDX", "DE",
     "UNH", "LLY", "MRK", "ABBV", "JNJ", "PFE",
     "UBER", "BKNG",
-    # index ETFs (for shortcuts / bar)
     "SPY", "QQQ", "DIA", "IWM",
 ]
 
@@ -76,9 +74,7 @@ def now() -> float:
 async def _get(
     url: str, params: Dict[str, Any] | None = None, timeout: float = 10.0
 ) -> httpx.Response | None:
-    """
-    Basic GET helper with reasonable timeout and user-agent.
-    """
+    """Basic GET helper with timeout and UA."""
     try:
         async with httpx.AsyncClient(
             headers=BASE_HEADERS, timeout=httpx.Timeout(timeout, connect=4)
@@ -95,14 +91,10 @@ async def _get(
 # Quote providers: Yahoo (primary) → Stooq (fallback)
 # -------------------------------------------------
 def _stooq_code(sym: str) -> str:
-    # US stocks on Stooq usually end with .us
     return f"{sym.lower().replace('.', '-')}.us"
 
 
 async def quotes_from_yahoo(symbols: List[str]) -> List[Dict[str, Any]]:
-    """
-    Fetch quotes from Yahoo Finance quote endpoint.
-    """
     out: List[Dict[str, Any]] = []
     for i in range(0, len(symbols), 50):
         chunk = symbols[i : i + 50]
@@ -110,9 +102,14 @@ async def quotes_from_yahoo(symbols: List[str]) -> List[Dict[str, Any]]:
             "https://query1.finance.yahoo.com/v7/finance/quote",
             {"symbols": ",".join(chunk)},
         )
-        items = (
-            resp.json().get("quoteResponse", {}).get("result", []) if resp else []
-        )
+        try:
+            items = (
+                resp.json().get("quoteResponse", {}).get("result", [])
+                if resp is not None
+                else []
+            )
+        except Exception:
+            items = []
         by_sym = {
             (d.get("symbol") or "").upper(): d
             for d in items
@@ -124,12 +121,10 @@ async def quotes_from_yahoo(symbols: List[str]) -> List[Dict[str, Any]]:
             price = None
             change_pct = None
             if d:
-                # price
                 for key in ("regularMarketPrice", "postMarketPrice", "bid"):
                     if d.get(key) is not None:
                         price = float(d[key])
                         break
-                # % change
                 for key in (
                     "regularMarketChangePercent",
                     "postMarketChangePercent",
@@ -137,9 +132,9 @@ async def quotes_from_yahoo(symbols: List[str]) -> List[Dict[str, Any]]:
                 ):
                     if d.get(key) is not None:
                         try:
-                            # for regularMarketChange, need to divide by prev close
-                            if key == "regularMarketChange" and d.get(
-                                "regularMarketPreviousClose"
+                            if (
+                                key == "regularMarketChange"
+                                and d.get("regularMarketPreviousClose") is not None
                             ):
                                 change_pct = (
                                     float(d[key])
@@ -151,6 +146,7 @@ async def quotes_from_yahoo(symbols: List[str]) -> List[Dict[str, Any]]:
                         except Exception:
                             change_pct = None
                         break
+
             out.append(
                 {
                     "symbol": s,
@@ -164,9 +160,6 @@ async def quotes_from_yahoo(symbols: List[str]) -> List[Dict[str, Any]]:
 
 
 async def quotes_from_stooq(symbols: List[str]) -> List[Dict[str, Any]]:
-    """
-    Daily snapshot from Stooq, used as fallback and for simple % calculations.
-    """
     resp = await _get(
         "https://stooq.com/q/l/",
         {"s": ",".join(_stooq_code(s) for s in symbols), "f": "sd2t2ohlc"},
@@ -174,10 +167,13 @@ async def quotes_from_stooq(symbols: List[str]) -> List[Dict[str, Any]]:
     out = [{"symbol": s, "price": None, "change_pct": None} for s in symbols]
     if not resp:
         return out
-    rows = {
-        (row.get("Symbol") or "").strip().lower(): row
-        for row in csv.DictReader(io.StringIO(resp.text))
-    }
+    try:
+        rows = {
+            (row.get("Symbol") or "").strip().lower(): row
+            for row in csv.DictReader(io.StringIO(resp.text))
+        }
+    except Exception:
+        return out
     for idx, s in enumerate(symbols):
         row = rows.get(_stooq_code(s))
         if not row:
@@ -198,16 +194,10 @@ async def quotes_from_stooq(symbols: List[str]) -> List[Dict[str, Any]]:
 
 
 async def stable_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
-    """
-    Core quote function: Yahoo → Stooq, then normalize.
-    Returns list of {symbol, price, change_pct} with change_pct=0 when unknown.
-    """
     data = await quotes_from_yahoo(symbols)
-    # if absolutely nothing has a price, fall back fully to Stooq
     if all(d["price"] is None for d in data):
         data = await quotes_from_stooq(symbols)
     else:
-        # fill missing rows or missing prices from Stooq
         stooq = await quotes_from_stooq(symbols)
         by_s = {d["symbol"].upper(): d for d in stooq}
         for i, d in enumerate(data):
@@ -217,7 +207,6 @@ async def stable_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
                     data[i]["price"] = alt["price"]
                     data[i]["change_pct"] = alt["change_pct"]
 
-    # normalize & ensure change_pct is usable
     norm: List[Dict[str, Any]] = []
     by_symbol = {(d["symbol"] or "").upper(): d for d in data}
     for s in symbols:
@@ -225,9 +214,9 @@ async def stable_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
         price = d.get("price")
         change_pct = d.get("change_pct")
         if price is None:
-            change_pct = None  # we really don't know
+            change_pct = None
         elif change_pct is None:
-            change_pct = 0.0   # treat as flat if we have price but no % info
+            change_pct = 0.0
 
         norm.append(
             {
@@ -251,7 +240,10 @@ async def stooq_history(sym: str, days: int = 800) -> pd.Series:
     )
     if not resp:
         return pd.Series(dtype=float)
-    df = pd.read_csv(io.StringIO(resp.text))
+    try:
+        df = pd.read_csv(io.StringIO(resp.text))
+    except Exception:
+        return pd.Series(dtype=float)
     if df.empty or "Close" not in df:
         return pd.Series(dtype=float)
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
@@ -334,7 +326,11 @@ async def symbol_news(symbol: str, limit: int = 30) -> List[Dict[str, Any]]:
     )
     if not resp:
         return []
-    news = resp.json().get("news", []) or []
+    try:
+        payload = resp.json()
+        news = payload.get("news", []) or []
+    except Exception:
+        news = []
     return [_map_yahoo_news_item(n) for n in news[:limit]]
 
 
@@ -345,7 +341,11 @@ async def market_news(limit: int = 40) -> List[Dict[str, Any]]:
     )
     if not resp:
         return []
-    news = resp.json().get("news", []) or []
+    try:
+        payload = resp.json()
+        news = payload.get("news", []) or []
+    except Exception:
+        news = []
     return [_map_yahoo_news_item(n) for n in news[:limit]]
 
 
@@ -376,12 +376,9 @@ async def api_tickers():
 async def api_movers():
     rows = CACHE["tickers"]["data"] or (await stable_quotes(WATCHLIST))
     valid = [r for r in rows if r.get("price") is not None]
-
-    # Ensure every row has a numeric change_pct for ranking
     for v in valid:
         if v.get("change_pct") is None:
             v["change_pct"] = 0.0
-
     valid.sort(key=lambda x: (x.get("change_pct") or 0.0), reverse=True)
     gainers = valid[:10]
     losers = list(reversed(valid[-10:])) if valid else []
@@ -417,7 +414,11 @@ async def api_metrics(symbol: str = Query(...)):
 
 @app.get("/api/news")
 async def api_news(symbol: str = Query(...)):
-    return JSONResponse(await symbol_news(symbol, 30))
+    try:
+        data = await symbol_news(symbol, 30)
+    except Exception:
+        data = []
+    return JSONResponse(data)
 
 
 @app.get("/api/market-news")
@@ -426,18 +427,16 @@ async def api_marketnews():
     t = now()
     if cache["data"] and t - cache["ts"] < TTL["mktnews"]:
         return JSONResponse(cache["data"])
-    data = await market_news(50)
+    try:
+        data = await market_news(50)
+    except Exception:
+        data = []
     cache["data"] = data
     cache["ts"] = t
     return JSONResponse(data)
 
 
 if __name__ == "__main__":
-    import uvicorn
+  import uvicorn
 
-    uvicorn.run(
-        "app:app",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", "8000")),
-        workers=1,
-    )
+  uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), workers=1)
