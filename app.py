@@ -1,280 +1,330 @@
-from datetime import datetime, timedelta
+import os
+import re
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 
-import httpx
 import yfinance as yf
 from fastapi import FastAPI, Request, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from xml.etree import ElementTree as ET
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 app = FastAPI()
 
-# ---------------------------------------------------------------------
-# Static & templates
-# ---------------------------------------------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+# static + templates
+static_dir = os.path.join(BASE_DIR, "static")
+templates_dir = os.path.join(BASE_DIR, "templates")
 
-# ---------------------------------------------------------------------
-# Symbol universe (ticker bar + movers)
-# ---------------------------------------------------------------------
+if os.path.isdir(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-TICKERS: List[str] = [
-    # Big tech / mega caps
-    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "AVGO", "AMD",
-    "NFLX", "ADBE", "INTC", "CSCO", "QCOM", "TXN",
-    # Financials
-    "JPM", "BAC", "GS", "V", "MA",
-    # Industrials / staples / discretionary
-    "CAT", "HD", "MCD", "DIS", "KO", "PEP",
-    # Energy / healthcare
-    "XOM", "CVX", "UNH", "LLY",
+templates = Jinja2Templates(directory=templates_dir)
+
+analyzer = SentimentIntensityAnalyzer()
+
+# ---------------------------------------------------------
+# Config
+# ---------------------------------------------------------
+WATCHLIST: List[str] = [
+    "AAPL", "MSFT", "NVDA", "AMZN", "META",
+    "GOOGL", "TSLA", "AVGO", "AMD", "NFLX",
+    "ADBE", "INTC", "CSCO", "QCOM", "TXN",
+    "JPM", "BAC", "WFC", "V", "MA",
+    "KO", "PEP", "MCD", "HD", "XOM", "CVX",
 ]
 
-# ---------------------------------------------------------------------
+SYMBOL_MAP: Dict[str, str] = {
+    "SP500": "^GSPC",
+    "NASDAQ": "^NDX",
+}
+
+INDEX_PROFILES: Dict[str, str] = {
+    "SP500": (
+        "The S&P 500 is a stock market index tracking the performance of 500 large "
+        "publicly traded U.S. companies. It is a market-cap-weighted index covering "
+        "all major sectors of the economy. Investors widely use it as a benchmark "
+        "for U.S. large-cap equities and portfolio performance. The S&P 500 is "
+        "maintained by S&P Dow Jones Indices. Many ETFs and index funds replicate "
+        "its composition, making it central to passive investing."
+    ),
+    "NASDAQ": (
+        "The Nasdaq-100 is an index of 100 of the largest non-financial companies "
+        "listed on the Nasdaq Stock Market. It is heavily weighted toward technology, "
+        "communication services, and consumer discretionary sectors. The index is "
+        "popular with growth-oriented investors and is tracked by vehicles such as "
+        "the Invesco QQQ ETF. It is often viewed as a proxy for the performance of "
+        "large U.S. technology and innovation-driven companies."
+    ),
+}
+
+TICKER_CACHE: Dict[str, Any] = {"ts": None, "data": None}
+INSIGHTS_CACHE: Dict[str, Any] = {}
+NEWS_CACHE: Dict[str, Any] = {}
+
+CACHE_TTL_TICKERS = 60
+CACHE_TTL_INSIGHTS = 600
+CACHE_TTL_NEWS = 300
+
+
+# ---------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------
+# ---------------------------------------------------------
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-def _safe_float(v: Any, default: float = 0.0) -> float:
+def truncate_sentences(text: str, max_sentences: int = 6) -> str:
+    if not text:
+        return ""
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return " ".join(parts[:max_sentences])
+
+
+def pct_change(old: float, new: float) -> float:
+    if old is None or new is None or old == 0:
+        return 0.0
+    return (new - old) / old * 100.0
+
+
+def map_symbol_for_yahoo(symbol: str) -> str:
+    return SYMBOL_MAP.get(symbol.upper(), symbol)
+
+
+def yahoo_history(symbol: str, period: str = "1y"):
+    yf_sym = map_symbol_for_yahoo(symbol)
+    t = yf.Ticker(yf_sym)
+    return t.history(period=period, auto_adjust=False)
+
+
+def get_watchlist_snapshot() -> List[Dict[str, Any]]:
+    now = now_utc()
+    if (
+        TICKER_CACHE["data"] is not None
+        and TICKER_CACHE["ts"] is not None
+        and (now - TICKER_CACHE["ts"]).total_seconds() < CACHE_TTL_TICKERS
+    ):
+        return TICKER_CACHE["data"]
+
+    data: List[Dict[str, Any]] = []
+    for sym in WATCHLIST:
+        try:
+            hist = yahoo_history(sym, period="5d")
+            if hist.empty or len(hist) < 2:
+                last = prev = None
+                chg = 0.0
+            else:
+                last = float(hist["Close"].iloc[-1])
+                prev = float(hist["Close"].iloc[-2])
+                chg = pct_change(prev, last)
+            data.append({"symbol": sym, "price": last, "change_pct": chg})
+        except Exception:
+            data.append({"symbol": sym, "price": None, "change_pct": 0.0})
+
+    TICKER_CACHE["ts"] = now
+    TICKER_CACHE["data"] = data
+    return data
+
+
+def build_insights(symbol: str) -> Dict[str, Any]:
+    now = now_utc()
+    cache = INSIGHTS_CACHE.get(symbol)
+    if cache and (now - cache["ts"]).total_seconds() < CACHE_TTL_INSIGHTS:
+        return cache["data"]
+
+    yf_sym = map_symbol_for_yahoo(symbol)
+    t = yf.Ticker(yf_sym)
+
     try:
-        return float(v)
+        hist = t.history(period="1y", auto_adjust=False)
     except Exception:
-        return default
+        hist = None
 
-
-def _daily_snapshot(symbol: str) -> Dict[str, Any] | None:
-    """
-    Simple daily snapshot using yfinance.
-
-    Returns:
-      { "symbol": str, "price": float, "change_pct": float } or None
-    """
-    try:
-        data = yf.download(symbol, period="2d", interval="1d", progress=False)
-        if data.empty:
+    def price_at(delta_days: int | None) -> float | None:
+        if hist is None or hist.empty:
             return None
+        if delta_days is None:
+            year_start = datetime(now.year, 1, 1, tzinfo=hist.index.tz)
+            sub = hist[hist.index >= year_start]
+            if sub.empty:
+                return float(hist["Close"].iloc[0])
+            return float(sub["Close"].iloc[0])
+        target = now - timedelta(days=delta_days)
+        sub = hist[hist.index <= target]
+        if sub.empty:
+            return float(hist["Close"].iloc[0])
+        return float(sub["Close"].iloc[-1])
 
-        closes = data["Close"].tolist()
-        if len(closes) == 1:
-            prev = last = closes[0]
-        else:
-            prev, last = closes[-2], closes[-1]
+    last_price = None
+    if hist is not None and not hist.empty:
+        last_price = float(hist["Close"].iloc[-1])
 
-        last_f = _safe_float(last)
-        prev_f = _safe_float(prev)
-        change_pct = (last_f - prev_f) / prev_f * 100 if prev_f else 0.0
-
-        return {
-            "symbol": symbol,
-            "price": round(last_f, 2),
-            "change_pct": round(change_pct, 2),
+    if last_price is not None:
+        perf = {
+            "1W": pct_change(price_at(7), last_price),
+            "1M": pct_change(price_at(30), last_price),
+            "3M": pct_change(price_at(90), last_price),
+            "6M": pct_change(price_at(180), last_price),
+            "YTD": pct_change(price_at(None), last_price),
+            "1Y": pct_change(price_at(365), last_price),
         }
-    except Exception:
-        return None
+    else:
+        perf = {k: 0.0 for k in ["1W", "1M", "3M", "6M", "YTD", "1Y"]}
+
+    if symbol.upper() in INDEX_PROFILES:
+        description = INDEX_PROFILES[symbol.upper()]
+    else:
+        try:
+            info = t.info or {}
+            description = info.get("longBusinessSummary") or info.get("longName") or ""
+        except Exception:
+            description = ""
+
+    description = truncate_sentences(description, max_sentences=6)
+
+    result = {"symbol": symbol, "periods": perf, "description": description}
+    INSIGHTS_CACHE[symbol] = {"ts": now, "data": result}
+    return result
 
 
-def _performance_series(symbol: str) -> Dict[str, float]:
-    """
-    Simple performance series for a symbol.
-
-    Returns keys:
-      "1W", "1M", "3M", "6M", "YTD", "1Y"
-    """
-    result = {k: 0.0 for k in ["1W", "1M", "3M", "6M", "YTD", "1Y"]}
-
-    try:
-        end = datetime.utcnow()
-        start = end - timedelta(days=365 * 2)
-        history = yf.download(
-            symbol,
-            start=start.strftime("%Y-%m-%d"),
-            end=end.strftime("%Y-%m-%d"),
-            interval="1d",
-            progress=False,
-        )
-        if history.empty:
-            return result
-
-        closes = history["Close"]
-        last_price = _safe_float(closes.iloc[-1])
-        if last_price == 0:
-            return result
-
-        def pct_from_days(days: int) -> float:
-            cutoff = end - timedelta(days=days)
-            subset = closes[closes.index >= cutoff]
-            if subset.empty:
-                return 0.0
-            ref_price = _safe_float(subset.iloc[0])
-            if ref_price == 0:
-                return 0.0
-            return round((last_price - ref_price) / ref_price * 100, 2)
-
-        result["1W"] = pct_from_days(7)
-        result["1M"] = pct_from_days(30)
-        result["3M"] = pct_from_days(90)
-        result["6M"] = pct_from_days(180)
-
-        # YTD
-        this_year_start = datetime(end.year, 1, 1)
-        subset_ytd = closes[closes.index >= this_year_start]
-        if not subset_ytd.empty:
-            ref_ytd = _safe_float(subset_ytd.iloc[0])
-            if ref_ytd:
-                result["YTD"] = round((last_price - ref_ytd) / ref_ytd * 100, 2)
-
-        result["1Y"] = pct_from_days(365)
-        return result
-    except Exception:
-        return result
-
-
-async def _fetch_rss(url: str, source_name: str, limit: int = 20) -> List[Dict[str, Any]]:
-    """
-    Fetch & parse RSS into unified news JSON:
-      { title, url, source, published_at }
-    """
-    items: List[Dict[str, Any]] = []
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(url)
-            r.raise_for_status()
-            root = ET.fromstring(r.text)
-    except Exception:
-        return items
-
-    for item in root.findall(".//item")[:limit]:
-        title = (item.findtext("title") or "").strip()
-        link = (item.findtext("link") or "").strip()
-        pub = (item.findtext("pubDate") or "").strip()
-        if not title:
+def build_news_from_yf_news(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    parsed: List[Dict[str, Any]] = []
+    for n in items or []:
+        try:
+            title = n.get("title") or ""
+            link = n.get("link") or n.get("url") or ""
+            provider = ""
+            if isinstance(n.get("provider"), list) and n["provider"]:
+                provider = n["provider"][0].get("name", "")
+            elif isinstance(n.get("publisher"), str):
+                provider = n["publisher"]
+            ts = n.get("providerPublishTime") or n.get("published_time") or None
+            if isinstance(ts, (int, float)):
+                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                published_at = dt.strftime("%Y-%m-%d %H:%M")
+            else:
+                published_at = ""
+            parsed.append(
+                {
+                    "title": title,
+                    "url": link,
+                    "source": provider,
+                    "published_at": published_at,
+                }
+            )
+        except Exception:
             continue
-        items.append(
-            {
-                "title": title,
-                "url": link,
-                "source": source_name,
-                "published_at": pub,
-            }
-        )
-    return items
+    return parsed
 
 
-# ---------------------------------------------------------------------
+def get_symbol_news(symbol: str) -> List[Dict[str, Any]]:
+    now = now_utc()
+    key = f"sym:{symbol.upper()}"
+    cache = NEWS_CACHE.get(key)
+    if cache and (now - cache["ts"]).total_seconds() < CACHE_TTL_NEWS:
+        return cache["data"]
+
+    yf_sym = map_symbol_for_yahoo(symbol)
+    try:
+        t = yf.Ticker(yf_sym)
+        raw = t.news or []
+    except Exception:
+        raw = []
+
+    data = build_news_from_yf_news(raw)
+    NEWS_CACHE[key] = {"ts": now, "data": data}
+    return data
+
+
+def get_market_news() -> List[Dict[str, Any]]:
+    now = now_utc()
+    key = "market:US"
+    cache = NEWS_CACHE.get(key)
+    if cache and (now - cache["ts"]).total_seconds() < CACHE_TTL_NEWS:
+        return cache["data"]
+
+    try:
+        t = yf.Ticker("SPY")
+        raw = t.news or []
+    except Exception:
+        raw = []
+
+    data = build_news_from_yf_news(raw)
+    NEWS_CACHE[key] = {"ts": now, "data": data}
+    return data
+
+
+# ---------------------------------------------------------
 # Routes
-# ---------------------------------------------------------------------
-
-
-@app.get("/")
-async def root(request: Request):
+# ---------------------------------------------------------
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.get("/api/tickers")
-async def api_tickers() -> JSONResponse:
-    """
-    Ticker bar data:
-      [ {symbol, price, change_pct}, ... ]
-    """
-    rows: List[Dict[str, Any]] = []
-    for sym in TICKERS:
-        snap = _daily_snapshot(sym)
-        if snap:
-            rows.append(snap)
-    return JSONResponse(rows)
-
-
-@app.get("/api/insights")
-async def api_insights(symbol: str = Query("AAPL")) -> JSONResponse:
-    """
-    Market insights tile.
-
-    Returns:
-      {
-        "symbol": "...",
-        "performance": { "1W": ..., ... },
-        "description": "..."
-      }
-    """
-    sym = (symbol or "AAPL").upper()
-    perf = _performance_series(sym)
-
-    desc = ""
-    try:
-        info = yf.Ticker(sym).info
-        desc = info.get("longBusinessSummary") or info.get("longName") or ""
-    except Exception:
-        desc = ""
-
-    return JSONResponse(
-        {
-            "symbol": sym,
-            "performance": perf,
-            "description": desc,
-        }
-    )
+async def api_tickers():
+    data = get_watchlist_snapshot()
+    return JSONResponse(data)
 
 
 @app.get("/api/movers")
-async def api_movers() -> JSONResponse:
-    """
-    Top gainers/losers within watchlist.
-
-    Returns:
-      { "gainers": [...], "losers": [...] }
-    """
-    snaps: List[Dict[str, Any]] = []
-    for sym in TICKERS:
-        snap = _daily_snapshot(sym)
-        if snap:
-            snaps.append(snap)
-
-    gainers = sorted(snaps, key=lambda r: r["change_pct"], reverse=True)[:5]
-    losers = sorted(snaps, key=lambda r: r["change_pct"])[:5]
-
+async def api_movers(limit: int = 5):
+    snapshot = get_watchlist_snapshot()
+    valid = [x for x in snapshot if x["price"] is not None]
+    sorted_by_change = sorted(valid, key=lambda x: x["change_pct"])
+    losers = sorted_by_change[:limit]
+    gainers = list(reversed(sorted_by_change[-limit:]))
     return JSONResponse({"gainers": gainers, "losers": losers})
 
 
-@app.get("/api/news")
-async def api_news(symbol: str = Query("AAPL")) -> JSONResponse:
-    """
-    Symbol-specific news via Yahoo Finance RSS.
-
-    Returns array:
-      {title, url, source, published_at}
-    """
-    sym = (symbol or "AAPL").upper()
-    url = (
-        "https://feeds.finance.yahoo.com/rss/2.0/headline"
-        f"?s={sym}&region=US&lang=en-US"
-    )
+@app.get("/api/quote")
+async def api_quote(symbol: str = Query(...)):
+    yf_sym = map_symbol_for_yahoo(symbol)
+    t = yf.Ticker(yf_sym)
     try:
-        articles = await _fetch_rss(url, "Yahoo Finance", limit=20)
-        return JSONResponse(articles)
+        hist = t.history(period="5d")
+        if hist.empty or len(hist) < 2:
+            price = prev = None
+            chg = 0.0
+        else:
+            price = float(hist["Close"].iloc[-1])
+            prev = float(hist["Close"].iloc[-2])
+            chg = pct_change(prev, price)
     except Exception:
-        return JSONResponse([])
+        price = prev = None
+        chg = 0.0
+
+    return JSONResponse(
+        {"symbol": symbol, "price": price, "previous_close": prev, "change_pct": chg}
+    )
+
+
+@app.get("/api/insights")
+async def api_insights(symbol: str = Query(...)):
+    data = build_insights(symbol)
+    return JSONResponse(data)
+
+
+@app.get("/api/news")
+async def api_news(symbol: str = Query(...)):
+    data = get_symbol_news(symbol)
+    return JSONResponse(data)
 
 
 @app.get("/api/market-news")
-async def api_market_news() -> JSONResponse:
-    """
-    General market headlines (S&P 500 proxy).
-    """
-    url = (
-        "https://feeds.finance.yahoo.com/rss/2.0/headline"
-        "?s=%5EGSPC&region=US&lang=en-US"
-    )
-    try:
-        articles = await _fetch_rss(url, "Yahoo Finance", limit=30)
-        return JSONResponse(articles)
-    except Exception:
-        return JSONResponse([])
+async def api_market_news():
+    data = get_market_news()
+    return JSONResponse(data)
 
 
-@app.get("/health")
-async def health_check():
-    return {"status": "ok"}
+@app.get("/api/sentiment")
+async def api_sentiment(symbol: str = Query(...)):
+    headlines = get_symbol_news(symbol)[:10]
+    text = ". ".join(h["title"] for h in headlines if h.get("title"))
+    if not text:
+        return JSONResponse({"compound": 0.0})
+    score = analyzer.polarity_scores(text)
+    return JSONResponse({"compound": score["compound"]})
