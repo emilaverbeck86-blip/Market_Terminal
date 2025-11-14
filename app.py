@@ -1,442 +1,496 @@
-from __future__ import annotations
-
-import os
-import io
-import csv
+import asyncio
 import time
-import datetime as dt
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import httpx
-import pandas as pd
-from fastapi import FastAPI, Request, Query
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
+import yfinance as yf
+from fastapi import FastAPI, Query
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
-# -------------------------------------------------
-# Paths / FastAPI setup
-# -------------------------------------------------
-BASE = os.path.dirname(os.path.abspath(__file__))
-STATIC_DIR = os.path.join(BASE, "static")
-TEMPLATE_DIR = os.path.join(BASE, "templates")
+# -------------------------------------------------------------------
+# Basic setup
+# -------------------------------------------------------------------
 
-os.makedirs(STATIC_DIR, exist_ok=True)
-os.makedirs(TEMPLATE_DIR, exist_ok=True)
+BASE_DIR = Path(__file__).resolve().parent
+INDEX_FILE = BASE_DIR / "index.html"
 
 app = FastAPI(title="Market Terminal")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+# static files (style.css, main.js)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# single shared HTTP client for Yahoo calls
+_http_client = httpx.AsyncClient(
+    timeout=10.0,
+    headers={
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36"
+        )
+    },
 )
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-templates = Jinja2Templates(directory=TEMPLATE_DIR)
 
-# -------------------------------------------------
-# Config / watchlist
-# -------------------------------------------------
+@app.on_event("shutdown")
+async def _shutdown_client():
+    await _http_client.aclose()
 
-WATCHLIST: List[str] = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "AVGO", "AMD", "NFLX",
-    "ADBE", "INTC", "CSCO", "QCOM", "TXN",
-    "CRM", "ORCL", "IBM", "NOW", "SNOW", "ABNB", "SHOP", "PYPL",
-    "JPM", "BAC", "WFC", "GS", "MS", "V", "MA", "AXP", "BRK-B", "SCHW",
-    "KO", "PEP", "PG", "MCD", "COST", "HD", "LOW", "DIS", "NKE", "SBUX", "TGT", "WMT",
-    "T", "VZ", "CMCSA",
-    "XOM", "CVX", "COP", "CAT", "BA", "GE", "UPS", "FDX", "DE",
-    "UNH", "LLY", "MRK", "ABBV", "JNJ", "PFE",
-    "UBER", "BKNG",
-    "SPY", "QQQ", "DIA", "IWM",
+
+# -------------------------------------------------------------------
+# Universe of tickers (used for ticker bar + movers)
+# -------------------------------------------------------------------
+
+TICKERS: List[str] = [
+    # Mega & large cap US stocks
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AMZN",
+    "META",
+    "GOOGL",
+    "TSLA",
+    "AVGO",
+    "AMD",
+    "NFLX",
+    "ADBE",
+    "INTC",
+    "CSCO",
+    "QCOM",
+    "TXN",
+    "CRM",
+    "ORCL",
+    "NOW",
+    "ABNB",
+    "SHOP",
+    "PYPL",
+    "JPM",
+    "BAC",
+    "WFC",
+    "GS",
+    "MS",
+    "V",
+    "MA",
+    "AXP",
+    "BRK-B",
+    "SCHW",
+    "KO",
+    "PEP",
+    "PG",
+    "MCD",
+    "COST",
+    "HD",
+    "LOW",
+    "DIS",
+    "NKE",
+    "SBUX",
+    "TGT",
+    "WMT",
+    "T",
+    "VZ",
+    "CMCSA",
+    "XOM",
+    "CVX",
+    "COP",
+    "CAT",
+    "BA",
+    "GE",
+    "UPS",
+    "FDX",
+    "DE",
+    "UNH",
+    "LLY",
+    "MRK",
+    "ABBV",
+    "JNJ",
+    "PFE",
+    "UBER",
+    "BKNG",
+    # ETF shortcuts
+    "SPY",
+    "QQQ",
+    "DIA",
+    "IWM",
 ]
 
-BASE_HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "*/*",
-    "Accept-Language": "en-US,en;q=0.9",
+# -------------------------------------------------------------------
+# Helper: yfinance download + simple caching
+# -------------------------------------------------------------------
+
+_quotes_cache: Dict[str, Any] = {
+    "ts": 0.0,
+    "rows": [],  # list of {symbol, price, change_pct}
 }
 
-CACHE: Dict[str, Dict[str, Any]] = {
-    "tickers": {"ts": 0.0, "data": None},
-    "mktnews": {"ts": 0.0, "data": None},
-}
-TTL = {"tickers": 5, "mktnews": 180}  # ticker refresh every 5s
 
+async def _download_quotes(symbols: List[str]) -> Dict[str, Dict[str, float]]:
+    """
+    Download last and previous daily close for a list of symbols.
+    Returns mapping: {symbol: {"last": float, "prev": float}}
+    """
 
-def now() -> float:
-    return time.time()
-
-
-async def _get(
-    url: str, params: Dict[str, Any] | None = None, timeout: float = 10.0
-) -> httpx.Response | None:
-    """Basic GET helper with timeout and UA."""
-    try:
-        async with httpx.AsyncClient(
-            headers=BASE_HEADERS, timeout=httpx.Timeout(timeout, connect=4)
-        ) as client:
-            resp = await client.get(url, params=params)
-            if resp.status_code == 200:
-                return resp
-    except Exception:
-        pass
-    return None
-
-
-# -------------------------------------------------
-# Quote providers: Yahoo (primary) → Stooq (fallback)
-# -------------------------------------------------
-def _stooq_code(sym: str) -> str:
-    return f"{sym.lower().replace('.', '-')}.us"
-
-
-async def quotes_from_yahoo(symbols: List[str]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for i in range(0, len(symbols), 50):
-        chunk = symbols[i : i + 50]
-        resp = await _get(
-            "https://query1.finance.yahoo.com/v7/finance/quote",
-            {"symbols": ",".join(chunk)},
+    def _run() -> Dict[str, Dict[str, float]]:
+        if not symbols:
+            return {}
+        data = yf.download(
+            tickers=" ".join(symbols),
+            period="2d",
+            interval="1d",
+            group_by="ticker",
+            auto_adjust=False,
+            progress=False,
         )
-        try:
-            items = (
-                resp.json().get("quoteResponse", {}).get("result", [])
-                if resp is not None
-                else []
-            )
-        except Exception:
-            items = []
-        by_sym = {
-            (d.get("symbol") or "").upper(): d
-            for d in items
-            if d.get("symbol")
-        }
 
-        for s in chunk:
-            d = by_sym.get(s.upper())
-            price = None
-            change_pct = None
-            if d:
-                for key in ("regularMarketPrice", "postMarketPrice", "bid"):
-                    if d.get(key) is not None:
-                        price = float(d[key])
-                        break
-                for key in (
-                    "regularMarketChangePercent",
-                    "postMarketChangePercent",
-                    "regularMarketChange",
-                ):
-                    if d.get(key) is not None:
-                        try:
-                            if (
-                                key == "regularMarketChange"
-                                and d.get("regularMarketPreviousClose") is not None
-                            ):
-                                change_pct = (
-                                    float(d[key])
-                                    / float(d["regularMarketPreviousClose"])
-                                    * 100
-                                )
-                            else:
-                                change_pct = float(d[key])
-                        except Exception:
-                            change_pct = None
-                        break
+        out: Dict[str, Dict[str, float]] = {}
 
-            out.append(
-                {
-                    "symbol": s,
-                    "price": round(price, 2) if price is not None else None,
-                    "change_pct": round(change_pct, 2)
-                    if change_pct is not None
-                    else None,
-                }
-            )
-    return out
+        # yfinance returns different shapes for 1 vs many tickers
+        if isinstance(data.columns, yf.pandas.MultiIndex):  # type: ignore[attr-defined]
+            for sym in symbols:
+                if sym not in data.columns.levels[0]:
+                    continue
+                df = data[sym].dropna()
+                if len(df) == 0:
+                    continue
+                last = float(df["Close"].iloc[-1])
+                prev = float(df["Close"].iloc[-2]) if len(df) > 1 else last
+                out[sym] = {"last": last, "prev": prev}
+        else:
+            df = data.dropna()
+            if len(df) > 0:
+                last = float(df["Close"].iloc[-1])
+                prev = float(df["Close"].iloc[-2]) if len(df) > 1 else last
+                out[symbols[0]] = {"last": last, "prev": prev}
 
-
-async def quotes_from_stooq(symbols: List[str]) -> List[Dict[str, Any]]:
-    resp = await _get(
-        "https://stooq.com/q/l/",
-        {"s": ",".join(_stooq_code(s) for s in symbols), "f": "sd2t2ohlc"},
-    )
-    out = [{"symbol": s, "price": None, "change_pct": None} for s in symbols]
-    if not resp:
         return out
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _run)
+
+
+async def _get_ticker_rows() -> List[Dict[str, Any]]:
+    """
+    Return list of {symbol, price, change_pct}, cached for ~60s
+    so the free Yahoo backend isn't hammered.
+    """
+    now = time.time()
+    if now - _quotes_cache["ts"] < 60 and _quotes_cache["rows"]:
+        return _quotes_cache["rows"]
+
     try:
-        rows = {
-            (row.get("Symbol") or "").strip().lower(): row
-            for row in csv.DictReader(io.StringIO(resp.text))
-        }
+        qmap = await _download_quotes(TICKERS)
     except Exception:
-        return out
-    for idx, s in enumerate(symbols):
-        row = rows.get(_stooq_code(s))
-        if not row:
+        qmap = {}
+
+    rows: List[Dict[str, Any]] = []
+    for sym in TICKERS:
+        q = qmap.get(sym)
+        if not q:
+            rows.append({"symbol": sym, "price": None, "change_pct": 0.0})
             continue
-        try:
-            c = None if row["Close"] in ("", "-") else float(row["Close"])
-            o = None if row["Open"] in ("", "-") else float(row["Open"])
-            price = round(c, 2) if c is not None else None
-            change_pct = (
-                round(((c - o) / o) * 100, 2)
-                if c not in (None, 0) and o not in (None, 0)
-                else None
-            )
-            out[idx] = {"symbol": s, "price": price, "change_pct": change_pct}
-        except Exception:
-            pass
-    return out
-
-
-async def stable_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
-    data = await quotes_from_yahoo(symbols)
-    if all(d["price"] is None for d in data):
-        data = await quotes_from_stooq(symbols)
-    else:
-        stooq = await quotes_from_stooq(symbols)
-        by_s = {d["symbol"].upper(): d for d in stooq}
-        for i, d in enumerate(data):
-            if d["price"] is None:
-                alt = by_s.get(d["symbol"].upper())
-                if alt:
-                    data[i]["price"] = alt["price"]
-                    data[i]["change_pct"] = alt["change_pct"]
-
-    norm: List[Dict[str, Any]] = []
-    by_symbol = {(d["symbol"] or "").upper(): d for d in data}
-    for s in symbols:
-        d = by_symbol.get(s.upper(), {"symbol": s, "price": None, "change_pct": None})
-        price = d.get("price")
-        change_pct = d.get("change_pct")
-        if price is None:
-            change_pct = None
-        elif change_pct is None:
-            change_pct = 0.0
-
-        norm.append(
+        last = q["last"]
+        prev = q["prev"] or last
+        change_pct = ((last - prev) / prev * 100.0) if prev else 0.0
+        rows.append(
             {
-                "symbol": s,
-                "price": round(price, 2) if isinstance(price, (int, float)) else None,
-                "change_pct": round(change_pct, 2)
-                if isinstance(change_pct, (int, float))
-                else change_pct,
+                "symbol": sym,
+                "price": round(last, 4),
+                "change_pct": change_pct,
             }
         )
-    return norm
+
+    _quotes_cache["ts"] = now
+    _quotes_cache["rows"] = rows
+    return rows
 
 
-# -------------------------------------------------
-# History / performance metrics (Stooq)
-# -------------------------------------------------
-async def stooq_history(sym: str, days: int = 800) -> pd.Series:
-    resp = await _get(
-        "https://stooq.com/q/d/l/",
-        {"s": _stooq_code(sym), "i": "d"},
-    )
-    if not resp:
-        return pd.Series(dtype=float)
+# -------------------------------------------------------------------
+# Helper: Yahoo Finance news
+# -------------------------------------------------------------------
+
+async def _get(url: str, params: Optional[Dict[str, Any]] = None) -> Optional[httpx.Response]:
     try:
-        df = pd.read_csv(io.StringIO(resp.text))
+        resp = await _http_client.get(url, params=params)
+        if resp.status_code != 200:
+            return None
+        return resp
     except Exception:
-        return pd.Series(dtype=float)
-    if df.empty or "Close" not in df:
-        return pd.Series(dtype=float)
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    df = df.dropna(subset=["Date"]).set_index("Date").sort_index()
-    if len(df) > days:
-        df = df.iloc[-days:]
-    return df["Close"].astype(float)
-
-
-def pct(close: pd.Series, bdays: int):
-    if close is None or close.empty or len(close) <= bdays:
         return None
-    a = close.iloc[-(bdays + 1)]
-    b = close.iloc[-1]
-    return None if not a else float((b - a) / a * 100)
 
 
-CURATED: Dict[str, str] = {
-    "AAPL": (
-        "Apple designs the iPhone, Mac, iPad and services such as the App Store, "
-        "Apple Music and iCloud. Its tight hardware–software integration creates "
-        "an ecosystem that keeps users inside the platform, and the company is "
-        "gradually layering in more on-device AI to deepen engagement and services revenue."
-    ),
-    "MSFT": (
-        "Microsoft operates the Windows and Office franchises and runs Azure, one of the "
-        "largest public clouds. Subscriptions like Microsoft 365 add recurring revenue, "
-        "and Copilot brings AI into productivity and developer workflows across the stack."
-    ),
-    "NVDA": (
-        "NVIDIA builds GPUs and full platforms used to train and deploy large AI models. "
-        "Its CUDA software ecosystem and data-center hardware give it a deep competitive "
-        "moat as demand for accelerated computing and generative AI expands."
-    ),
-    "AMZN": (
-        "Amazon combines a global e-commerce and logistics network with AWS, a leading "
-        "cloud infrastructure provider. Advertising and subscription services such as "
-        "Prime add high-margin, recurring revenue on top of the retail footprint."
-    ),
-    "META": (
-        "Meta Platforms operates Facebook, Instagram and WhatsApp. The business is driven "
-        "by targeted advertising, supported by large-scale AI ranking systems, while "
-        "messaging and short-form video continue to deepen user engagement."
-    ),
-    "GOOGL": (
-        "Alphabet owns Google Search, YouTube, Android and Google Cloud. Search and YouTube "
-        "ads fund heavy investment into cloud infrastructure and AI products across the "
-        "consumer and enterprise ecosystem."
-    ),
-}
-
-
-async def profile(symbol: str) -> Dict[str, str]:
-    desc = CURATED.get(
-        symbol.upper(),
-        "U.S. listed company. A concise profile is not available, but this placeholder "
-        "keeps the layout consistent while the terminal focuses on prices and news.",
-    )
-    return {"symbol": symbol, "name": symbol, "description": desc}
-
-
-# -------------------------------------------------
-# News (ticker + market) via Yahoo finance search
-# -------------------------------------------------
-def _map_yahoo_news_item(n: Dict[str, Any]) -> Dict[str, Any]:
-    link = n.get("link") or {}
+def _map_yahoo_news_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    link = item.get("link") or item.get("linkUrl") or ""
+    title = item.get("title") or item.get("headline") or ""
+    source = item.get("publisher") or item.get("provider") or ""
+    ts = item.get("providerPublishTime") or item.get("pubDate")
+    published = ""
+    if isinstance(ts, (int, float)):
+        try:
+            published = time.strftime("%Y-%m-%d %H:%M", time.gmtime(ts))
+        except Exception:
+            published = ""
     return {
-        "title": n.get("title"),
-        "url": link.get("url") or link.get("href"),
-        "source": n.get("publisher") or "Yahoo Finance",
-        "summary": "",
-        "published_at": "",
+        "title": title,
+        "url": link,
+        "source": source,
+        "published_at": published,
     }
 
 
 async def symbol_news(symbol: str, limit: int = 30) -> List[Dict[str, Any]]:
-    resp = await _get(
-        "https://query1.finance.yahoo.com/v1/finance/search",
-        {"q": symbol, "quotesCount": 0, "newsCount": limit},
-    )
-    if not resp:
-        return []
-    try:
-        payload = resp.json()
-        news = payload.get("news", []) or []
-    except Exception:
-        news = []
-    return [_map_yahoo_news_item(n) for n in news[:limit]]
+    """
+    Try multiple Yahoo search queries for the symbol.
+    If all fail or return nothing, fall back to generic market news.
+    """
+    queries = [
+        symbol,
+        f"{symbol} stock",
+        f"{symbol} stock news",
+    ]
+    for q in queries:
+        resp = await _get(
+            "https://query1.finance.yahoo.com/v1/finance/search",
+            {"q": q, "quotesCount": 0, "newsCount": limit},
+        )
+        if not resp:
+            continue
+        try:
+            payload = resp.json()
+            news = payload.get("news", []) or []
+        except Exception:
+            news = []
+        if news:
+            return [_map_yahoo_news_item(n) for n in news[:limit]]
+
+    # Fallback to generic headlines
+    return await market_news(limit=limit)
 
 
 async def market_news(limit: int = 40) -> List[Dict[str, Any]]:
-    resp = await _get(
-        "https://query1.finance.yahoo.com/v1/finance/search",
-        {"q": "markets", "quotesCount": 0, "newsCount": limit},
-    )
-    if not resp:
-        return []
-    try:
-        payload = resp.json()
-        news = payload.get("news", []) or []
-    except Exception:
-        news = []
-    return [_map_yahoo_news_item(n) for n in news[:limit]]
+    """
+    Generic US market headlines using Yahoo search with broad queries.
+    """
+    queries = [
+        "US stock market today",
+        "US stocks",
+        "Wall Street stocks",
+    ]
+    seen_links = set()
+    out: List[Dict[str, Any]] = []
+    for q in queries:
+        resp = await _get(
+            "https://query1.finance.yahoo.com/v1/finance/search",
+            {"q": q, "quotesCount": 0, "newsCount": limit},
+        )
+        if not resp:
+            continue
+        try:
+            payload = resp.json()
+            news = payload.get("news", []) or []
+        except Exception:
+            news = []
+        for item in news:
+            mapped = _map_yahoo_news_item(item)
+            if mapped["url"] and mapped["url"] not in seen_links:
+                seen_links.add(mapped["url"])
+                out.append(mapped)
+            if len(out) >= limit:
+                break
+        if len(out) >= limit:
+            break
+    return out
 
 
-# -------------------------------------------------
+# -------------------------------------------------------------------
+# Helper: metrics / performance + company description
+# -------------------------------------------------------------------
+
+async def symbol_metrics(symbol: str) -> Dict[str, Any]:
+    """
+    Return:
+      {
+        "symbol": "AAPL",
+        "performance": { "1W": float|None, ... },
+        "profile": { "description": str }
+      }
+    """
+
+    def _run_hist() -> Dict[str, Any]:
+        # 2y of daily data for performance
+        hist = yf.download(
+            symbol,
+            period="2y",
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+        )
+        result: Dict[str, Any] = {
+            "performance": {},
+            "profile": {"description": ""},
+        }
+        if hist is None or hist.empty:
+            return result
+
+        closes = hist["Close"].dropna()
+        if closes.empty:
+            return result
+
+        last_date = closes.index[-1]
+        last_price = float(closes.iloc[-1])
+
+        def pct_from(days: int) -> Optional[float]:
+            if days <= 0:
+                return None
+            cutoff = last_date - yf.utils._datetime.timedelta(days=days)  # type: ignore[attr-defined]
+            # get first date >= cutoff
+            past = closes[closes.index >= cutoff]
+            if past.empty:
+                return None
+            base = float(past.iloc[0])
+            if base == 0:
+                return None
+            return (last_price - base) / base * 100.0
+
+        perf_map: Dict[str, Optional[float]] = {
+            "1W": pct_from(7),
+            "1M": pct_from(30),
+            "3M": pct_from(90),
+            "6M": pct_from(180),
+            "YTD": None,
+            "1Y": pct_from(365),
+        }
+
+        # YTD: price from first trading day of the year
+        try:
+            year_start = yf.utils._datetime.datetime(  # type: ignore[attr-defined]
+                last_date.year, 1, 1, tzinfo=last_date.tz
+            )
+            past = closes[closes.index >= year_start]
+            if not past.empty:
+                base = float(past.iloc[0])
+                if base != 0:
+                    perf_map["YTD"] = (last_price - base) / base * 100.0
+        except Exception:
+            pass
+
+        result["performance"] = perf_map
+
+        # company description
+        try:
+            info = yf.Ticker(symbol).get_info()
+            desc = info.get("longBusinessSummary") or ""
+            if desc:
+                result["profile"]["description"] = desc
+        except Exception:
+            pass
+
+        return result
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _run_hist)
+
+
+# -------------------------------------------------------------------
 # Routes
-# -------------------------------------------------
+# -------------------------------------------------------------------
+
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    idx = os.path.join(TEMPLATE_DIR, "index.html")
-    if not os.path.isfile(idx):
-        return PlainTextResponse("templates/index.html missing", status_code=500)
-    return templates.TemplateResponse("index.html", {"request": request})
+async def root():
+    """
+    Serve the main SPA HTML.
+    """
+    if not INDEX_FILE.exists():
+        return HTMLResponse("<h1>index.html not found</h1>", status_code=500)
+    return INDEX_FILE.read_text(encoding="utf-8")
 
 
 @app.get("/api/tickers")
 async def api_tickers():
-    cache = CACHE["tickers"]
-    t = now()
-    if cache["data"] and t - cache["ts"] < TTL["tickers"]:
-        return JSONResponse(cache["data"])
-    data = await stable_quotes(WATCHLIST)
-    cache["data"] = data
-    cache["ts"] = t
-    return JSONResponse(data)
+    """
+    List of tickers for the scrolling bar:
+    [
+      { "symbol": "AAPL", "price": 173.42, "change_pct": 0.48 },
+      ...
+    ]
+    """
+    rows = await _get_ticker_rows()
+    return JSONResponse(rows)
 
 
 @app.get("/api/movers")
 async def api_movers():
-    rows = CACHE["tickers"]["data"] or (await stable_quotes(WATCHLIST))
-    valid = [r for r in rows if r.get("price") is not None]
-    for v in valid:
-        if v.get("change_pct") is None:
-            v["change_pct"] = 0.0
-    valid.sort(key=lambda x: (x.get("change_pct") or 0.0), reverse=True)
-    gainers = valid[:10]
-    losers = list(reversed(valid[-10:])) if valid else []
-    return JSONResponse({"gainers": gainers, "losers": losers})
+    """
+    Top gainers / losers from the same universe.
+    {
+      "gainers": [...],
+      "losers": [...]
+    }
+    """
+    rows = await _get_ticker_rows()
+    # filter out rows with no price
+    valid = [r for r in rows if r["price"] is not None]
+    # sort by % change
+    sorted_rows = sorted(valid, key=lambda r: r["change_pct"])
+    losers = sorted_rows[:5]
+    gainers = sorted_rows[-5:][::-1]
+
+    return JSONResponse(
+        {
+            "gainers": gainers,
+            "losers": losers,
+        }
+    )
 
 
 @app.get("/api/metrics")
 async def api_metrics(symbol: str = Query(...)):
-    close = await stooq_history(symbol, days=800)
-
-    def ret(b: int):
-        return pct(close, b)
-
-    perf = {
-        "1W": ret(5),
-        "1M": ret(21),
-        "3M": ret(63),
-        "6M": ret(126),
-        "YTD": None,
-        "1Y": ret(252),
+    """
+    Market Insights panel:
+    {
+      "symbol": "AAPL",
+      "performance": { "1W": float|None, ... },
+      "profile": { "description": str }
     }
-    if not close.empty:
-        year = dt.datetime.utcnow().year
-        seg = close[close.index.year == year]
-        if not seg.empty:
-            perf["YTD"] = float(
-                (close.iloc[-1] - seg.iloc[0]) / seg.iloc[0] * 100
-            )
-
-    prof = await profile(symbol)
-    return JSONResponse({"symbol": symbol, "performance": perf, "profile": prof})
+    """
+    try:
+        data = await symbol_metrics(symbol)
+    except Exception:
+        data = {"performance": {}, "profile": {"description": ""}}
+    data["symbol"] = symbol
+    return JSONResponse(data)
 
 
 @app.get("/api/news")
 async def api_news(symbol: str = Query(...)):
+    """
+    Symbol-specific news (Yahoo search). Falls back to generic
+    market news if nothing is found.
+    """
     try:
-        data = await symbol_news(symbol, 30)
+        data = await symbol_news(symbol, limit=30)
     except Exception:
         data = []
     return JSONResponse(data)
 
 
 @app.get("/api/market-news")
-async def api_marketnews():
-    cache = CACHE["mktnews"]
-    t = now()
-    if cache["data"] and t - cache["ts"] < TTL["mktnews"]:
-        return JSONResponse(cache["data"])
+async def api_market_news():
+    """
+    General US stock market headlines.
+    """
     try:
-        data = await market_news(50)
+        data = await market_news(limit=40)
     except Exception:
         data = []
-    cache["data"] = data
-    cache["ts"] = t
     return JSONResponse(data)
 
 
-if __name__ == "__main__":
-  import uvicorn
+# -------------------------------------------------------------------
+# Local dev entrypoint (not used on Render, but handy if you run uvicorn manually)
+# -------------------------------------------------------------------
 
-  uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), workers=1)
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=True)
