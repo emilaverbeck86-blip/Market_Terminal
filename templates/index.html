@@ -54,10 +54,6 @@
               <input type="checkbox" data-tile="tile-news" checked />
               <span>News</span>
             </label>
-            <label class="check-row">
-              <input type="checkbox" data-tile="tile-spotify" checked />
-              <span>Spotify</span>
-            </label>
           </div>
 
           <div class="menu-section">
@@ -77,7 +73,7 @@
   </div>
 
   <main id="gridRoot" class="grid-root">
-    <section class="tile tile-large" id="tile-chart">
+    <section class="tile" id="tile-chart">
       <div class="tile-header">
         <span id="chartTitle">Chart – AAPL</span>
         <button class="tile-close" data-tile-close="tile-chart">–</button>
@@ -87,7 +83,7 @@
       </div>
     </section>
 
-    <section class="tile tile-insights" id="tile-insights">
+    <section class="tile" id="tile-insights">
       <div class="tile-header">
         <span id="insightsTitle">Market Insights: AAPL</span>
         <button class="tile-close" data-tile-close="tile-insights">–</button>
@@ -125,7 +121,7 @@
       </div>
     </section>
 
-    <section class="tile tile-movers" id="tile-movers">
+    <section class="tile" id="tile-movers">
       <div class="tile-header">
         <span>Top Movers (Watchlist)</span>
         <button class="tile-close" data-tile-close="tile-movers">–</button>
@@ -148,30 +144,13 @@
       </div>
     </section>
 
-    <section class="tile tile-news" id="tile-news">
+    <section class="tile" id="tile-news">
       <div class="tile-header">
         <span>News</span>
         <button class="tile-close" data-tile-close="tile-news">–</button>
       </div>
       <div class="tile-body news-body" id="newsList">
         Loading news…
-      </div>
-    </section>
-
-    <section class="tile tile-spotify" id="tile-spotify">
-      <div class="tile-header">
-        <span>Spotify</span>
-        <button class="tile-close" data-tile-close="tile-spotify">–</button>
-      </div>
-      <div class="tile-body spotify-body">
-        <iframe
-          src="https://open.spotify.com/embed/playlist/5goz1LXB9uVqXyUGg2ZeZs?utm_source=generator"
-          width="100%"
-          height="100%"
-          frameborder="0"
-          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-          loading="lazy">
-        </iframe>
       </div>
     </section>
   </main>
