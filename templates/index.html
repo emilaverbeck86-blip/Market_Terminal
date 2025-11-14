@@ -1,179 +1,179 @@
-<!doctype html>
-<html lang="en" data-theme="dark">
-  <head>
-    <meta charset="utf-8" />
-    <title>Market Terminal</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="/static/style.css" />
-    <!-- TradingView -->
-    <script
-      type="text/javascript"
-      src="https://s3.tradingview.com/tv.js"
-    ></script>
-  </head>
-  <body>
-    <div class="top-bar">
-      <div class="logo">MARKET TERMINAL</div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Market Terminal</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://s3.tradingview.com/tv.js"></script>
+  <script defer src="/static/main.js"></script>
+</head>
+<body class="theme-dark">
+  <header class="top-bar">
+    <div class="top-left">
+      <span class="brand">MARKET TERMINAL</span>
+    </div>
+    <div class="ticker-wrap">
+      <div id="tickerScroll" class="ticker-scroll"></div>
+    </div>
+    <div class="top-right">
+      <button id="sp500Button" class="top-btn">S&P 500</button>
+      <button id="nasdaqButton" class="top-btn">NASDAQ</button>
 
-      <div class="ticker-bar">
-        <div id="tickerScroll" class="ticker-scroll"></div>
-      </div>
+      <div class="menu-wrapper">
+        <button id="settingsButton" class="top-btn">Menu ▾</button>
+        <div id="settingsMenu" class="settings-menu hidden">
+          <div class="menu-section">
+            <div class="menu-section-title">Theme</div>
+            <label class="toggle-row">
+              <span class="icon">🌙</span>
+              <span class="toggle-label">Dark</span>
+              <label class="switch">
+                <input type="checkbox" id="themeToggle" checked />
+                <span class="slider round"></span>
+              </label>
+              <span class="icon">☀️</span>
+            </label>
+          </div>
 
-      <div class="top-right">
-        <button class="shortcut-btn" data-shortcut="spx">S&amp;P 500</button>
-        <button class="shortcut-btn" data-shortcut="nasdaq">NASDAQ</button>
+          <div class="menu-section">
+            <div class="menu-section-title">Tiles</div>
+            <label class="check-row">
+              <input type="checkbox" data-tile="tile-chart" checked />
+              <span>Chart</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" data-tile="tile-insights" checked />
+              <span>Market Insights</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" data-tile="tile-movers" checked />
+              <span>Top Movers</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" data-tile="tile-news" checked />
+              <span>News</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" data-tile="tile-spotify" checked />
+              <span>Spotify</span>
+            </label>
+          </div>
 
-        <div class="settings-wrapper">
-          <button class="settings-btn" id="settingsBtn">Settings ▾</button>
-          <div class="settings-menu" id="settingsMenu">
-            <div class="settings-section">
-              <div class="settings-title">Theme</div>
-              <div class="theme-toggle">
-                <span class="icon">☀️</span>
-                <label class="switch">
-                  <input type="checkbox" id="themeToggle" />
-                  <span class="slider"></span>
-                </label>
-                <span class="icon">🌙</span>
-              </div>
-            </div>
-
-            <div class="settings-section">
-              <div class="settings-title">Tiles</div>
-              <label>
-                <input type="checkbox" data-tile-toggle="chart" checked />
-                Chart
-              </label>
-              <label>
-                <input type="checkbox" data-tile-toggle="insights" checked />
-                Market Insights
-              </label>
-              <label>
-                <input type="checkbox" data-tile-toggle="movers" checked />
-                Top Movers
-              </label>
-              <label>
-                <input type="checkbox" data-tile-toggle="news" checked />
-                News
-              </label>
-              <label>
-                <input type="checkbox" data-tile-toggle="spotify" checked />
-                Spotify
-              </label>
-            </div>
+          <div class="menu-section">
+            <div class="menu-section-title">Shortcuts</div>
+            <button id="heatmapButton" class="menu-link">S&P 500 Heatmap</button>
           </div>
         </div>
       </div>
     </div>
+  </header>
 
-    <section class="layout">
-      <div class="row row-top">
-        <!-- Chart tile -->
-        <div class="tile tile-chart" data-tile="chart">
-          <div class="tile-header">
-            <span id="chartTitle">Chart – AAPL</span>
-            <button class="tile-close" data-tile-close="chart">−</button>
-          </div>
-          <div id="tvContainer" class="tv-container"></div>
-        </div>
+  <div id="heatmapOverlay" class="heatmap-overlay">
+    <div class="heatmap-inner">
+      <button id="heatmapClose" class="heatmap-close">✕</button>
+      <div id="heatmapWidget" class="heatmap-widget"></div>
+    </div>
+  </div>
 
-        <!-- Market insights -->
-        <div class="tile tile-insights" data-tile="insights">
-          <div class="tile-header">
-            <span id="insightsTitle">Market Insights: AAPL</span>
-            <button class="tile-close" data-tile-close="insights">−</button>
-          </div>
-          <div class="insights-body">
-            <div class="insight-row">
-              <div class="insight-card">
-                <div class="value" id="perf1W">—</div>
-                <div class="label">1W</div>
-              </div>
-              <div class="insight-card">
-                <div class="value" id="perf1M">—</div>
-                <div class="label">1M</div>
-              </div>
-              <div class="insight-card">
-                <div class="value" id="perf3M">—</div>
-                <div class="label">3M</div>
-              </div>
-            </div>
-            <div class="insight-row">
-              <div class="insight-card">
-                <div class="value" id="perf6M">—</div>
-                <div class="label">6M</div>
-              </div>
-              <div class="insight-card">
-                <div class="value" id="perfYTD">—</div>
-                <div class="label">YTD</div>
-              </div>
-              <div class="insight-card">
-                <div class="value" id="perf1Y">—</div>
-                <div class="label">1Y</div>
-              </div>
-            </div>
-            <div
-              class="company-description"
-              id="companyDescription"
-            ></div>
-          </div>
-        </div>
+  <main id="gridRoot" class="grid-root">
+    <section class="tile tile-large" id="tile-chart">
+      <div class="tile-header">
+        <span id="chartTitle">Chart – AAPL</span>
+        <button class="tile-close" data-tile-close="tile-chart">–</button>
       </div>
+      <div class="tile-body chart-body">
+        <div id="tv_container" class="tv-container"></div>
+      </div>
+    </section>
 
-      <div class="row row-bottom">
-        <!-- Top movers -->
-        <div class="tile tile-movers" data-tile="movers">
-          <div class="tile-header">
-            <span>Top Movers (Watchlist)</span>
-            <button class="tile-close" data-tile-close="movers">−</button>
+    <section class="tile tile-insights" id="tile-insights">
+      <div class="tile-header">
+        <span id="insightsTitle">Market Insights: AAPL</span>
+        <button class="tile-close" data-tile-close="tile-insights">–</button>
+      </div>
+      <div class="tile-body insights-body">
+        <div class="insights-grid">
+          <div class="insight-box">
+            <div class="label">1W</div>
+            <div class="value" id="perf-1W">—</div>
           </div>
-          <div class="movers-body">
-            <div class="movers-column">
-              <div class="movers-title">Top Gainers</div>
-              <table>
-                <tbody id="gainersBody"></tbody>
-              </table>
-            </div>
-            <div class="movers-column">
-              <div class="movers-title">Top Losers</div>
-              <table>
-                <tbody id="losersBody"></tbody>
-              </table>
-            </div>
+          <div class="insight-box">
+            <div class="label">1M</div>
+            <div class="value" id="perf-1M">—</div>
+          </div>
+          <div class="insight-box">
+            <div class="label">3M</div>
+            <div class="value" id="perf-3M">—</div>
+          </div>
+          <div class="insight-box">
+            <div class="label">6M</div>
+            <div class="value" id="perf-6M">—</div>
+          </div>
+          <div class="insight-box">
+            <div class="label">YTD</div>
+            <div class="value" id="perf-YTD">—</div>
+          </div>
+          <div class="insight-box">
+            <div class="label">1Y</div>
+            <div class="value" id="perf-1Y">—</div>
           </div>
         </div>
+        <p id="insightsDescription" class="insights-description">
+          Loading description…
+        </p>
+      </div>
+    </section>
 
-        <!-- Symbol-specific news -->
-        <div class="tile tile-news" data-tile="news">
-          <div class="tile-header">
-            <span>News</span>
-            <button class="tile-close" data-tile-close="news">−</button>
+    <section class="tile tile-movers" id="tile-movers">
+      <div class="tile-header">
+        <span>Top Movers (Watchlist)</span>
+        <button class="tile-close" data-tile-close="tile-movers">–</button>
+      </div>
+      <div class="tile-body movers-body">
+        <div class="movers-columns">
+          <div class="movers-col">
+            <div class="movers-title">Top Gainers</div>
+            <table class="movers-table">
+              <tbody id="gainersBody"></tbody>
+            </table>
           </div>
-          <div class="news-list" id="newsList">
-            <div class="muted">Loading news…</div>
-          </div>
-        </div>
-
-        <!-- Spotify in the third slot -->
-        <div class="tile tile-spotify" data-tile="spotify">
-          <div class="tile-header">
-            <span>Spotify</span>
-            <button class="tile-close" data-tile-close="spotify">−</button>
-          </div>
-          <div class="spotify-body">
-            <!-- Your playlist -->
-            <iframe
-              src="https://open.spotify.com/embed/playlist/5goz1LXB9uVqXyUGg2ZeZs"
-              width="100%"
-              height="100%"
-              frameborder="0"
-              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            ></iframe>
+          <div class="movers-col">
+            <div class="movers-title">Top Losers</div>
+            <table class="movers-table">
+              <tbody id="losersBody"></tbody>
+            </table>
           </div>
         </div>
       </div>
     </section>
 
-    <script src="/static/main.js"></script>
-  </body>
+    <section class="tile tile-news" id="tile-news">
+      <div class="tile-header">
+        <span>News</span>
+        <button class="tile-close" data-tile-close="tile-news">–</button>
+      </div>
+      <div class="tile-body news-body" id="newsList">
+        Loading news…
+      </div>
+    </section>
+
+    <section class="tile tile-spotify" id="tile-spotify">
+      <div class="tile-header">
+        <span>Spotify</span>
+        <button class="tile-close" data-tile-close="tile-spotify">–</button>
+      </div>
+      <div class="tile-body spotify-body">
+        <iframe
+          src="https://open.spotify.com/embed/playlist/5goz1LXB9uVqXyUGg2ZeZs?utm_source=generator"
+          width="100%"
+          height="100%"
+          frameborder="0"
+          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          loading="lazy">
+        </iframe>
+      </div>
+    </section>
+  </main>
+</body>
 </html>
