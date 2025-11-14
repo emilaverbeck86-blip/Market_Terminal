@@ -4,7 +4,6 @@ const TICKERS_ENDPOINT = "/api/tickers";
 const INSIGHTS_ENDPOINT = "/api/insights";
 const MOVERS_ENDPOINT = "/api/movers";
 const NEWS_ENDPOINT = "/api/news";
-const MARKET_NEWS_ENDPOINT = "/api/market-news";
 
 // DOM -----------------------------------------------------------------
 
@@ -26,7 +25,6 @@ const perfEls = {
 const gainersBody = document.getElementById("gainersBody");
 const losersBody = document.getElementById("losersBody");
 const newsList = document.getElementById("newsList");
-const marketNewsList = document.getElementById("marketNewsList");
 
 const themeToggle = document.getElementById("themeToggle");
 const settingsBtn = document.getElementById("settingsBtn");
@@ -123,8 +121,6 @@ function initSettingsMenu() {
 // TradingView ---------------------------------------------------------
 
 function tradingViewSymbol(sym) {
-  // Most US stocks: plain symbol works.
-  // Shortcuts for indices:
   if (sym === "SPX_INDEX") return "CAPITALCOM:US500";
   if (sym === "NDX_INDEX") return "CAPITALCOM:US100";
   return sym;
@@ -168,7 +164,6 @@ function buildTickerBar(data) {
   clearChildren(tickerScroll);
   tickerNodes.clear();
 
-  // duplicate row for seamless loop
   const extended = data.concat(data);
 
   extended.forEach((row) => {
@@ -202,7 +197,6 @@ function buildTickerBar(data) {
 
     tickerScroll.appendChild(item);
 
-    // Only track first occurrence (original row)
     if (!tickerNodes.has(row.symbol)) {
       tickerNodes.set(row.symbol, { priceSpan, chgSpan });
     }
@@ -228,16 +222,14 @@ async function loadTickers(initial = false) {
   try {
     const data = await fetchJSON(TICKERS_ENDPOINT);
     if (initial || tickerNodes.size === 0) {
-      buildTickerBar(data);
-      if (initial && data.length) {
-        currentSymbol = data[0].symbol;
-        onSymbolSelect(currentSymbol);
+      if (data.length && !initial) {
+        currentSymbol = currentSymbol || data[0].symbol;
       }
+      buildTickerBar(data);
     } else {
       updateTickerBar(data);
     }
   } catch (err) {
-    // silent fail for ticker bar
     console.error("tickers error", err);
   }
 }
@@ -270,7 +262,9 @@ async function loadInsights(symbol) {
     const data = await fetchJSON(
       `${INSIGHTS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`
     );
-    insightsTitle.textContent = `Market Insights: ${data.symbol || symbol}`;
+    insightsTitle.textContent = `Market Insights: ${
+      data.symbol || symbol
+    }`;
     renderInsights(data.performance || {}, data.description || "");
   } catch (err) {
     console.error("insights error", err);
@@ -388,32 +382,11 @@ async function loadNews(symbol) {
   }
 }
 
-async function loadMarketNews() {
-  marketNewsList.innerHTML =
-    '<div class="muted">Loading market headlines…</div>';
-  try {
-    const data = await fetchJSON(MARKET_NEWS_ENDPOINT);
-    renderNewsList(
-      marketNewsList,
-      data,
-      "No headlines."
-    );
-  } catch (err) {
-    console.error("market news error", err);
-    renderNewsList(
-      marketNewsList,
-      [],
-      "Failed to load market headlines."
-    );
-  }
-}
-
 // Symbol selection & shortcuts --------------------------------------
 
 async function onSymbolSelect(symbol) {
   currentSymbol = symbol;
 
-  // Update titles
   chartTitle.textContent = `Chart – ${symbol}`;
   insightsTitle.textContent = `Market Insights: ${symbol}`;
 
@@ -443,20 +416,20 @@ function initShortcuts() {
 
 // Boot ----------------------------------------------------------------
 
-async function init() {
+function init() {
   initTheme();
   initSettingsMenu();
   initShortcuts();
 
-  // Initial data
-  await loadTickers(true);
-  await loadMovers();
-  await loadMarketNews();
+  // Always show something, even if /api/tickers has issues
+  onSymbolSelect(currentSymbol).catch(console.error);
 
-  // Periodic refresh
-  setInterval(() => loadTickers(false), 60_000);
-  setInterval(loadMovers, 120_000);
-  setInterval(loadMarketNews, 300_000);
+  // Fire-and-forget background loads
+  loadTickers(true).catch(console.error);
+  loadMovers().catch(console.error);
+
+  setInterval(() => loadTickers(false).catch(console.error), 60_000);
+  setInterval(() => loadMovers().catch(console.error), 120_000);
 }
 
 document.addEventListener("DOMContentLoaded", init);
