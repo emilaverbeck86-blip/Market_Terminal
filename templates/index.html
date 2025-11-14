@@ -1,149 +1,200 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" data-theme="dark">
-<head>
-  <meta charset="UTF-8" />
-  <title>Market Terminal</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="/static/style.css" />
-  <!-- TradingView widget script -->
-  <script src="https://s3.tradingview.com/tv.js"></script>
-</head>
-<body>
-  <header class="top-bar">
-    <div class="logo">Market Terminal</div>
+  <head>
+    <meta charset="utf-8" />
+    <title>Market Terminal</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/static/style.css" />
+    <!-- TradingView -->
+    <script
+      type="text/javascript"
+      src="https://s3.tradingview.com/tv.js"
+    ></script>
+  </head>
+  <body>
+    <div class="top-bar">
+      <div class="logo">MARKET TERMINAL</div>
 
-    <div class="ticker-bar">
-      <div id="tickerScroll" class="ticker-scroll"></div>
-    </div>
+      <div class="ticker-bar">
+        <div id="tickerScroll" class="ticker-scroll"></div>
+      </div>
 
-    <div class="top-right">
-      <button id="spxShortcut" class="shortcut-btn">S&amp;P 500</button>
-      <button id="nasdaqShortcut" class="shortcut-btn">NASDAQ</button>
+      <div class="top-right">
+        <button class="shortcut-btn" data-shortcut="spx">S&amp;P 500</button>
+        <button class="shortcut-btn" data-shortcut="nasdaq">NASDAQ</button>
 
-      <div class="settings-wrapper">
-        <button id="settingsBtn" class="settings-btn">Settings ▾</button>
-        <div id="settingsMenu" class="settings-menu">
-          <div class="settings-section">
-            <div class="settings-title">Theme</div>
-            <div class="theme-toggle">
-              <span class="icon">☀️</span>
-              <label class="switch">
-                <input type="checkbox" id="themeToggle" />
-                <span class="slider"></span>
+        <div class="settings-wrapper">
+          <button class="settings-btn" id="settingsBtn">Settings ▾</button>
+          <div class="settings-menu" id="settingsMenu">
+            <div class="settings-section">
+              <div class="settings-title">Theme</div>
+              <div class="theme-toggle">
+                <span class="icon">☀️</span>
+                <label class="switch">
+                  <input type="checkbox" id="themeToggle" />
+                  <span class="slider"></span>
+                </label>
+                <span class="icon">🌙</span>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-title">Tiles</div>
+              <label>
+                <input type="checkbox" data-tile-toggle="chart" checked />
+                Chart
               </label>
-              <span class="icon">🌙</span>
+              <label>
+                <input type="checkbox" data-tile-toggle="insights" checked />
+                Market Insights
+              </label>
+              <label>
+                <input type="checkbox" data-tile-toggle="movers" checked />
+                Top Movers
+              </label>
+              <label>
+                <input type="checkbox" data-tile-toggle="news" checked />
+                News
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  data-tile-toggle="marketNews"
+                  checked
+                />
+                Market News
+              </label>
+              <label>
+                <input type="checkbox" data-tile-toggle="spotify" checked />
+                Spotify
+              </label>
             </div>
-          </div>
-          <div class="settings-section">
-            <div class="settings-title">Tiles</div>
-            <label><input type="checkbox" data-tile-toggle="chart" checked /> Chart</label>
-            <label><input type="checkbox" data-tile-toggle="insights" checked /> Market Insights</label>
-            <label><input type="checkbox" data-tile-toggle="movers" checked /> Top Movers</label>
-            <label><input type="checkbox" data-tile-toggle="news" checked /> News</label>
-            <label><input type="checkbox" data-tile-toggle="marketNews" checked /> Market News</label>
           </div>
         </div>
       </div>
     </div>
-  </header>
 
-  <main class="layout">
-    <!-- Row 1: Chart + Insights -->
-    <section class="row row-top">
-      <div class="tile tile-chart" data-tile="chart">
-        <div class="tile-header">
-          <span id="chartTitle">Chart – AAPL</span>
-          <button class="tile-close" data-tile-close="chart">−</button>
+    <section class="layout">
+      <div class="row row-top">
+        <!-- Chart tile -->
+        <div class="tile tile-chart" data-tile="chart">
+          <div class="tile-header">
+            <span id="chartTitle">Chart – AAPL</span>
+            <button class="tile-close" data-tile-close="chart">−</button>
+          </div>
+          <div id="tvContainer" class="tv-container"></div>
         </div>
-        <div id="tvContainer" class="tv-container"></div>
+
+        <!-- Market insights -->
+        <div class="tile tile-insights" data-tile="insights">
+          <div class="tile-header">
+            <span id="insightsTitle">Market Insights: AAPL</span>
+            <button class="tile-close" data-tile-close="insights">−</button>
+          </div>
+          <div class="insights-body">
+            <div class="insight-row">
+              <div class="insight-card">
+                <div class="value" id="perf1W">—</div>
+                <div class="label">1W</div>
+              </div>
+              <div class="insight-card">
+                <div class="value" id="perf1M">—</div>
+                <div class="label">1M</div>
+              </div>
+              <div class="insight-card">
+                <div class="value" id="perf3M">—</div>
+                <div class="label">3M</div>
+              </div>
+            </div>
+            <div class="insight-row">
+              <div class="insight-card">
+                <div class="value" id="perf6M">—</div>
+                <div class="label">6M</div>
+              </div>
+              <div class="insight-card">
+                <div class="value" id="perfYTD">—</div>
+                <div class="label">YTD</div>
+              </div>
+              <div class="insight-card">
+                <div class="value" id="perf1Y">—</div>
+                <div class="label">1Y</div>
+              </div>
+            </div>
+            <div
+              class="company-description"
+              id="companyDescription"
+            ></div>
+          </div>
+        </div>
       </div>
 
-      <div class="tile tile-insights" data-tile="insights">
-        <div class="tile-header">
-          <span id="insightsTitle">Market Insights: AAPL</span>
-          <button class="tile-close" data-tile-close="insights">−</button>
+      <div class="row row-bottom">
+        <!-- Top movers -->
+        <div class="tile tile-movers" data-tile="movers">
+          <div class="tile-header">
+            <span>Top Movers (Watchlist)</span>
+            <button class="tile-close" data-tile-close="movers">−</button>
+          </div>
+          <div class="movers-body">
+            <div class="movers-column">
+              <div class="movers-title">Top Gainers</div>
+              <table>
+                <tbody id="gainersBody"></tbody>
+              </table>
+            </div>
+            <div class="movers-column">
+              <div class="movers-title">Top Losers</div>
+              <table>
+                <tbody id="losersBody"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
-        <div class="insights-body">
-          <div class="insight-row">
-            <div class="insight-card">
-              <div class="label">1W</div>
-              <div id="perf1W" class="value muted">—</div>
-            </div>
-            <div class="insight-card">
-              <div class="label">1M</div>
-              <div id="perf1M" class="value muted">—</div>
-            </div>
-            <div class="insight-card">
-              <div class="label">3M</div>
-              <div id="perf3M" class="value muted">—</div>
-            </div>
+
+        <!-- Symbol-specific news -->
+        <div class="tile tile-news" data-tile="news">
+          <div class="tile-header">
+            <span>News</span>
+            <button class="tile-close" data-tile-close="news">−</button>
           </div>
-          <div class="insight-row">
-            <div class="insight-card">
-              <div class="label">6M</div>
-              <div id="perf6M" class="value muted">—</div>
-            </div>
-            <div class="insight-card">
-              <div class="label">YTD</div>
-              <div id="perfYTD" class="value muted">—</div>
-            </div>
-            <div class="insight-card">
-              <div class="label">1Y</div>
-              <div id="perf1Y" class="value muted">—</div>
-            </div>
+          <div class="news-list" id="newsList">
+            <div class="muted">Loading news…</div>
           </div>
-          <div id="companyDescription" class="company-description muted">
-            Loading profile…
+        </div>
+
+        <!-- Market news -->
+        <div class="tile tile-market-news" data-tile="marketNews">
+          <div class="tile-header">
+            <span>Market News (US)</span>
+            <button class="tile-close" data-tile-close="marketNews">
+              −
+            </button>
+          </div>
+          <div class="news-list" id="marketNewsList">
+            <div class="muted">Loading market headlines…</div>
+          </div>
+        </div>
+
+        <!-- Spotify -->
+        <div class="tile tile-spotify" data-tile="spotify">
+          <div class="tile-header">
+            <span>Spotify</span>
+            <button class="tile-close" data-tile-close="spotify">−</button>
+          </div>
+          <div class="spotify-body">
+            <!-- Replace playlist with your own if you like -->
+            <iframe
+              src="https://open.spotify.com/embed/playlist/37i9dQZF1DXcBWIGoYBM5M"
+              width="100%"
+              height="100%"
+              frameborder="0"
+              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+            ></iframe>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Row 2: Movers + News + Market News -->
-    <section class="row row-bottom">
-      <div class="tile tile-movers" data-tile="movers">
-        <div class="tile-header">
-          <span>Top Movers (Watchlist)</span>
-          <button class="tile-close" data-tile-close="movers">−</button>
-        </div>
-        <div class="movers-body">
-          <div class="movers-column">
-            <div class="movers-title">Top Gainers</div>
-            <table>
-              <tbody id="gainersBody"></tbody>
-            </table>
-          </div>
-          <div class="movers-column">
-            <div class="movers-title">Top Losers</div>
-            <table>
-              <tbody id="losersBody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div class="tile tile-news" data-tile="news">
-        <div class="tile-header">
-          <span>News</span>
-          <button class="tile-close" data-tile-close="news">−</button>
-        </div>
-        <div id="newsList" class="news-list">
-          <div class="muted">No headlines.</div>
-        </div>
-      </div>
-
-      <div class="tile tile-market-news" data-tile="marketNews">
-        <div class="tile-header">
-          <span>Market News (US)</span>
-          <button class="tile-close" data-tile-close="marketNews">−</button>
-        </div>
-        <div id="marketNewsList" class="news-list">
-          <div class="muted">No headlines.</div>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <script src="/static/main.js"></script>
-</body>
+    <script src="/static/main.js"></script>
+  </body>
 </html>
