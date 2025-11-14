@@ -1,4 +1,3 @@
-// Endpoints
 const TICKER_ENDPOINT = "/api/tickers";
 const MOVERS_ENDPOINT = "/api/movers";
 const QUOTE_ENDPOINT = "/api/quote";
@@ -6,7 +5,6 @@ const INSIGHTS_ENDPOINT = "/api/insights";
 const NEWS_ENDPOINT = "/api/news";
 const MARKET_NEWS_ENDPOINT = "/api/market-news";
 
-// DOM
 const tickerScroll = document.getElementById("tickerScroll");
 const chartTitle = document.getElementById("chartTitle");
 const insightsTitle = document.getElementById("insightsTitle");
@@ -17,13 +15,11 @@ const losersBody = document.getElementById("losersBody");
 
 let currentSymbol = "AAPL";
 let tickerData = [];
-let tickerAnimationRunning = false;
 let heatmapLoaded = false;
 let heatmapRefreshTimer = null;
 
 const perfIds = ["1W", "1M", "3M", "6M", "YTD", "1Y"];
 
-// ---------------------- helpers ----------------------
 function fmtPct(v) {
   if (v === null || v === undefined || !isFinite(v)) return "—";
   const sign = v > 0 ? "+" : v < 0 ? "−" : "";
@@ -42,9 +38,8 @@ async function getJSON(url) {
   return r.json();
 }
 
-// ---------------------- TradingView ----------------------
+// TradingView
 function tvSymbol(symbol) {
-  // assume most are NASDAQ; works for ^GSPC, ^NDX automatically
   if (symbol === "SP500") return "CURRENCYCOM:US500";
   if (symbol === "NASDAQ") return "CURRENCYCOM:US100";
   return `NASDAQ:${symbol}`;
@@ -73,7 +68,7 @@ function mountTradingView(symbol) {
   });
 }
 
-// ---------------------- ticker tape ----------------------
+// ticker tape
 function buildTickerTape(data) {
   tickerScroll.innerHTML = "";
   const row = document.createElement("div");
@@ -108,12 +103,10 @@ function buildTickerTape(data) {
     row.appendChild(item);
   });
 
-  // Duplicate row for smooth scrolling
   const row2 = row.cloneNode(true);
   tickerScroll.appendChild(row);
   tickerScroll.appendChild(row2);
 
-  // trigger animation
   tickerScroll.classList.remove("animate");
   void tickerScroll.offsetWidth;
   tickerScroll.classList.add("animate");
@@ -126,11 +119,11 @@ async function loadTickers() {
     tickerData = data;
     buildTickerTape(data);
   } catch (e) {
-    // quietly ignore; keep last values
+    // keep old ticker tape
   }
 }
 
-// ---------------------- movers ----------------------
+// movers
 function renderMovers(movers) {
   gainersBody.innerHTML = "";
   losersBody.innerHTML = "";
@@ -173,7 +166,7 @@ async function loadMovers() {
   }
 }
 
-// ---------------------- insights ----------------------
+// insights
 function renderInsights(data) {
   insightsTitle.textContent = `Market Insights: ${data.symbol}`;
   perfIds.forEach((id) => {
@@ -197,7 +190,7 @@ async function loadInsights(symbol) {
   }
 }
 
-// ---------------------- news ----------------------
+// news
 function renderNews(articles) {
   newsList.innerHTML = "";
   if (!articles || !articles.length) {
@@ -237,14 +230,14 @@ async function loadNews(symbol) {
   }
 }
 
-// ---------------------- selection ----------------------
+// selection
 async function onSymbolSelect(symbol) {
   currentSymbol = symbol;
   mountTradingView(symbol);
   await Promise.all([loadInsights(symbol), loadNews(symbol)]);
 }
 
-// ---------------------- theme + menu ----------------------
+// theme + menu
 function initTheme() {
   const toggle = document.getElementById("themeToggle");
   if (!toggle) return;
@@ -269,7 +262,6 @@ function initTheme() {
       document.body.classList.add("theme-light");
       localStorage.setItem("mt-theme", "light");
     }
-    // remount chart with new theme
     mountTradingView(currentSymbol);
   });
 }
@@ -290,7 +282,6 @@ function initMenu() {
 
   menu.addEventListener("click", (e) => e.stopPropagation());
 
-  // tile toggles
   const checks = menu.querySelectorAll("input[type=checkbox][data-tile]");
   checks.forEach((ch) => {
     ch.addEventListener("change", () => {
@@ -301,7 +292,6 @@ function initMenu() {
     });
   });
 
-  // tile close buttons
   const closeBtns = document.querySelectorAll("[data-tile-close]");
   closeBtns.forEach((b) => {
     b.addEventListener("click", () => {
@@ -309,14 +299,13 @@ function initMenu() {
       const tile = document.getElementById(id);
       if (!tile) return;
       tile.style.display = "none";
-      // uncheck in menu
       const chk = menu.querySelector(`input[data-tile="${id}"]`);
       if (chk) chk.checked = false;
     });
   });
 }
 
-// ---------------------- heatmap ----------------------
+// heatmap
 function showHeatmap() {
   const overlay = document.getElementById("heatmapOverlay");
   overlay.classList.add("visible");
@@ -361,7 +350,7 @@ function hideHeatmap() {
   overlay.classList.remove("visible");
 }
 
-// ---------------------- shortcuts ----------------------
+// shortcuts
 function initShortcuts() {
   const spBtn = document.getElementById("sp500Button");
   const ndBtn = document.getElementById("nasdaqButton");
@@ -380,7 +369,7 @@ function initShortcuts() {
   if (hClose) hClose.addEventListener("click", hideHeatmap);
 }
 
-// ---------------------- boot ----------------------
+// boot
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
   initMenu();
@@ -392,6 +381,4 @@ document.addEventListener("DOMContentLoaded", () => {
   setInterval(loadMovers, 30000);
 
   onSymbolSelect(currentSymbol);
-
-  // pause ticker animation on hover is handled by CSS
 });
