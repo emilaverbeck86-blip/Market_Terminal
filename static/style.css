@@ -57,7 +57,6 @@ body {
   overflow: hidden;
 }
 
-/* override for light theme background */
 html[data-theme="light"] body {
   background: linear-gradient(to bottom, #f7f8fc 0, #edf0f7 40%, #e8ebf5 100%);
   color: var(--text);
@@ -87,6 +86,8 @@ html[data-theme="light"] .top-bar {
   color: var(--accent);
 }
 
+/* Ticker bar ------------------------------------------------------ */
+
 .ticker-bar {
   overflow: hidden;
   height: 28px;
@@ -110,7 +111,6 @@ html[data-theme="light"] .ticker-bar {
   animation-play-state: running;
 }
 
-/* pause on hover */
 .ticker-bar:hover .ticker-scroll {
   animation-play-state: paused;
 }
@@ -163,6 +163,8 @@ html[data-theme="light"] .ticker-item:hover {
   color: var(--negative);
 }
 
+/* Top right ------------------------------------------------------- */
+
 .top-right {
   display: flex;
   align-items: center;
@@ -191,6 +193,8 @@ html[data-theme="light"] .ticker-item:hover {
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* Settings menu --------------------------------------------------- */
 
 .settings-wrapper {
   position: relative;
@@ -233,6 +237,13 @@ html[data-theme="light"] .ticker-item:hover {
   color: var(--text);
 }
 
+.settings-section label {
+  display: block;
+  margin-bottom: 3px;
+}
+
+/* Theme toggle ---------------------------------------------------- */
+
 .theme-toggle {
   display: flex;
   align-items: center;
@@ -243,7 +254,6 @@ html[data-theme="light"] .ticker-item:hover {
   font-size: 14px;
 }
 
-/* toggle switch */
 .switch {
   position: relative;
   display: inline-block;
@@ -313,11 +323,18 @@ html[data-theme="light"] .slider {
 
 .row-bottom {
   grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.1fr) minmax(0, 1.1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 0.6fr);
   height: 40%;
 }
 
+/* Tiles ----------------------------------------------------------- */
+
 .tile {
-  background: radial-gradient(circle at top left, var(--tile-glow) 0, var(--bg-elevated) 42%);
+  background: radial-gradient(
+    circle at top left,
+    var(--tile-glow) 0,
+    var(--bg-elevated) 42%
+  );
   border-radius: var(--tile-radius);
   border: 1px solid var(--border-subtle);
   box-shadow: var(--shadow-soft);
@@ -325,6 +342,10 @@ html[data-theme="light"] .slider {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+}
+
+html[data-theme="light"] .tile {
+  background: radial-gradient(circle at top left, #ffffff 0, #f3f5fd 45%);
 }
 
 .tile.hidden {
@@ -512,11 +533,30 @@ html[data-theme="light"] .news-item {
   margin-top: 2px;
 }
 
+/* Spotify --------------------------------------------------------- */
+
+.tile-spotify {
+  grid-column: 1 / -1;
+  min-height: 120px;
+}
+
+.spotify-body {
+  flex: 1;
+}
+
+.spotify-body iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
 /* Utilities ------------------------------------------------------- */
 
 .muted {
   color: var(--text-muted);
 }
+
+/* Ticker animation ------------------------------------------------ */
 
 @keyframes ticker-scroll {
   0% {
@@ -527,7 +567,8 @@ html[data-theme="light"] .news-item {
   }
 }
 
-/* Responsive tweak */
+/* Responsive ------------------------------------------------------ */
+
 @media (max-width: 1000px) {
   .row-top {
     grid-template-columns: minmax(0, 1fr);
@@ -535,6 +576,10 @@ html[data-theme="light"] .news-item {
   }
   .row-bottom {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(4, minmax(0, 1fr));
     height: 45%;
+  }
+  .tile-spotify {
+    grid-column: auto;
   }
 }
