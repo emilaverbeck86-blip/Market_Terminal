@@ -14,7 +14,6 @@ app = FastAPI()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# static + templates
 static_dir = os.path.join(BASE_DIR, "static")
 templates_dir = os.path.join(BASE_DIR, "templates")
 
@@ -64,9 +63,9 @@ TICKER_CACHE: Dict[str, Any] = {"ts": None, "data": None}
 INSIGHTS_CACHE: Dict[str, Any] = {}
 NEWS_CACHE: Dict[str, Any] = {}
 
-CACHE_TTL_TICKERS = 60
-CACHE_TTL_INSIGHTS = 600
-CACHE_TTL_NEWS = 300
+CACHE_TTL_TICKERS = 60          # 1 minute
+CACHE_TTL_INSIGHTS = 600        # 10 minutes
+CACHE_TTL_NEWS = 300            # 5 minutes
 
 
 # ---------------------------------------------------------
@@ -219,6 +218,24 @@ def build_news_from_yf_news(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     return parsed
 
 
+def get_market_news() -> List[Dict[str, Any]]:
+    now = now_utc()
+    key = "market:US"
+    cache = NEWS_CACHE.get(key)
+    if cache and (now - cache["ts"]).total_seconds() < CACHE_TTL_NEWS:
+        return cache["data"]
+
+    try:
+        t = yf.Ticker("SPY")
+        raw = t.news or []
+    except Exception:
+        raw = []
+
+    data = build_news_from_yf_news(raw)
+    NEWS_CACHE[key] = {"ts": now, "data": data}
+    return data
+
+
 def get_symbol_news(symbol: str) -> List[Dict[str, Any]]:
     now = now_utc()
     key = f"sym:{symbol.upper()}"
@@ -234,24 +251,11 @@ def get_symbol_news(symbol: str) -> List[Dict[str, Any]]:
         raw = []
 
     data = build_news_from_yf_news(raw)
-    NEWS_CACHE[key] = {"ts": now, "data": data}
-    return data
 
+    # Fallback: if no symbol-specific news, show broad US market news
+    if not data:
+        data = get_market_news()
 
-def get_market_news() -> List[Dict[str, Any]]:
-    now = now_utc()
-    key = "market:US"
-    cache = NEWS_CACHE.get(key)
-    if cache and (now - cache["ts"]).total_seconds() < CACHE_TTL_NEWS:
-        return cache["data"]
-
-    try:
-        t = yf.Ticker("SPY")
-        raw = t.news or []
-    except Exception:
-        raw = []
-
-    data = build_news_from_yf_news(raw)
     NEWS_CACHE[key] = {"ts": now, "data": data}
     return data
 
