@@ -323,7 +323,6 @@ html[data-theme="light"] .slider {
 
 .row-bottom {
   grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.1fr) minmax(0, 1.1fr);
-  grid-template-rows: minmax(0, 1fr) minmax(0, 0.6fr);
   height: 40%;
 }
 
@@ -536,7 +535,6 @@ html[data-theme="light"] .news-item {
 /* Spotify --------------------------------------------------------- */
 
 .tile-spotify {
-  grid-column: 1 / -1;
   min-height: 120px;
 }
 
@@ -576,10 +574,7 @@ html[data-theme="light"] .news-item {
   }
   .row-bottom {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: repeat(4, minmax(0, 1fr));
+    grid-template-rows: repeat(3, minmax(0, 1fr));
     height: 45%;
-  }
-  .tile-spotify {
-    grid-column: auto;
   }
 }
