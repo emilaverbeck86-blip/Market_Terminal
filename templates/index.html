@@ -10,9 +10,11 @@
 <body class="theme-dark">
   <header class="top-bar">
     <div class="brand">MARKET TERMINAL</div>
-    <div id="tickerBar" class="ticker-bar">
+
+    <div class="ticker-bar">
       <div id="tickerScroll" class="ticker-scroll"></div>
     </div>
+
     <div class="top-actions">
       <button id="fundamentalsBtn" class="top-btn">Fundamentals</button>
 
@@ -40,6 +42,9 @@
             </button>
             <button class="menu-shortcut" data-symbol="OANDA:NAS100USD">
               NASDAQ 100 (NAS100)
+            </button>
+            <button id="heatmapShortcut" class="menu-shortcut">
+              S&amp;P 500 Heatmap
             </button>
           </div>
 
@@ -69,10 +74,6 @@
               <input type="checkbox" data-tile-toggle="movers" checked />
               <span>Top Movers</span>
             </label>
-            <label class="menu-check">
-              <input type="checkbox" data-tile-toggle="heatmap" checked />
-              <span>S&amp;P 500 Heatmap</span>
-            </label>
           </div>
         </div>
       </div>
@@ -80,7 +81,7 @@
   </header>
 
   <main id="mainLayout" class="layout">
-    <!-- ROW 1: chart + news -->
+    <!-- Row 1: chart + news -->
     <section id="row1" class="row row-1">
       <div class="row-inner">
         <article id="tile-chart" class="tile tile-chart" data-tile-id="chart">
@@ -110,7 +111,7 @@
       <div id="rowResizer1" class="row-resizer"></div>
     </section>
 
-    <!-- ROW 2: insights + macro -->
+    <!-- Row 2: insights + macro -->
     <section id="row2" class="row row-2">
       <div class="row-inner">
         <article id="tile-insights" class="tile tile-insights" data-tile-id="insights">
@@ -159,7 +160,6 @@
             <button class="tile-close" data-close-tile="macro">−</button>
           </header>
           <div class="macro-body">
-            <!-- Macro map via TradingView (iframe) -->
             <iframe
               title="Macro Maps"
               src="https://www.tradingview.com/macro/"
@@ -172,7 +172,7 @@
       <div id="rowResizer2" class="row-resizer"></div>
     </section>
 
-    <!-- ROW 3: economic calendar + movers -->
+    <!-- Row 3: calendar + movers -->
     <section id="row3" class="row row-3">
       <div class="row-inner row3-inner">
         <article id="tile-calendar" class="tile tile-calendar" data-tile-id="calendar">
@@ -213,36 +213,6 @@
           </div>
         </article>
       </div>
-    </section>
-
-    <!-- ROW 4: S&P 500 heatmap -->
-    <section id="row4" class="row row-4">
-      <article id="tile-heatmap" class="tile tile-heatmap" data-tile-id="heatmap">
-        <header class="tile-header">
-          <div class="tile-title">S&amp;P 500 Heatmap</div>
-          <button class="tile-close" data-close-tile="heatmap">−</button>
-        </header>
-        <div class="heatmap-body">
-          <!-- TradingView heatmap widget -->
-          <div class="tv-heatmap-container">
-            <div class="tradingview-widget-container">
-              <div id="tv-heatmap"></div>
-              <script type="text/javascript">
-                new TradingView.MarketHeatMapWidget({
-                  container_id: "tv-heatmap",
-                  width: "100%",
-                  height: "100%",
-                  dataSource: "S&P500",
-                  grouping: "sector",
-                  blockColor: "change",
-                  locale: "en",
-                  signallers: [],
-                });
-              </script>
-            </div>
-          </div>
-        </div>
-      </article>
     </section>
   </main>
 
