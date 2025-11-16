@@ -1,580 +1,492 @@
-const ENDPOINTS = {
-    tickers: "/api/tickers",
-    news: "/api/news",
-    insights: "/api/insights",
-    calendar: "/api/calendar",
-    movers: "/api/movers"
+// ---------- Endpoints ----------
+const TICKER_ENDPOINT = "/api/tickers";
+const MOVERS_ENDPOINT = "/api/movers";
+const NEWS_ENDPOINT = "/api/news";
+const INSIGHTS_ENDPOINT = "/api/insights";
+
+// ---------- DOM ----------
+const tickerScroll = document.getElementById("tickerScroll");
+const chartTitleEl = document.getElementById("chartTitle");
+const newsSymbolEl = document.getElementById("newsSymbol");
+const insightsSymbolEl = document.getElementById("insightsSymbol");
+const newsList = document.getElementById("newsList");
+const gainersBody = document.getElementById("gainersBody");
+const losersBody = document.getElementById("losersBody");
+const companyProfileEl = document.getElementById("companyProfile");
+
+const perfEls = {
+  "1W": document.getElementById("perf1W"),
+  "1M": document.getElementById("perf1M"),
+  "3M": document.getElementById("perf3M"),
+  "6M": document.getElementById("perf6M"),
+  YTD: document.getElementById("perfYTD"),
+  "1Y": document.getElementById("perf1Y"),
 };
 
-const DEFAULT_SYMBOL = "AAPL";
+const fundamentalsBtn = document.getElementById("fundamentalsBtn");
+const menuToggle = document.getElementById("menuToggle");
+const menuPanel = document.getElementById("menuPanel");
+const themeSwitch = document.getElementById("themeSwitch");
 
-let currentSymbol = DEFAULT_SYMBOL;
-let currentTheme = "dark";
-let tvReady = false;
+const row1 = document.getElementById("row1");
+const row2 = document.getElementById("row2");
+const row3 = document.getElementById("row3");
 
-// ================= THEME =================
+const rowResizer1 = document.getElementById("rowResizer1");
+const rowResizer2 = document.getElementById("rowResizer2");
+const colResizerRow1 = document.getElementById("colResizerRow1");
 
-function initTheme() {
-    const stored = localStorage.getItem("mt_theme");
-    currentTheme = stored === "light" ? "light" : "dark";
-    document.body.classList.toggle("light-theme", currentTheme === "light");
+const tileChart = document.getElementById("tile-chart");
+const tileNews = document.getElementById("tile-news");
 
-    const toggle = document.getElementById("themeToggle");
-    if (toggle) {
-        toggle.checked = currentTheme === "light";
-        toggle.addEventListener("change", () => {
-            currentTheme = toggle.checked ? "light" : "dark";
-            document.body.classList.toggle("light-theme", currentTheme === "light");
-            localStorage.setItem("mt_theme", currentTheme);
-            if (document.getElementById("dashboardRoot") && !document.getElementById("dashboardRoot").classList.contains("hidden")) {
-                mountChart(currentSymbol);
-            }
-            if (document.getElementById("fundamentalsRoot") && !document.getElementById("fundamentalsRoot").classList.contains("hidden")) {
-                initFundamentalsCharts(true);
-            }
-        });
+// ---------- State ----------
+let currentSymbol = "AAPL";
+let tickerNodes = new Map();
+let tickerDataCache = [];
+let theme = "dark"; // "dark" | "light"
+let tvWidget = null;
+
+// ---------- Utils ----------
+const fmtPrice = (v) =>
+  typeof v === "number" && isFinite(v) ? v.toFixed(2) : "—";
+
+const fmtPct = (v) => {
+  if (v == null || !isFinite(v)) return "—";
+  const sign = v > 0 ? "+" : v < 0 ? "−" : "";
+  return `${sign}${Math.abs(v).toFixed(2)}%`;
+};
+
+const applyPctClass = (el, v) => {
+  el.classList.remove("pos", "neg", "neu");
+  if (v == null || !isFinite(v)) {
+    el.classList.add("neu");
+  } else if (v > 0) {
+    el.classList.add("pos");
+  } else if (v < 0) {
+    el.classList.add("neg");
+  } else {
+    el.classList.add("neu");
+  }
+};
+
+const setTheme = (mode) => {
+  theme = mode;
+  const root = document.documentElement;
+  const body = document.body;
+  root.setAttribute("data-theme", mode);
+  body.classList.remove("theme-dark", "theme-light");
+  body.classList.add(mode === "dark" ? "theme-dark" : "theme-light");
+  themeSwitch.checked = mode === "light";
+  localStorage.setItem("mt_theme", mode);
+  // remount chart with new theme
+  if (currentSymbol) {
+    mountTradingView(currentSymbol);
+  }
+};
+
+const initTheme = () => {
+  const stored = localStorage.getItem("mt_theme");
+  if (stored === "light" || stored === "dark") {
+    setTheme(stored);
+  } else {
+    setTheme("dark");
+  }
+};
+
+// ---------- TradingView Chart ----------
+function mountTradingView(symbol) {
+  chartTitleEl.textContent = symbol;
+  currentSymbol = symbol;
+
+  const container = document.getElementById("tv_container");
+  container.innerHTML = "";
+  if (typeof TradingView === "undefined") {
+    const msg = document.createElement("div");
+    msg.className = "muted";
+    msg.textContent = "TradingView failed to load.";
+    container.appendChild(msg);
+    return;
+  }
+
+  const tvTheme = theme === "dark" ? "dark" : "light";
+
+  tvWidget = new TradingView.widget({
+    width: "100%",
+    height: "100%",
+    symbol: symbol,
+    interval: "60",
+    timezone: "Etc/UTC",
+    theme: tvTheme,
+    style: "1",
+    locale: "en",
+    toolbar_bg: "#000000",
+    enable_publishing: false,
+    allow_symbol_change: false,
+    hide_top_toolbar: false,
+    hide_legend: false,
+    container_id: "tv_container",
+  });
+}
+
+// ---------- Ticker bar ----------
+function buildTickerRow(items) {
+  tickerScroll.innerHTML = "";
+  tickerNodes.clear();
+  tickerDataCache = items.slice();
+
+  const repeated = [...items, ...items]; // helps with continuous scroll
+  repeated.forEach((tk) => {
+    const item = document.createElement("div");
+    item.className = "ticker-item";
+    item.dataset.sym = tk.symbol;
+
+    const sym = document.createElement("span");
+    sym.className = "sym";
+    sym.textContent = tk.symbol;
+
+    const price = document.createElement("span");
+    price.className = "price";
+    price.textContent = fmtPrice(tk.price);
+
+    const chg = document.createElement("span");
+    chg.className = "chg";
+    applyPctClass(chg, tk.change_pct);
+    chg.textContent = fmtPct(tk.change_pct);
+
+    item.append(sym, price, chg);
+    item.addEventListener("click", () => onSymbolSelect(tk.symbol));
+    tickerScroll.appendChild(item);
+
+    tickerNodes.set(tk.symbol, { item, price, chg, last: tk.price });
+  });
+}
+
+function liveUpdateTickers(items) {
+  tickerDataCache = items.slice();
+  items.forEach((tk) => {
+    const node = tickerNodes.get(tk.symbol);
+    if (!node) return;
+    const newPriceText = fmtPrice(tk.price);
+    if (node.price.textContent !== newPriceText) {
+      const up = (tk.price || 0) > (node.last || 0);
+      node.item.classList.remove("flash-up", "flash-down");
+      void node.item.offsetWidth;
+      node.item.classList.add(up ? "flash-up" : "flash-down");
+      setTimeout(
+        () => node.item.classList.remove("flash-up", "flash-down"),
+        500
+      );
+      node.price.textContent = newPriceText;
+      node.last = tk.price;
     }
+    applyPctClass(node.chg, tk.change_pct);
+    node.chg.textContent = fmtPct(tk.change_pct);
+  });
 }
-
-// ================= MENU =================
-
-function initMenu() {
-    const btn = document.getElementById("menuToggle");
-    const dd = document.getElementById("menuDropdown");
-    if (!btn || !dd) return;
-
-    btn.addEventListener("click", () => {
-        dd.classList.toggle("open");
-    });
-
-    document.addEventListener("click", (e) => {
-        if (!dd.contains(e.target) && e.target !== btn) {
-            dd.classList.remove("open");
-        }
-    });
-
-    const tileCheckboxes = dd.querySelectorAll("input[type='checkbox'][data-tile]");
-    tileCheckboxes.forEach((cb) => {
-        const selector = cb.getAttribute("data-tile");
-        const el = document.querySelector(selector);
-        if (!el) return;
-        cb.checked = !el.classList.contains("hidden");
-        cb.addEventListener("change", () => {
-            el.classList.toggle("hidden", !cb.checked);
-        });
-    });
-
-    const shortcuts = dd.querySelectorAll(".shortcut-btn");
-    shortcuts.forEach((btnShortcut) => {
-        btnShortcut.addEventListener("click", () => {
-            const symbol = btnShortcut.getAttribute("data-symbol");
-            if (!symbol) return;
-            if (!document.getElementById("dashboardRoot").classList.contains("hidden")) {
-                onSymbolChange(symbol);
-            } else {
-                showDashboard();
-                onSymbolChange(symbol);
-            }
-            dd.classList.remove("open");
-        });
-    });
-}
-
-// ================= TRADINGVIEW =================
-
-function ensureTV() {
-    if (tvReady || typeof TradingView === "undefined") return;
-    tvReady = !!TradingView;
-}
-
-function mountChart(symbol) {
-    const container = document.getElementById("tv_chart");
-    ensureTV();
-    if (!container || !tvReady) return;
-
-    currentSymbol = symbol;
-    container.innerHTML = "";
-
-    new TradingView.widget({
-        symbol: symbol,
-        container_id: "tv_chart",
-        autosize: true,
-        interval: "60",
-        timezone: "Etc/UTC",
-        theme: currentTheme === "light" ? "light" : "dark",
-        style: "1",
-        locale: "en",
-        hide_top_toolbar: false,
-        hide_legend: false,
-        allow_symbol_change: false
-    });
-
-    const chartTitle = document.getElementById("chartTitle");
-    const newsTitle = document.getElementById("newsTitle");
-    const insightsTitle = document.getElementById("insightsTitle");
-    if (chartTitle) chartTitle.textContent = "Chart – " + symbol;
-    if (newsTitle) newsTitle.textContent = "News – " + symbol;
-    if (insightsTitle) insightsTitle.textContent = "Market Insights: " + symbol;
-
-    loadNews(symbol);
-    loadInsights(symbol);
-}
-
-// ================= TICKERS =================
 
 async function loadTickers() {
-    const strip = document.getElementById("tickerInner");
-    if (!strip) return;
-
-    try {
-        const res = await fetch(ENDPOINTS.tickers);
-        const data = await res.json();
-        if (!Array.isArray(data) || data.length === 0) return;
-
-        const doubled = [...data, ...data];
-        strip.innerHTML = "";
-
-        doubled.forEach((t) => {
-            const item = document.createElement("div");
-            item.className = "ticker-item";
-            item.dataset.symbol = t.symbol;
-            item.innerHTML = `
-                <span class="ticker-symbol">${t.symbol}</span>
-                <span class="ticker-price">${t.price ?? "--"}</span>
-                <span class="ticker-chg ${t.change_pct > 0 ? "pos" : t.change_pct < 0 ? "neg" : ""}">
-                    ${formatChange(t.change_pct)}
-                </span>
-            `;
-            item.addEventListener("click", () => {
-                showDashboard();
-                onSymbolChange(t.symbol);
-            });
-            strip.appendChild(item);
-        });
-    } catch (e) {
-        console.error("tickers error", e);
+  try {
+    const r = await fetch(TICKER_ENDPOINT);
+    const data = await r.json();
+    if (!tickerScroll.childElementCount) {
+      buildTickerRow(data);
+      if (data.length && !currentSymbol) {
+        onSymbolSelect(data[0].symbol);
+      }
+    } else {
+      liveUpdateTickers(data);
     }
+  } catch (e) {
+    // keep previous
+  }
 }
 
-function formatChange(v) {
-    if (v == null || !isFinite(v)) return "0.00%";
-    const s = v > 0 ? "+" : v < 0 ? "−" : "";
-    return `${s}${Math.abs(v).toFixed(2)}%`;
-}
+// ---------- News ----------
+function renderNewsList(symbol, articles) {
+  newsSymbolEl.textContent = symbol;
+  newsList.innerHTML = "";
+  if (!Array.isArray(articles) || !articles.length) {
+    newsList.innerHTML = '<div class="muted">No headlines.</div>';
+    return;
+  }
+  articles.forEach((n) => {
+    const item = document.createElement("div");
+    item.className = "news-item";
 
-// ================= NEWS =================
+    const title = document.createElement("a");
+    title.href = n.url || "#";
+    title.target = "_blank";
+    title.rel = "noopener noreferrer";
+    title.textContent = n.title || "(untitled)";
+
+    const meta = document.createElement("div");
+    meta.className = "muted";
+    const src = n.source || "Source";
+    const ts = n.published_at || "";
+    meta.textContent = `${src}${ts ? " · " + ts : ""}`;
+
+    item.append(title, meta);
+    newsList.appendChild(item);
+  });
+}
 
 async function loadNews(symbol) {
-    const list = document.getElementById("newsList");
-    if (!list) return;
-    list.innerHTML = '<div class="placeholder">Loading news…</div>';
-
-    try {
-        const res = await fetch(`${ENDPOINTS.news}?symbol=${encodeURIComponent(symbol)}`);
-        const news = await res.json();
-        list.innerHTML = "";
-
-        if (!Array.isArray(news) || news.length === 0) {
-            list.innerHTML = '<div class="placeholder">No headlines.</div>';
-            return;
-        }
-
-        news.slice(0, 50).forEach((n) => {
-            const div = document.createElement("div");
-            div.className = "news-item";
-            const a = document.createElement("a");
-            a.href = n.url || "#";
-            a.target = "_blank";
-            a.rel = "noopener noreferrer";
-            a.textContent = n.title || "(untitled)";
-            const meta = document.createElement("div");
-            meta.className = "news-meta";
-            const src = n.source || "Source";
-            const time = n.time || "";
-            meta.textContent = `${src}${time ? " · " + time : ""}`;
-            div.appendChild(a);
-            div.appendChild(meta);
-            list.appendChild(div);
-        });
-    } catch (e) {
-        console.error("news error", e);
-        list.innerHTML = '<div class="placeholder">Failed to load news.</div>';
-    }
+  newsList.innerHTML = '<div class="muted">Loading news…</div>';
+  try {
+    const r = await fetch(`${NEWS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
+    const data = await r.json();
+    renderNewsList(symbol, data);
+  } catch (e) {
+    newsList.innerHTML =
+      '<div class="muted">Failed to load news. Try again later.</div>';
+  }
 }
 
-// ================= INSIGHTS =================
+// ---------- Insights ----------
+function renderInsights(symbol, data) {
+  insightsSymbolEl.textContent = symbol;
+
+  const perf = data.perf || {};
+  ["1W", "1M", "3M", "6M", "YTD", "1Y"].forEach((key) => {
+    const el = perfEls[key];
+    const val = perf[key];
+    if (!el) return;
+    el.textContent = fmtPct(val);
+    el.classList.remove("pos", "neg", "neu");
+    if (val == null || !isFinite(val)) {
+      el.classList.add("neu");
+    } else if (val > 0) {
+      el.classList.add("pos");
+    } else if (val < 0) {
+      el.classList.add("neg");
+    } else {
+      el.classList.add("neu");
+    }
+  });
+
+  const profile = data.profile || "No performance snapshot.";
+  companyProfileEl.textContent = profile;
+}
 
 async function loadInsights(symbol) {
-    const grid = document.getElementById("insightsGrid");
-    const desc = document.getElementById("insightsDescription");
-    if (!grid || !desc) return;
-
-    grid.innerHTML = "";
-    desc.textContent = "Loading profile…";
-
-    try {
-        const res = await fetch(`${ENDPOINTS.insights}?symbol=${encodeURIComponent(symbol)}`);
-        const data = await res.json();
-
-        const periods = data.periods || [];
-        if (periods.length === 0) {
-            grid.innerHTML = '<div class="placeholder">No performance snapshot.</div>';
-        } else {
-            periods.forEach((p) => {
-                const cell = document.createElement("div");
-                cell.className = "insight-cell";
-                const label = document.createElement("div");
-                label.className = "insight-label";
-                label.textContent = p.label;
-                const val = document.createElement("div");
-                val.className =
-                    "insight-value " +
-                    (p.change > 0 ? "pos" : p.change < 0 ? "neg" : "");
-                val.textContent = formatChange(p.change);
-                cell.appendChild(label);
-                cell.appendChild(val);
-                grid.appendChild(cell);
-            });
-        }
-
-        const profile = data.profile;
-        if (profile) {
-            desc.textContent = profile;
-        } else {
-            desc.textContent = "No company profile available at this time.";
-        }
-    } catch (e) {
-        console.error("insights error", e);
-        grid.innerHTML = '<div class="placeholder">Failed to load snapshot.</div>';
-        desc.textContent = "Profile unavailable.";
-    }
+  Object.values(perfEls).forEach((el) => (el.textContent = "—"));
+  companyProfileEl.textContent = "Loading insights…";
+  try {
+    const r = await fetch(
+      `${INSIGHTS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`
+    );
+    const data = await r.json();
+    renderInsights(symbol, data);
+  } catch (e) {
+    companyProfileEl.textContent = "Insights unavailable.";
+  }
 }
 
-// ================= CALENDAR =================
+// ---------- Movers ----------
+function renderMovers(data) {
+  const gainers = data.gainers || [];
+  const losers = data.losers || [];
 
-async function loadCalendar() {
-    const body = document.getElementById("calendarBody");
-    if (!body) return;
+  gainersBody.innerHTML = "";
+  losersBody.innerHTML = "";
 
-    body.innerHTML = `<tr><td colspan="6" class="placeholder">Loading events…</td></tr>`;
+  gainers.forEach((g) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="sym-cell">${g.symbol}</td>
+      <td class="num">${fmtPrice(g.price)}</td>
+      <td class="num ${g.change_pct > 0 ? "pos" : "neg"}">${fmtPct(
+      g.change_pct
+    )}</td>`;
+    tr.addEventListener("click", () => onSymbolSelect(g.symbol));
+    gainersBody.appendChild(tr);
+  });
 
-    try {
-        const res = await fetch(ENDPOINTS.calendar);
-        const events = await res.json();
-
-        if (!Array.isArray(events) || events.length === 0) {
-            body.innerHTML = `<tr><td colspan="6" class="placeholder">No events.</td></tr>`;
-            return;
-        }
-
-        body.innerHTML = "";
-        events.forEach((ev) => {
-            const tr = document.createElement("tr");
-            tr.innerHTML = `
-                <td>${ev.time || ""}</td>
-                <td>${ev.country || ""}</td>
-                <td>${ev.event || ""}</td>
-                <td>${ev.actual ?? ""}</td>
-                <td>${ev.forecast ?? ""}</td>
-                <td>${ev.previous ?? ""}</td>
-            `;
-            body.appendChild(tr);
-        });
-    } catch (e) {
-        console.error("calendar error", e);
-        body.innerHTML = `<tr><td colspan="6" class="placeholder">Failed to load events.</td></tr>`;
-    }
+  losers.forEach((l) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="sym-cell">${l.symbol}</td>
+      <td class="num">${fmtPrice(l.price)}</td>
+      <td class="num ${l.change_pct > 0 ? "pos" : "neg"}">${fmtPct(
+      l.change_pct
+    )}</td>`;
+    tr.addEventListener("click", () => onSymbolSelect(l.symbol));
+    losersBody.appendChild(tr);
+  });
 }
-
-// ================= MOVERS =================
 
 async function loadMovers() {
-    const gBody = document.getElementById("gainersBody");
-    const lBody = document.getElementById("losersBody");
-    if (!gBody || !lBody) return;
-
-    gBody.innerHTML = `<tr><td class="placeholder">Loading…</td></tr>`;
-    lBody.innerHTML = `<tr><td class="placeholder">Loading…</td></tr>`;
-
-    try {
-        const res = await fetch(ENDPOINTS.movers);
-        const data = await res.json();
-        const gainers = data.gainers || [];
-        const losers = data.losers || [];
-
-        const fill = (tbody, rows) => {
-            tbody.innerHTML = "";
-            if (rows.length === 0) {
-                tbody.innerHTML =
-                    `<tr><td class="placeholder">No data.</td></tr>`;
-                return;
-            }
-            rows.forEach((r) => {
-                const tr = document.createElement("tr");
-                tr.innerHTML = `
-                    <td>${r.symbol}</td>
-                    <td style="text-align:right;">${r.price ?? "--"}</td>
-                    <td style="text-align:right; color:${
-                        r.change_pct > 0
-                            ? "var(--success)"
-                            : r.change_pct < 0
-                            ? "var(--danger)"
-                            : "var(--text-muted)"
-                    }">${formatChange(r.change_pct)}</td>
-                `;
-                tr.addEventListener("click", () => onSymbolChange(r.symbol));
-                tbody.appendChild(tr);
-            });
-        };
-
-        fill(gBody, gainers);
-        fill(lBody, losers);
-    } catch (e) {
-        console.error("movers error", e);
-        gBody.innerHTML = `<tr><td class="placeholder">Failed.</td></tr>`;
-        lBody.innerHTML = `<tr><td class="placeholder">Failed.</td></tr>`;
-    }
+  try {
+    const r = await fetch(MOVERS_ENDPOINT);
+    const data = await r.json();
+    renderMovers(data);
+  } catch (e) {
+    // ignore
+  }
 }
 
-// ================= RESIZERS =================
+// ---------- Selection ----------
+async function onSymbolSelect(symbol) {
+  currentSymbol = symbol;
+  mountTradingView(symbol);
+  await Promise.all([loadNews(symbol), loadInsights(symbol)]);
+}
 
-function initRowResizers() {
-    const container = document.querySelector(".layout-root");
-    if (!container) return;
+// ---------- Menu / theme / shortcuts ----------
+function initMenu() {
+  menuToggle.addEventListener("click", () => {
+    menuPanel.classList.toggle("open");
+  });
 
-    const resizers = document.querySelectorAll(".row-resizer");
-    let isDragging = false;
-    let startY = 0;
-    let topRow, bottomRow;
-    let topHeight, bottomHeight;
+  document.addEventListener("click", (e) => {
+    if (!menuPanel.contains(e.target) && !menuToggle.contains(e.target)) {
+      menuPanel.classList.remove("open");
+    }
+  });
 
-    resizers.forEach((resizer) => {
-        resizer.addEventListener("mousedown", (e) => {
-            const topSel = resizer.getAttribute("data-top");
-            const bottomSel = resizer.getAttribute("data-bottom");
-            topRow = document.querySelector(topSel);
-            bottomRow = document.querySelector(bottomSel);
-            if (!topRow || !bottomRow) return;
+  themeSwitch.addEventListener("change", () => {
+    setTheme(themeSwitch.checked ? "light" : "dark");
+  });
 
-            isDragging = true;
-            startY = e.clientY;
-            topHeight = topRow.getBoundingClientRect().height;
-            bottomHeight = bottomRow.getBoundingClientRect().height;
-
-            document.addEventListener("mousemove", onMove);
-            document.addEventListener("mouseup", onUp);
-            e.preventDefault();
-        });
+  document.querySelectorAll(".menu-shortcut").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sym = btn.dataset.symbol;
+      if (sym) onSymbolSelect(sym);
     });
+  });
 
-    function onMove(e) {
-        if (!isDragging) return;
-        const dy = e.clientY - startY;
+  document.querySelectorAll("[data-tile-toggle]").forEach((check) => {
+    check.addEventListener("change", () => {
+      const id = check.getAttribute("data-tile-toggle");
+      const tile = document.querySelector(`[data-tile-id="${id}"]`);
+      if (!tile) return;
+      tile.style.display = check.checked ? "" : "none";
+    });
+  });
 
-        let newTop = topHeight + dy;
-        let newBottom = bottomHeight - dy;
-        const minHeight = 120;
-        if (newTop < minHeight || newBottom < minHeight) return;
+  document.querySelectorAll("[data-close-tile]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-close-tile");
+      const tile = document.querySelector(`[data-tile-id="${id}"]`);
+      const check = document.querySelector(`input[data-tile-toggle="${id}"]`);
+      if (tile) tile.style.display = "none";
+      if (check) check.checked = false;
+    });
+  });
 
-        topRow.style.flex = "0 0 auto";
-        bottomRow.style.flex = "0 0 auto";
-        topRow.style.height = `${newTop}px`;
-        bottomRow.style.height = `${newBottom}px`;
-    }
-
-    function onUp() {
-        if (!isDragging) return;
-        isDragging = false;
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-    }
+  fundamentalsBtn.addEventListener("click", () => {
+    window.location.href = "/fundamentals";
+  });
 }
 
-function initColResizer() {
-    const row = document.getElementById("chartRow");
-    const resizer = document.getElementById("colResizer");
-    const leftTile = document.getElementById("chartTile");
-    const rightTile = document.getElementById("newsTile");
-    if (!row || !resizer || !leftTile || !rightTile) return;
+// ---------- Resizing ----------
+function initRowResizing() {
+  let currentResizer = null;
+  let startY = 0;
+  let startHeightTop = 0;
+  let startHeightBottom = 0;
 
-    function positionHandle() {
-        const rowRect = row.getBoundingClientRect();
-        const leftRect = leftTile.getBoundingClientRect();
-        const offset = leftRect.right - rowRect.left;
-        resizer.style.left = `${offset}px`;
-    }
+  const onMouseMove = (e) => {
+    if (!currentResizer) return;
+    const dy = e.clientY - startY;
 
-    positionHandle();
-    window.addEventListener("resize", positionHandle);
+    const topRow = currentResizer === rowResizer1 ? row1 : row2;
+    const bottomRow = currentResizer === rowResizer1 ? row2 : row3;
 
-    let isDragging = false;
-    let startX = 0;
-    let leftWidth = 0;
-    let rightWidth = 0;
+    const newTop = Math.max(150, startHeightTop + dy);
+    const newBottom = Math.max(150, startHeightBottom - dy);
 
+    topRow.style.height = newTop + "px";
+    bottomRow.style.height = newBottom + "px";
+  };
+
+  const onMouseUp = () => {
+    currentResizer = null;
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+  };
+
+  [rowResizer1, rowResizer2].forEach((resizer) => {
     resizer.addEventListener("mousedown", (e) => {
-        const rowRect = row.getBoundingClientRect();
-        const leftRect = leftTile.getBoundingClientRect();
-        const rightRect = rightTile.getBoundingClientRect();
-        leftWidth = leftRect.width;
-        rightWidth = rightRect.width;
-        startX = e.clientX;
-        isDragging = true;
-        document.addEventListener("mousemove", onMove);
-        document.addEventListener("mouseup", onUp);
-        e.preventDefault();
+      e.preventDefault();
+      currentResizer = resizer;
+      startY = e.clientY;
+      const topRow = resizer === rowResizer1 ? row1 : row2;
+      const bottomRow = resizer === rowResizer1 ? row2 : row3;
+      startHeightTop = topRow.getBoundingClientRect().height;
+      startHeightBottom = bottomRow.getBoundingClientRect().height;
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
     });
-
-    function onMove(e) {
-        if (!isDragging) return;
-        const dx = e.clientX - startX;
-        let newLeft = leftWidth + dx;
-        let newRight = rightWidth - dx;
-        const minWidth = 220;
-        if (newLeft < minWidth || newRight < minWidth) return;
-
-        row.style.gridTemplateColumns = `${newLeft}px ${newRight}px`;
-        positionHandle();
-    }
-
-    function onUp() {
-        if (!isDragging) return;
-        isDragging = false;
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-    }
+  });
 }
 
-// ================= FUNDAMENTALS =================
+function initColResizingRow1() {
+  let isResizing = false;
+  let startX = 0;
+  let startWidthLeft = 0;
+  let startWidthRight = 0;
 
-function initFundamentalsCharts(forceRemount = false) {
-    if (typeof TradingView === "undefined") return;
-    const spxContainer = document.getElementById("fundChartSPX");
-    const ndxContainer = document.getElementById("fundChartNDX");
-    if (!spxContainer || !ndxContainer) return;
+  const onMove = (e) => {
+    if (!isResizing) return;
+    const dx = e.clientX - startX;
+    const total = startWidthLeft + startWidthRight;
+    let newLeft = startWidthLeft + dx;
+    newLeft = Math.max(200, Math.min(total - 200, newLeft));
+    const leftPct = (newLeft / total) * 100;
+    const rightPct = 100 - leftPct;
 
-    if (forceRemount) {
-        spxContainer.innerHTML = "";
-        ndxContainer.innerHTML = "";
-    }
+    tileChart.style.flexBasis = leftPct + "%";
+    tileNews.style.flexBasis = rightPct + "%";
+  };
 
-    new TradingView.widget({
-        symbol: "OANDA:US500USD",
-        container_id: "fundChartSPX",
-        autosize: true,
-        interval: "D",
-        timezone: "Etc/UTC",
-        theme: currentTheme === "light" ? "light" : "dark",
-        style: "1",
-        locale: "en",
-        hide_top_toolbar: true,
-        hide_legend: true,
-        allow_symbol_change: false
-    });
+  const onUp = () => {
+    isResizing = false;
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+  };
 
-    new TradingView.widget({
-        symbol: "OANDA:NAS100USD",
-        container_id: "fundChartNDX",
-        autosize: true,
-        interval: "D",
-        timezone: "Etc/UTC",
-        theme: currentTheme === "light" ? "light" : "dark",
-        style: "1",
-        locale: "en",
-        hide_top_toolbar: true,
-        hide_legend: true,
-        allow_symbol_change: false
-    });
-
-    const spxTrend = document.getElementById("spxTrend");
-    const spxVol = document.getElementById("spxVol");
-    const ndxTrend = document.getElementById("ndxTrend");
-    const ndxVol = document.getElementById("ndxVol");
-    if (spxTrend) spxTrend.textContent = "Uptrend (last 3 months)";
-    if (spxVol) spxVol.textContent = "Moderate";
-    if (ndxTrend) ndxTrend.textContent = "Range-bound";
-    if (ndxVol) ndxVol.textContent = "Elevated";
+  colResizerRow1.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    const rectLeft = tileChart.getBoundingClientRect();
+    const rectRight = tileNews.getBoundingClientRect();
+    startX = e.clientX;
+    startWidthLeft = rectLeft.width;
+    startWidthRight = rectRight.width;
+    isResizing = true;
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
 }
 
-// ================= VIEW SWITCH =================
-
-function showDashboard() {
-    const dash = document.getElementById("dashboardRoot");
-    const fund = document.getElementById("fundamentalsRoot");
-    if (dash) dash.classList.remove("hidden");
-    if (fund) fund.classList.add("hidden");
+// ---------- Ticker scroll pause on hover ----------
+function initTickerScrollPause() {
+  const bar = document.querySelector(".ticker-bar");
+  bar.addEventListener("mouseenter", () => {
+    bar.classList.add("paused");
+  });
+  bar.addEventListener("mouseleave", () => {
+    bar.classList.remove("paused");
+  });
 }
 
-function showFundamentals() {
-    const dash = document.getElementById("dashboardRoot");
-    const fund = document.getElementById("fundamentalsRoot");
-    if (dash) dash.classList.add("hidden");
-    if (fund) fund.classList.remove("hidden");
-    ensureTV();
-    if (tvReady) {
-        initFundamentalsCharts(true);
-    } else {
-        const tryInit = () => {
-            ensureTV();
-            if (tvReady) {
-                initFundamentalsCharts(true);
-            } else {
-                setTimeout(tryInit, 200);
-            }
-        };
-        tryInit();
-    }
-}
-
-// expose for HTML
-window.marketTerminal = {
-    showDashboard,
-    showFundamentals
-};
-
-// ================= SYMBOL =================
-
-function onSymbolChange(symbol) {
-    currentSymbol = symbol;
-    ensureTV();
-    const tryMount = () => {
-        ensureTV();
-        if (tvReady) {
-            mountChart(symbol);
-        } else {
-            setTimeout(tryMount, 200);
-        }
-    };
-    tryMount();
-}
-
-// ================= BOOT =================
-
+// ---------- Boot ----------
 document.addEventListener("DOMContentLoaded", () => {
-    initTheme();
-    initMenu();
-    loadTickers();
+  initTheme();
+  initMenu();
+  initRowResizing();
+  initColResizingRow1();
+  initTickerScrollPause();
 
-    const dashRoot = document.getElementById("dashboardRoot");
-    if (dashRoot) {
-        // optional symbol from hash
-        const hash = window.location.hash || "";
-        const m = hash.match(/symbol=([^&]+)/i);
-        currentSymbol = m ? decodeURIComponent(m[1]) : DEFAULT_SYMBOL;
+  // starting layout heights
+  row1.style.height = "420px";
+  row2.style.height = "260px";
+  row3.style.height = "260px";
 
-        const tryInit = () => {
-            ensureTV();
-            if (tvReady) {
-                mountChart(currentSymbol);
-                loadCalendar();
-                loadMovers();
-            } else {
-                setTimeout(tryInit, 200);
-            }
-        };
-        tryInit();
-
-        initRowResizers();
-        initColResizer();
-    }
+  mountTradingView(currentSymbol);
+  loadNews(currentSymbol);
+  loadInsights(currentSymbol);
+  loadTickers();
+  loadMovers();
+  setInterval(loadTickers, 15000);
+  setInterval(loadMovers, 45000);
 });
