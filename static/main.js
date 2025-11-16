@@ -7,7 +7,7 @@ const INSIGHTS_ENDPOINT = "/api/insights";
 const MOVERS_ENDPOINT = "/api/movers";
 const NEWS_ENDPOINT = "/api/news";
 
-// DOM
+// DOM references
 const tickerScroll = document.getElementById("tickerScroll");
 const tvContainer = document.getElementById("tv_container");
 const chartTitleEl = document.getElementById("chartTitle");
@@ -26,13 +26,18 @@ const domBody = document.getElementById("domBody");
 const gainersBody = document.getElementById("gainersBody");
 const losersBody = document.getElementById("losersBody");
 
+const fundamentalsPanel = document.getElementById("fundamentalsPanel");
+const fundamentalsBtn = document.getElementById("fundamentalsBtn");
+const fundamentalsClose = document.getElementById("fundamentalsClose");
+const fundamentalsSymbol = document.getElementById("fundamentalsSymbol");
+
 // state
 let currentSymbol = window.DEFAULT_SYMBOL || "AAPL";
 let tvWidget = null;
-let tickerNodes = new Map(); // symbol -> {item, priceEl, chgEl, last}
+let tickerNodes = new Map(); // symbol -> { item, priceEl, chgEl, last }
 
 // -------------------------------------------------------------
-// Helpers
+// Helper functions
 // -------------------------------------------------------------
 function fmtPrice(v) {
   if (v == null || !isFinite(v)) return "—";
@@ -49,16 +54,14 @@ function setChangeClass(el, v) {
   else if (v < 0) el.classList.add("neg");
 }
 
-// -------------------------------------------------------------
-// TradingView widgets
-// -------------------------------------------------------------
 function toTVSymbol(symbol) {
-  // For most US stocks TradingView uses NASDAQ/NYSE auto-resolve, but
-  // we keep simple "NASDAQ:NVDA" etc only for shortcuts.
-  if (symbol.startsWith("CURRENCYCOM:") || symbol.includes(":")) return symbol;
+  if (symbol.startsWith("OANDA:") || symbol.includes(":")) return symbol;
   return symbol;
 }
 
+// -------------------------------------------------------------
+// TradingView
+// -------------------------------------------------------------
 function mountMainChart(symbol) {
   chartTitleEl.textContent = symbol;
   tvContainer.innerHTML = "";
@@ -116,7 +119,7 @@ function buildTickerRow(items) {
   tickerScroll.innerHTML = "";
   tickerNodes.clear();
 
-  const repeated = [...items, ...items]; // for marquee
+  const repeated = [...items, ...items];
   repeated.forEach((tk) => {
     const item = document.createElement("div");
     item.className = "ticker-item";
@@ -147,9 +150,8 @@ function updateTickerRow(items) {
   items.forEach((tk) => {
     const node = tickerNodes.get(tk.symbol);
     if (!node) return;
-    const { item, priceEl, chgEl, last } = node;
-
-    if (tk.price != null && tk.price !== last) {
+    const { priceEl, chgEl } = node;
+    if (tk.price != null) {
       priceEl.textContent = fmtPrice(tk.price);
       node.last = tk.price;
     }
@@ -168,12 +170,12 @@ async function loadTickers() {
       updateTickerRow(data);
     }
   } catch (e) {
-    // keep old data if API fails
+    // keep previous values
   }
 }
 
 // -------------------------------------------------------------
-// Insights + DOM + Movers + News
+// Insights / DOM / Movers / News
 // -------------------------------------------------------------
 function applyPerf(perf) {
   Object.keys(perfIds).forEach((key) => {
@@ -194,6 +196,7 @@ function applyPerf(perf) {
 
 async function loadInsights(symbol) {
   insightsSymbolEl.textContent = symbol;
+  fundamentalsSymbol.textContent = symbol;
   profileText.textContent = "Loading profile…";
   try {
     const res = await fetch(`${INSIGHTS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
@@ -214,7 +217,6 @@ function buildDOMFromQuote(quote) {
       '<tr><td colspan="4" class="muted">Waiting for quote data…</td></tr>';
     return;
   }
-
   const rows = [];
   const levels = 7;
   const step = price * 0.0015 || 0.5;
@@ -225,7 +227,6 @@ function buildDOMFromQuote(quote) {
     const askSize = (Math.random() * 5 + 1).toFixed(2);
     rows.push({ bidSize, bid, ask, askSize });
   }
-
   let html = "";
   rows.forEach((r) => {
     html += `<tr>
@@ -301,9 +302,9 @@ function renderMovers(tableBody, items) {
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${row.symbol}</td><td>${fmtPrice(
       row.price
-    )}</td><td class="${row.change_pct > 0 ? "pos" : row.change_pct < 0 ? "neg" : ""}">${fmtChange(
-      row.change_pct
-    )}</td>`;
+    )}</td><td class="${
+      row.change_pct > 0 ? "pos" : row.change_pct < 0 ? "neg" : ""
+    }">${fmtChange(row.change_pct)}</td>`;
     tr.addEventListener("click", () => onSymbolSelect(row.symbol));
     tableBody.appendChild(tr);
   });
@@ -316,17 +317,17 @@ async function loadMovers() {
     renderMovers(gainersBody, data.gainers);
     renderMovers(losersBody, data.losers);
   } catch (e) {
-    // show nothing
+    // ignore
   }
 }
 
 // -------------------------------------------------------------
-// Layout: row resizers
+// Layout: column + row resizers
 // -------------------------------------------------------------
-function initRowResizers() {
+function initColResizers() {
   const rows = document.querySelectorAll(".row");
   rows.forEach((row) => {
-    const resizer = row.querySelector(".row-resizer");
+    const resizer = row.querySelector(".col-resizer");
     if (!resizer) return;
 
     const left = resizer.previousElementSibling;
@@ -366,7 +367,6 @@ function initRowResizers() {
 
     resizer.addEventListener("mousedown", (e) => {
       e.preventDefault();
-      const rect = row.getBoundingClientRect();
       const leftRect = left.getBoundingClientRect();
       const rightRect = right.getBoundingClientRect();
       startX = e.clientX;
@@ -380,28 +380,94 @@ function initRowResizers() {
   });
 }
 
+function initRowResizers() {
+  const grid = document.getElementById("gridRoot");
+  const resizers = document.querySelectorAll(".row-resizer");
+  const rows = Array.from(document.querySelectorAll(".row"));
+
+  resizers.forEach((resizer) => {
+    let startY = 0;
+    let topRow = null;
+    let bottomRow = null;
+    let topHeight = 0;
+    let bottomHeight = 0;
+
+    function onMouseMove(e) {
+      const dy = e.clientY - startY;
+      const totalHeight = grid.getBoundingClientRect().height;
+      const minPixels = 120;
+
+      let newTop = topHeight + dy;
+      let newBottom = bottomHeight - dy;
+
+      if (newTop < minPixels) {
+        newTop = minPixels;
+        newBottom = topHeight + bottomHeight - minPixels;
+      } else if (newBottom < minPixels) {
+        newBottom = minPixels;
+        newTop = topHeight + bottomHeight - minPixels;
+      }
+
+      const topFlex = newTop / totalHeight;
+      const bottomFlex = newBottom / totalHeight;
+      topRow.style.flex = topFlex.toString();
+      bottomRow.style.flex = bottomFlex.toString();
+    }
+
+    function onMouseUp() {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      resizer.classList.remove("active");
+    }
+
+    resizer.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const between = resizer.dataset.between; // e.g. "1-2"
+      if (!between) return;
+      const [topIdx, botIdx] = between.split("-").map((x) => parseInt(x, 10));
+      topRow = rows.find((r) => parseInt(r.dataset.row, 10) === topIdx);
+      bottomRow = rows.find((r) => parseInt(r.dataset.row, 10) === botIdx);
+      if (!topRow || !bottomRow) return;
+
+      const topRect = topRow.getBoundingClientRect();
+      const bottomRect = bottomRow.getBoundingClientRect();
+      startY = e.clientY;
+      topHeight = topRect.height;
+      bottomHeight = bottomRect.height;
+      resizer.classList.add("active");
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    });
+  });
+}
+
 // -------------------------------------------------------------
-// Symbol selection + boot
+// Symbol selection + shortcuts
 // -------------------------------------------------------------
 async function onSymbolSelect(symbol) {
   currentSymbol = symbol;
   mountMainChart(symbol);
-  await Promise.all([loadInsights(symbol), loadNews(symbol), loadQuoteForDOM(symbol)]);
+  await Promise.all([
+    loadInsights(symbol),
+    loadNews(symbol),
+    loadQuoteForDOM(symbol),
+  ]);
 }
 
 function initShortcuts() {
-  document.querySelectorAll(".shortcut-btn").forEach((btn) => {
+  document.querySelectorAll('[data-role="shortcut"]').forEach((btn) => {
     btn.addEventListener("click", () => {
       const tvSym = btn.dataset.symbol;
-      // Chart uses TV symbol; insights/news/DOM use underlying base (e.g. US500 -> ^GSPX style)
       mountMainChart(tvSym);
+
       const base = tvSym.split(":").pop();
-      const logical = base === "US500" ? "SPY" : base === "US100" ? "QQQ" : base;
+      let logical = base;
+      if (base === "US500USD") logical = "SPY";
+      if (base === "NAS100USD") logical = "QQQ";
+
       currentSymbol = logical;
-      insightsSymbolEl.textContent = logical;
-      loadInsights(logical);
-      loadNews(logical);
-      loadQuoteForDOM(logical);
+      onSymbolSelect(logical);
     });
   });
 }
@@ -416,7 +482,10 @@ function initTickerHover() {
   });
 }
 
-function initMenu() {
+// -------------------------------------------------------------
+// Menu, theme, fundamentals panel
+// -------------------------------------------------------------
+function initMenuAndTheme() {
   const toggle = document.getElementById("menuToggle");
   const dropdown = document.getElementById("menuDropdown");
   const themeToggle = document.getElementById("themeToggle");
@@ -432,7 +501,6 @@ function initMenu() {
     }
   });
 
-  // theme
   const stored = localStorage.getItem("mt-theme");
   if (stored === "light") {
     document.body.classList.remove("theme-dark");
@@ -447,9 +515,15 @@ function initMenu() {
     document.body.classList.toggle("theme-dark", !isLight);
     localStorage.setItem("mt-theme", isLight ? "light" : "dark");
     themeIcon.textContent = isLight ? "☀️" : "🌙";
-    // re-mount chart & calendar with new theme
     mountMainChart(currentSymbol);
     mountCalendarWidget();
+  });
+
+  fundamentalsBtn.addEventListener("click", () => {
+    fundamentalsPanel.classList.toggle("open");
+  });
+  fundamentalsClose.addEventListener("click", () => {
+    fundamentalsPanel.classList.remove("open");
   });
 }
 
@@ -457,7 +531,8 @@ function initMenu() {
 // Init
 // -------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", async () => {
-  initMenu();
+  initMenuAndTheme();
+  initColResizers();
   initRowResizers();
   initShortcuts();
   initTickerHover();
@@ -470,10 +545,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   setInterval(loadMovers, 5 * 60 * 1000);
 
   await onSymbolSelect(currentSymbol);
-  // refresh news/insights/movers periodically
+
   setInterval(() => {
     loadInsights(currentSymbol);
     loadNews(currentSymbol);
     loadQuoteForDOM(currentSymbol);
+    loadMovers();
   }, 10 * 60 * 1000);
 });
