@@ -1,11 +1,10 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from typing import List, Dict, Any
 
-import httpx
-import yfinance as yf
-from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+import requests
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -15,256 +14,214 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 static_dir = os.path.join(BASE_DIR, "static")
-if not os.path.isdir(static_dir):
-    os.makedirs(static_dir, exist_ok=True)
-
+if not os.path.exists(static_dir):
+    os.makedirs(static_dir)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-WATCHLIST: List[str] = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "META",
-    "GOOGL", "TSLA", "AVGO", "AMD", "NFLX",
-    "ADBE", "INTC", "CSCO", "QCOM", "TXN",
-    "JPM", "BAC", "WFC", "GS", "MS",
+# ---------- Config ----------
+
+WATCHLIST = [
+    "AAPL", "MSFT", "NVDA", "META", "GOOGL", "TSLA",
+    "AVGO", "AMD", "NFLX", "ADBE", "INTC", "CSCO",
+    "QCOM", "TXN", "CRM", "JPM", "BAC", "WFC", "GS",
+    "V", "MA", "XOM", "CVX", "UNH", "LLY", "ABBV"
 ]
 
-DEFAULT_SYMBOL = "AAPL"
+YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
+YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+YAHOO_PROFILE_URL = (
+    "https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}"
+    "?modules=assetProfile"
+)
+YAHOO_NEWS_URL = (
+    "https://query2.finance.yahoo.com/v1/finance/search"
+)  # q, newsCount
 
 
-def _safe_float(v: Any) -> float | None:
-    try:
-        if v is None:
-            return None
-        return float(v)
-    except Exception:
-        return None
+# ---------- Utility helpers ----------
 
-
-def _format_time(ts: datetime | None) -> str:
-    if not ts:
-        return ""
-    return ts.strftime("%Y-%m-%d %H:%M")
-
-
-async def fetch_quote(symbol: str) -> Dict[str, Any]:
-    ticker = yf.Ticker(symbol)
-    try:
-        fi = ticker.fast_info
-        last = _safe_float(getattr(fi, "last_price", None))
-        prev = _safe_float(getattr(fi, "previous_close", None))
-        currency = getattr(fi, "currency", "USD")
-    except Exception:
-        fi = None
-        last = prev = currency = None
-
-    if last is None or prev is None:
-        try:
-            hist = ticker.history(period="5d")
-            if not hist.empty:
-                last = float(hist["Close"].iloc[-1])
-                prev = float(hist["Close"].iloc[-2]) if len(hist) > 1 else last
-                currency = getattr(ticker.info, "currency", "USD")
-        except Exception:
-            pass
-
-    change_pct = None
-    if last is not None and prev not in (None, 0):
-        change_pct = (last - prev) / prev * 100.0
-
-    return {
-        "symbol": symbol,
-        "price": last,
-        "previous_close": prev,
-        "change_pct": change_pct,
-        "currency": currency or "USD",
-    }
-
-
-async def fetch_performance(symbol: str) -> Dict[str, Any]:
-    now = datetime.utcnow()
-    start = now - timedelta(days=365 + 30)
-    try:
-        hist = yf.download(symbol, start=start.date(), end=now.date(), progress=False)
-    except Exception:
-        hist = None
-
-    if hist is None or hist.empty:
+def yahoo_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    if not symbols:
         return {}
-
-    hist = hist["Close"].dropna()
-    if hist.empty:
-        return {}
-
-    last_price = float(hist.iloc[-1])
-
-    def change_since(days_back: int | None = None, date_at_year_start: bool = False) -> float | None:
-        if last_price == 0:
-            return None
-        try:
-            if date_at_year_start:
-                year_start = datetime(now.year, 1, 1)
-                past_series = hist.loc[hist.index >= year_start]
-                if past_series.empty:
-                    return None
-                past_price = float(past_series.iloc[0])
-            else:
-                past_date = now - timedelta(days=days_back)
-                past_series = hist.loc[:past_date.strftime("%Y-%m-%d")]
-                if past_series.empty:
-                    return None
-                past_price = float(past_series.iloc[-1])
-            return (last_price - past_price) / past_price * 100.0
-        except Exception:
-            return None
-
-    return {
-        "1W": change_since(7),
-        "1M": change_since(30),
-        "3M": change_since(90),
-        "6M": change_since(180),
-        "YTD": change_since(None, date_at_year_start=True),
-        "1Y": change_since(365),
-    }
-
-
-async def fetch_profile(symbol: str) -> str:
-    try:
-        info = yf.Ticker(symbol).info
-    except Exception:
-        info = {}
-
-    text = info.get("longBusinessSummary") or info.get("description") or ""
-    if not text:
-        return ""
-
-    parts = [p.strip() for p in text.replace("\n", " ").split(".") if p.strip()]
-    short = ". ".join(parts[:6])
-    if short and not short.endswith("."):
-        short += "."
-    return short
-
-
-async def fetch_tickers() -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for sym in WATCHLIST:
-        q = await fetch_quote(sym)
-        out.append(q)
+    params = {"symbols": ",".join(symbols)}
+    r = requests.get(YAHOO_QUOTE_URL, params=params, timeout=8)
+    r.raise_for_status()
+    data = r.json().get("quoteResponse", {}).get("result", [])
+    out: Dict[str, Dict[str, Any]] = {}
+    for q in data:
+        sym = q.get("symbol")
+        if not sym:
+            continue
+        price = q.get("regularMarketPrice")
+        change = q.get("regularMarketChangePercent")
+        out[sym] = {
+            "symbol": sym,
+            "price": float(price) if price is not None else None,
+            "change_pct": float(change) if change is not None else None,
+        }
     return out
 
 
-async def fetch_movers() -> Dict[str, List[Dict[str, Any]]]:
-    quotes = await fetch_tickers()
-    valid = [q for q in quotes if q.get("change_pct") is not None]
-    sorted_list = sorted(valid, key=lambda x: x["change_pct"])
-    losers = sorted_list[:5]
-    gainers = sorted_list[-5:][::-1]
-    return {"gainers": gainers, "losers": losers}
+def yahoo_perf_and_profile(symbol: str) -> Dict[str, Any]:
+    # Performance: use 1Y daily chart and compute 1W/1M/3M/6M/YTD/1Y
+    out = {
+        "symbol": symbol,
+        "perf": {},
+        "profile": "",
+    }
+    try:
+        chart_params = {"range": "1y", "interval": "1d"}
+        cr = requests.get(
+            YAHOO_CHART_URL.format(symbol=symbol),
+            params=chart_params,
+            timeout=10,
+        )
+        cr.raise_for_status()
+        cdata = cr.json()["chart"]["result"][0]
+        closes = cdata["indicators"]["quote"][0]["close"]
+        timestamps = cdata["timestamp"]
+        if not closes or not timestamps:
+            raise ValueError("No chart data")
+
+        series = [
+            (datetime.fromtimestamp(t, tz=timezone.utc), c)
+            for t, c in zip(timestamps, closes)
+            if c is not None
+        ]
+        if not series:
+            raise ValueError("Empty series")
+
+        series.sort(key=lambda x: x[0])
+        end_price = series[-1][1]
+        end_date = series[-1][0].date()
+
+        def pct_change(days: int) -> float | None:
+            target_date = end_date.toordinal() - days
+            # find first point with date ordinal <= target_date
+            candidates = [p for (d, p) in series if d.date().toordinal() <= target_date]
+            if not candidates:
+                return None
+            start = candidates[-1]
+            return (end_price - start) / start * 100.0 if start else None
+
+        out["perf"] = {
+            "1W": pct_change(7),
+            "1M": pct_change(30),
+            "3M": pct_change(90),
+            "6M": pct_change(180),
+            "YTD": pct_change(end_date.timetuple().tm_yday - 1),
+            "1Y": pct_change(365),
+        }
+    except Exception:
+        pass
+
+    # Profile
+    try:
+        pr = requests.get(YAHOO_PROFILE_URL.format(symbol=symbol), timeout=8)
+        pr.raise_for_status()
+        result = pr.json()["quoteSummary"]["result"]
+        if result:
+            summary = result[0]["assetProfile"].get("longBusinessSummary", "")
+            if summary:
+                # shorten to ~6 sentences
+                parts = summary.split(". ")
+                out["profile"] = ". ".join(parts[:6]).strip()
+    except Exception:
+        pass
+
+    return out
 
 
-async def fetch_news_yahoo(symbol: str | None = None, limit: int = 20) -> List[Dict[str, Any]]:
-    if symbol:
-        url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
-    else:
-        url = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US"
-
-    items: List[Dict[str, Any]] = []
-    async with httpx.AsyncClient(timeout=8.0) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        import xml.etree.ElementTree as ET
-
-        root = ET.fromstring(resp.text)
-        for item in root.findall(".//item")[:limit]:
-            title = (item.findtext("title") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            pub = item.findtext("pubDate")
-            items.append(
+def yahoo_symbol_news(symbol: str, limit: int = 30) -> List[Dict[str, Any]]:
+    try:
+        params = {"q": symbol, "newsCount": limit}
+        r = requests.get(YAHOO_NEWS_URL, params=params, timeout=8)
+        r.raise_for_status()
+        data = r.json()
+        items = data.get("news", [])
+        out = []
+        for n in items:
+            title = n.get("title")
+            link = n.get("link")
+            publisher = n.get("publisher")
+            ts = n.get("providerPublishTime")
+            if not title or not link:
+                continue
+            when = ""
+            if ts:
+                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                when = dt.strftime("%Y-%m-%d %H:%M UTC")
+            out.append(
                 {
-                    "title": title or "(untitled)",
-                    "url": link or "#",
-                    "source": "Yahoo Finance",
-                    "published_at": pub or "",
+                    "title": title,
+                    "url": link,
+                    "source": publisher or "",
+                    "published_at": when,
                 }
             )
-    return items
+        return out
+    except Exception:
+        # fallback: empty list
+        return []
 
 
-async def fetch_news_google(symbol: str | None = None, limit: int = 20) -> List[Dict[str, Any]]:
-    query = f"{symbol} stock" if symbol else "stock market"
-    url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
-    items: List[Dict[str, Any]] = []
-    async with httpx.AsyncClient(timeout=8.0) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        import xml.etree.ElementTree as ET
-
-        root = ET.fromstring(resp.text)
-        for item in root.findall(".//item")[:limit]:
-            title = (item.findtext("title") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            pub = item.findtext("pubDate")
-            source_tag = item.find("{*}source")
-            source_name = source_tag.text.strip() if source_tag is not None and source_tag.text else "Google News"
-            items.append(
-                {
-                    "title": title or "(untitled)",
-                    "url": link or "#",
-                    "source": source_name,
-                    "published_at": pub or "",
-                }
-            )
-    return items
-
-
-async def fetch_news(symbol: str | None = None, limit: int = 20) -> List[Dict[str, Any]]:
-    for provider in (fetch_news_yahoo, fetch_news_google):
-        try:
-            return await provider(symbol, limit=limit)
-        except Exception:
-            continue
-    return []
-
+# ---------- Routes: pages ----------
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request) -> HTMLResponse:
+async def home(request: Request):
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "default_symbol": DEFAULT_SYMBOL, "watchlist": WATCHLIST},
+        {"request": request},
     )
 
 
+@app.get("/fundamentals", response_class=HTMLResponse)
+async def fundamentals_page(request: Request):
+    return templates.TemplateResponse(
+        "fundamentals.html",
+        {"request": request},
+    )
+
+
+# ---------- Routes: APIs ----------
+
 @app.get("/api/tickers")
-async def api_tickers() -> JSONResponse:
-    data = await fetch_tickers()
-    return JSONResponse(data)
-
-
-@app.get("/api/quote")
-async def api_quote(symbol: str = Query(...)) -> JSONResponse:
-    data = await fetch_quote(symbol.upper())
+async def api_tickers():
+    quotes = yahoo_quotes(WATCHLIST)
+    data = []
+    for sym in WATCHLIST:
+        q = quotes.get(sym, {"symbol": sym, "price": None, "change_pct": None})
+        data.append(q)
     return JSONResponse(data)
 
 
 @app.get("/api/insights")
-async def api_insights(symbol: str = Query(...)) -> JSONResponse:
-    sym = symbol.upper()
-    perf = await fetch_performance(sym)
-    profile = await fetch_profile(sym)
-    return JSONResponse(
-        {
-            "symbol": sym,
-            "performance": perf,
-            "profile": profile,
-        }
-    )
-
-
-@app.get("/api/movers")
-async def api_movers() -> JSONResponse:
-    data = await fetch_movers()
-    return JSONResponse(data)
+async def api_insights(symbol: str):
+    info = yahoo_perf_and_profile(symbol)
+    # convert None to null-friendly
+    return JSONResponse(info)
 
 
 @app.get("/api/news")
-async def api_news(symbol: str = Query(None)) -> JSONResponse:
-    data = await fetch_news(symbol.upper() if symbol else None, limit=25)
-    return JSONResponse(data)
+async def api_news(symbol: str):
+    return JSONResponse(yahoo_symbol_news(symbol))
+
+
+@app.get("/api/movers")
+async def api_movers():
+    quotes = yahoo_quotes(WATCHLIST)
+    items = list(quotes.values())
+    items = [q for q in items if q.get("change_pct") is not None]
+    if not items:
+        return JSONResponse({"gainers": [], "losers": []})
+
+    items.sort(key=lambda x: x["change_pct"])
+    losers = items[:5]
+    gainers = items[-5:][::-1]
+    return JSONResponse({"gainers": gainers, "losers": losers})
+
+
+# simple health check
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
