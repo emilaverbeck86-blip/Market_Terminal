@@ -1,334 +1,383 @@
-import os
-import re
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 
+import httpx
 import yfinance as yf
-from fastapi import FastAPI, Request, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Query
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+import xml.etree.ElementTree as ET
+from urllib.parse import quote_plus
 
 app = FastAPI()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# ---- Static / index ---------------------------------------------------------
 
-static_dir = os.path.join(BASE_DIR, "static")
-templates_dir = os.path.join(BASE_DIR, "templates")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-if os.path.isdir(static_dir):
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-templates = Jinja2Templates(directory=templates_dir)
+@app.get("/")
+async def index() -> FileResponse:
+    # Serve plain HTML (no templating) from project root
+    return FileResponse("index.html")
 
-analyzer = SentimentIntensityAnalyzer()
 
-# ---------------------------------------------------------
-# Config
-# ---------------------------------------------------------
+# ---- Symbol config ----------------------------------------------------------
+
+# Core symbols for yfinance (data) and TradingView (chart)
 WATCHLIST: List[str] = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "META",
-    "GOOGL", "TSLA", "AVGO", "AMD", "NFLX",
-    "ADBE", "INTC", "CSCO", "QCOM", "TXN",
-    "JPM", "BAC", "WFC", "V", "MA",
-    "KO", "PEP", "MCD", "HD", "XOM", "CVX",
+    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA",
+    "AVGO", "AMD", "NFLX", "ADBE", "INTC", "CSCO", "QCOM",
+    "TXN", "JPM", "BAC", "WFC", "V", "MA", "XOM", "CVX"
 ]
 
-SYMBOL_MAP: Dict[str, str] = {
+# Map pseudo symbols to yfinance + TradingView
+CORE_SYMBOL_MAP: Dict[str, str] = {
     "SP500": "^GSPC",
-    "NASDAQ": "^NDX",
+    "NASDAQ": "^NDX",        # NASDAQ 100
 }
 
-INDEX_PROFILES: Dict[str, str] = {
-    "SP500": (
-        "The S&P 500 is a stock market index tracking the performance of 500 large "
-        "publicly traded U.S. companies. It is a market-cap-weighted index covering "
-        "all major sectors of the economy. Investors widely use it as a benchmark "
-        "for U.S. large-cap equities and portfolio performance. The S&P 500 is "
-        "maintained by S&P Dow Jones Indices. Many ETFs and index funds replicate "
-        "its composition, making it central to passive investing."
-    ),
-    "NASDAQ": (
-        "The Nasdaq-100 is an index of 100 of the largest non-financial companies "
-        "listed on the Nasdaq Stock Market. It is heavily weighted toward technology, "
-        "communication services, and consumer discretionary sectors. The index is "
-        "popular with growth-oriented investors and is tracked by vehicles such as "
-        "the Invesco QQQ ETF. It is often viewed as a proxy for the performance of "
-        "large U.S. technology and innovation-driven companies."
-    ),
+# For insights (labels used on frontend)
+INSIGHT_WINDOWS = {
+    "1W": 5,
+    "1M": 21,
+    "3M": 63,
+    "6M": 126,
+    "YTD": "ytd",
+    "1Y": 252,
 }
 
-TICKER_CACHE: Dict[str, Any] = {"ts": None, "data": None}
-INSIGHTS_CACHE: Dict[str, Any] = {}
-NEWS_CACHE: Dict[str, Any] = {}
+# ---- HTTP client & small helpers -------------------------------------------
 
-CACHE_TTL_TICKERS = 60          # 1 minute
-CACHE_TTL_INSIGHTS = 600        # 10 minutes
-CACHE_TTL_NEWS = 300            # 5 minutes
+HTTP_TIMEOUT = 10.0
+client = httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers={"User-Agent": "MarketTerminal/1.0"})
 
 
-# ---------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------
-def now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+def yf_symbol(symbol: str) -> str:
+    """Map frontend symbol to yfinance symbol."""
+    return CORE_SYMBOL_MAP.get(symbol.upper(), symbol.upper())
 
 
-def truncate_sentences(text: str, max_sentences: int = 6) -> str:
-    if not text:
-        return ""
-    parts = re.split(r"(?<=[.!?])\s+", text.strip())
-    return " ".join(parts[:max_sentences])
-
-
-def pct_change(old: float, new: float) -> float:
+def _pct_change(old: float, new: float) -> float:
     if old is None or new is None or old == 0:
         return 0.0
     return (new - old) / old * 100.0
 
 
-def map_symbol_for_yahoo(symbol: str) -> str:
-    return SYMBOL_MAP.get(symbol.upper(), symbol)
+# ---- Caching for tickers / movers / insights -------------------------------
+
+_ticker_cache: Dict[str, Any] = {"ts": None, "data": None}
+_TICKER_CACHE_SECONDS = 60
+
+_insights_cache: Dict[str, Any] = {}
+_INSIGHTS_CACHE_SECONDS = 600  # 10 minutes
 
 
-def yahoo_history(symbol: str, period: str = "1y"):
-    yf_sym = map_symbol_for_yahoo(symbol)
-    t = yf.Ticker(yf_sym)
-    return t.history(period=period, auto_adjust=False)
-
-
-def get_watchlist_snapshot() -> List[Dict[str, Any]]:
-    now = now_utc()
+async def get_quotes() -> List[Dict[str, Any]]:
+    """Return latest price + daily change for WATCHLIST symbols."""
+    now = datetime.now(timezone.utc)
     if (
-        TICKER_CACHE["data"] is not None
-        and TICKER_CACHE["ts"] is not None
-        and (now - TICKER_CACHE["ts"]).total_seconds() < CACHE_TTL_TICKERS
+        _ticker_cache["ts"] is not None
+        and (now - _ticker_cache["ts"]).total_seconds() < _TICKER_CACHE_SECONDS
+        and _ticker_cache["data"] is not None
     ):
-        return TICKER_CACHE["data"]
+        return _ticker_cache["data"]
 
-    data: List[Dict[str, Any]] = []
+    result: List[Dict[str, Any]] = []
     for sym in WATCHLIST:
+        yfs = yf_symbol(sym)
         try:
-            hist = yahoo_history(sym, period="5d")
-            if hist.empty or len(hist) < 2:
-                last = prev = None
-                chg = 0.0
-            else:
-                last = float(hist["Close"].iloc[-1])
-                prev = float(hist["Close"].iloc[-2])
-                chg = pct_change(prev, last)
-            data.append({"symbol": sym, "price": last, "change_pct": chg})
-        except Exception:
-            data.append({"symbol": sym, "price": None, "change_pct": 0.0})
-
-    TICKER_CACHE["ts"] = now
-    TICKER_CACHE["data"] = data
-    return data
-
-
-def build_insights(symbol: str) -> Dict[str, Any]:
-    now = now_utc()
-    cache = INSIGHTS_CACHE.get(symbol)
-    if cache and (now - cache["ts"]).total_seconds() < CACHE_TTL_INSIGHTS:
-        return cache["data"]
-
-    yf_sym = map_symbol_for_yahoo(symbol)
-    t = yf.Ticker(yf_sym)
-
-    try:
-        hist = t.history(period="1y", auto_adjust=False)
-    except Exception:
-        hist = None
-
-    def price_at(delta_days: int | None) -> float | None:
-        if hist is None or hist.empty:
-            return None
-        if delta_days is None:
-            year_start = datetime(now.year, 1, 1, tzinfo=hist.index.tz)
-            sub = hist[hist.index >= year_start]
-            if sub.empty:
-                return float(hist["Close"].iloc[0])
-            return float(sub["Close"].iloc[0])
-        target = now - timedelta(days=delta_days)
-        sub = hist[hist.index <= target]
-        if sub.empty:
-            return float(hist["Close"].iloc[0])
-        return float(sub["Close"].iloc[-1])
-
-    last_price = None
-    if hist is not None and not hist.empty:
-        last_price = float(hist["Close"].iloc[-1])
-
-    if last_price is not None:
-        perf = {
-            "1W": pct_change(price_at(7), last_price),
-            "1M": pct_change(price_at(30), last_price),
-            "3M": pct_change(price_at(90), last_price),
-            "6M": pct_change(price_at(180), last_price),
-            "YTD": pct_change(price_at(None), last_price),
-            "1Y": pct_change(price_at(365), last_price),
-        }
-    else:
-        perf = {k: 0.0 for k in ["1W", "1M", "3M", "6M", "YTD", "1Y"]}
-
-    if symbol.upper() in INDEX_PROFILES:
-        description = INDEX_PROFILES[symbol.upper()]
-    else:
-        try:
-            info = t.info or {}
-            description = info.get("longBusinessSummary") or info.get("longName") or ""
-        except Exception:
-            description = ""
-
-    description = truncate_sentences(description, max_sentences=6)
-
-    result = {"symbol": symbol, "periods": perf, "description": description}
-    INSIGHTS_CACHE[symbol] = {"ts": now, "data": result}
-    return result
-
-
-def build_news_from_yf_news(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    parsed: List[Dict[str, Any]] = []
-    for n in items or []:
-        try:
-            title = n.get("title") or ""
-            link = n.get("link") or n.get("url") or ""
-            provider = ""
-            if isinstance(n.get("provider"), list) and n["provider"]:
-                provider = n["provider"][0].get("name", "")
-            elif isinstance(n.get("publisher"), str):
-                provider = n["publisher"]
-            ts = n.get("providerPublishTime") or n.get("published_time") or None
-            if isinstance(ts, (int, float)):
-                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-                published_at = dt.strftime("%Y-%m-%d %H:%M")
-            else:
-                published_at = ""
-            parsed.append(
+            t = yf.Ticker(yfs)
+            hist = t.history(period="2d", interval="1d")
+            if hist.empty:
+                continue
+            closes = hist["Close"].tolist()
+            last = float(closes[-1])
+            prev = float(closes[-2]) if len(closes) >= 2 else last
+            chg = _pct_change(prev, last)
+            result.append(
                 {
-                    "title": title,
-                    "url": link,
-                    "source": provider,
-                    "published_at": published_at,
+                    "symbol": sym,
+                    "price": round(last, 2),
+                    "change_pct": round(chg, 2),
                 }
             )
         except Exception:
             continue
-    return parsed
+
+    _ticker_cache["ts"] = now
+    _ticker_cache["data"] = result
+    return result
 
 
-def get_market_news() -> List[Dict[str, Any]]:
-    now = now_utc()
-    key = "market:US"
-    cache = NEWS_CACHE.get(key)
-    if cache and (now - cache["ts"]).total_seconds() < CACHE_TTL_NEWS:
-        return cache["data"]
+async def get_insights(symbol: str) -> Dict[str, Any]:
+    """Return multi-horizon performance + profile."""
+    key = symbol.upper()
+    now = datetime.now(timezone.utc)
+    cached = _insights_cache.get(key)
+    if cached and (now - cached["ts"]).total_seconds() < _INSIGHTS_CACHE_SECONDS:
+        return cached["data"]
+
+    yfs = yf_symbol(symbol)
+    t = yf.Ticker(yfs)
+    data: Dict[str, Any] = {
+        "symbol": symbol.upper(),
+        "windows": {},
+        "profile": "",
+    }
 
     try:
-        t = yf.Ticker("SPY")
-        raw = t.news or []
-    except Exception:
-        raw = []
+        hist = t.history(period="1y", interval="1d")
+        if hist.empty:
+            raise RuntimeError("no history")
 
-    data = build_news_from_yf_news(raw)
-    NEWS_CACHE[key] = {"ts": now, "data": data}
+        closes = hist["Close"]
+        close_dates = closes.index
+
+        def price_at_days_ago(days: int) -> float:
+            target_date = close_dates[-1] - timedelta(days=days)
+            # find closest previous date
+            prev = closes[closes.index <= target_date]
+            if prev.empty:
+                return float(closes.iloc[0])
+            return float(prev.iloc[-1])
+
+        last_price = float(closes.iloc[-1])
+
+        for label, win in INSIGHT_WINDOWS.items():
+            if label == "YTD":
+                # first trading day of year
+                year_start = datetime(close_dates[-1].year, 1, 1, tzinfo=close_dates[-1].tz)
+                prev = closes[closes.index >= year_start]
+                if prev.empty:
+                    pct = 0.0
+                else:
+                    base = float(prev.iloc[0])
+                    pct = _pct_change(base, last_price)
+            else:
+                days = int(win)
+                base = price_at_days_ago(days)
+                pct = _pct_change(base, last_price)
+            data["windows"][label] = round(pct, 2)
+
+    except Exception:
+        # keep empty; frontend will show dashes
+        pass
+
+    # Profile (limit to ~6 sentences)
+    try:
+        info = t.get_info()
+        long_desc = info.get("longBusinessSummary") or info.get("longName") or ""
+        if long_desc:
+            # crude sentence splitter
+            parts = [p.strip() for p in long_desc.replace("\n", " ").split(".") if p.strip()]
+            limited = ". ".join(parts[:6])
+            if limited and not limited.endswith("."):
+                limited += "."
+            data["profile"] = limited
+    except Exception:
+        data["profile"] = "No profile available for this instrument."
+
+    _insights_cache[key] = {"ts": now, "data": data}
     return data
 
 
-def get_symbol_news(symbol: str) -> List[Dict[str, Any]]:
-    now = now_utc()
-    key = f"sym:{symbol.upper()}"
-    cache = NEWS_CACHE.get(key)
-    if cache and (now - cache["ts"]).total_seconds() < CACHE_TTL_NEWS:
-        return cache["data"]
+# ---- News pipeline: TradingView → Yahoo RSS → Google News ------------------
 
-    yf_sym = map_symbol_for_yahoo(symbol)
+
+async def fetch_tradingview_news(symbol: str) -> List[Dict[str, Any]]:
+    """
+    Best-effort TradingView news scraper.
+    If it fails for any reason, we just return [] and let caller fallback.
+    """
+    # Attempt NASDAQ-XXX slug first, then plain
+    candidates = [
+        f"https://www.tradingview.com/symbols/NASDAQ-{symbol.upper()}/news/",
+        f"https://www.tradingview.com/symbols/{symbol.upper()}/news/",
+    ]
+    articles: List[Dict[str, Any]] = []
+
+    for url in candidates:
+        try:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                continue
+            html = resp.text
+
+            # TradingView usually includes JSON in window.__initialState__
+            # We'll very roughly look for `"news":` array.
+            if '"news":' not in html:
+                continue
+
+            start = html.find('"news":')
+            if start == -1:
+                continue
+            # Take a chunk after "news": and naive parse by splitting on `"head"`
+            chunk = html[start:start + 50000]
+
+            # Extremely crude parse – this is intentionally simple and
+            # will often fail safely. We only use it as a first-tier attempt.
+            items = []
+            for part in chunk.split('{"id"')[1:20]:
+                # Get title
+                t_start = part.find('"headline":"')
+                if t_start == -1:
+                    continue
+                t_start += len('"headline":"')
+                t_end = part.find('"', t_start)
+                title = part[t_start:t_end]
+
+                # Get link
+                l_start = part.find('"shortUrl":"')
+                if l_start == -1:
+                    continue
+                l_start += len('"shortUrl":"')
+                l_end = part.find('"', l_start)
+                link = part[l_start:l_end].replace("\\u002F", "/")
+
+                items.append((title, link))
+
+            for title, link in items:
+                articles.append(
+                    {
+                        "title": title,
+                        "url": f"https://www.tradingview.com{link}" if link.startswith("/") else link,
+                        "source": "TradingView",
+                        "published_at": "",
+                    }
+                )
+
+            if articles:
+                break
+        except Exception:
+            continue
+
+    return articles[:20]
+
+
+async def fetch_yahoo_rss(symbol: str) -> List[Dict[str, Any]]:
+    url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={quote_plus(symbol)}&region=US&lang=en-US"
+    articles: List[Dict[str, Any]] = []
     try:
-        t = yf.Ticker(yf_sym)
-        raw = t.news or []
+        resp = await client.get(url)
+        if resp.status_code != 200 or not resp.text.strip():
+            return []
+        root = ET.fromstring(resp.text)
+        for item in root.findall(".//item")[:20]:
+            title = (item.findtext("title") or "").strip()
+            link = (item.findtext("link") or "").strip()
+            pub = (item.findtext("pubDate") or "").strip()
+            source_el = item.find("{*}source")
+            source = (source_el.text or "").strip() if source_el is not None else "Yahoo Finance"
+            if title and link:
+                articles.append(
+                    {
+                        "title": title,
+                        "url": link,
+                        "source": source or "Yahoo Finance",
+                        "published_at": pub,
+                    }
+                )
     except Exception:
-        raw = []
-
-    data = build_news_from_yf_news(raw)
-
-    # Fallback: if no symbol-specific news, show broad US market news
-    if not data:
-        data = get_market_news()
-
-    NEWS_CACHE[key] = {"ts": now, "data": data}
-    return data
+        return []
+    return articles
 
 
-# ---------------------------------------------------------
-# Routes
-# ---------------------------------------------------------
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+async def fetch_google_news(query: str, limit: int = 20) -> List[Dict[str, Any]]:
+    url = (
+        "https://news.google.com/rss/search?q="
+        f"{quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"
+    )
+    articles: List[Dict[str, Any]] = []
+    try:
+        resp = await client.get(url)
+        if resp.status_code != 200 or not resp.text.strip():
+            return []
+        root = ET.fromstring(resp.text)
+        for item in root.findall(".//item")[:limit]:
+            title = (item.findtext("title") or "").strip()
+            link = (item.findtext("link") or "").strip()
+            pub = (item.findtext("pubDate") or "").strip()
+            source_el = item.find("{*}source")
+            source = (source_el.text or "").strip() if source_el is not None else "Google News"
+            if title and link:
+                articles.append(
+                    {
+                        "title": title,
+                        "url": link,
+                        "source": source or "Google News",
+                        "published_at": pub,
+                    }
+                )
+    except Exception:
+        return []
+    return articles
+
+
+async def news_pipeline_for_symbol(symbol: str) -> List[Dict[str, Any]]:
+    # 1) TradingView
+    tv = await fetch_tradingview_news(symbol)
+    if tv:
+        return tv
+
+    # 2) Yahoo RSS
+    yh = await fetch_yahoo_rss(symbol)
+    if yh:
+        return yh
+
+    # 3) Google News
+    gn = await fetch_google_news(f"{symbol} stock")
+    return gn
+
+
+async def market_news_pipeline() -> List[Dict[str, Any]]:
+    # General market news via Google News only (broad query)
+    gn = await fetch_google_news("stock market OR S&P 500", limit=30)
+    return gn
+
+
+# ---- API endpoints ----------------------------------------------------------
 
 
 @app.get("/api/tickers")
-async def api_tickers():
-    data = get_watchlist_snapshot()
+async def api_tickers() -> JSONResponse:
+    data = await get_quotes()
     return JSONResponse(data)
 
 
 @app.get("/api/movers")
-async def api_movers(limit: int = 5):
-    snapshot = get_watchlist_snapshot()
-    valid = [x for x in snapshot if x["price"] is not None]
-    sorted_by_change = sorted(valid, key=lambda x: x["change_pct"])
-    losers = sorted_by_change[:limit]
-    gainers = list(reversed(sorted_by_change[-limit:]))
+async def api_movers() -> JSONResponse:
+    quotes = await get_quotes()
+    # Only use ones that actually have a price
+    valid = [q for q in quotes if q.get("price") is not None]
+    sorted_by = sorted(valid, key=lambda x: x.get("change_pct", 0.0), reverse=True)
+    gainers = sorted_by[:5]
+    losers = list(reversed(sorted_by[-5:]))
     return JSONResponse({"gainers": gainers, "losers": losers})
 
 
-@app.get("/api/quote")
-async def api_quote(symbol: str = Query(...)):
-    yf_sym = map_symbol_for_yahoo(symbol)
-    t = yf.Ticker(yf_sym)
-    try:
-        hist = t.history(period="5d")
-        if hist.empty or len(hist) < 2:
-            price = prev = None
-            chg = 0.0
-        else:
-            price = float(hist["Close"].iloc[-1])
-            prev = float(hist["Close"].iloc[-2])
-            chg = pct_change(prev, price)
-    except Exception:
-        price = prev = None
-        chg = 0.0
-
-    return JSONResponse(
-        {"symbol": symbol, "price": price, "previous_close": prev, "change_pct": chg}
-    )
-
-
 @app.get("/api/insights")
-async def api_insights(symbol: str = Query(...)):
-    data = build_insights(symbol)
+async def api_insights(symbol: str = Query(...)) -> JSONResponse:
+    data = await get_insights(symbol)
     return JSONResponse(data)
 
 
 @app.get("/api/news")
-async def api_news(symbol: str = Query(...)):
-    data = get_symbol_news(symbol)
-    return JSONResponse(data)
+async def api_news(symbol: str = Query(...)) -> JSONResponse:
+    articles = await news_pipeline_for_symbol(symbol)
+    return JSONResponse(articles)
 
 
 @app.get("/api/market-news")
-async def api_market_news():
-    data = get_market_news()
-    return JSONResponse(data)
+async def api_market_news() -> JSONResponse:
+    articles = await market_news_pipeline()
+    return JSONResponse(articles)
 
 
-@app.get("/api/sentiment")
-async def api_sentiment(symbol: str = Query(...)):
-    headlines = get_symbol_news(symbol)[:10]
-    text = ". ".join(h["title"] for h in headlines if h.get("title"))
-    if not text:
-        return JSONResponse({"compound": 0.0})
-    score = analyzer.polarity_scores(text)
-    return JSONResponse({"compound": score["compound"]})
+# ---- Shutdown ---------------------------------------------------------------
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    await client.aclose()
