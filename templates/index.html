@@ -1,152 +1,153 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
   <title>Market Terminal</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="/static/style.css" />
-
-  <!-- TradingView base script -->
-  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+  <!-- TradingView core script -->
+  <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body class="theme-dark">
-  <header class="top-header">
-    <div class="brand">MARKET TERMINAL</div>
+<header class="top-bar">
+  <div class="brand">MARKET TERMINAL</div>
 
-    <div id="tickerBar" class="ticker-bar">
-      <div id="tickerTrack" class="ticker-track"></div>
-    </div>
+  <div class="ticker-strip">
+    <div id="tickerScroll" class="ticker-scroll"></div>
+  </div>
 
-    <div class="shortcuts">
-      <button class="shortcut-btn" data-core-symbol="SP500" data-tv-symbol="CURRENCYCOM:US500">S&amp;P 500</button>
-      <button class="shortcut-btn" data-core-symbol="NASDAQ" data-tv-symbol="CURRENCYCOM:US100">NASDAQ</button>
+  <div class="header-actions">
+    <button class="shortcut-btn" data-symbol="CURRENCYCOM:US500">S&P 500</button>
+    <button class="shortcut-btn" data-symbol="CURRENCYCOM:US100">NASDAQ</button>
 
-      <div class="menu-wrapper">
-        <button id="menuToggle" class="menu-toggle">Menu ▾</button>
-        <div id="menuDropdown" class="menu-dropdown">
-          <div class="menu-group">
-            <div class="menu-label">Theme</div>
-            <label class="switch">
-              <input id="themeToggle" type="checkbox" />
-              <span class="slider"></span>
-              <span class="sun">☀</span>
-              <span class="moon">🌙</span>
-            </label>
-          </div>
+    <div class="menu">
+      <button id="menuToggle" class="menu-toggle">Menu ▾</button>
+      <div id="menuDropdown" class="menu-dropdown">
+        <div class="menu-section">
+          <span class="menu-label">Theme</span>
+          <label class="switch">
+            <input type="checkbox" id="themeToggle" />
+            <span class="slider round"></span>
+          </label>
+          <span class="theme-icon" id="themeIcon">🌙</span>
         </div>
       </div>
     </div>
-  </header>
+  </div>
+</header>
 
-  <main id="layoutRoot">
-    <!-- Row 1: Chart + Insights -->
-    <section class="tile-row" data-row="1">
-      <div class="tile tile-chart" data-tile="chart">
-        <div class="tile-header">
-          <span id="chartTitle">Chart – AAPL</span>
-        </div>
-        <div id="tv_chart" class="tile-body chart-body"></div>
+<main id="gridRoot">
+  <!-- Row 1: Chart | News -->
+  <section class="row" data-row="1">
+    <div class="tile tile-chart" id="tile-chart">
+      <div class="tile-header">Chart – <span id="chartTitle">AAPL</span></div>
+      <div class="tile-body chart-body">
+        <div id="tv_container" class="tv-container"></div>
       </div>
-
-      <div class="row-resizer" data-row-resizer></div>
-
-      <div class="tile tile-insights" data-tile="insights">
-        <div class="tile-header">
-          <span id="insightsTitle">Market Insights: AAPL</span>
-        </div>
-        <div class="tile-body insights-body" id="insightsBody">
-          <div class="insight-grid">
-            <div class="insight-cell">
-              <div class="label">1W</div>
-              <div id="insight1W" class="value">–</div>
-            </div>
-            <div class="insight-cell">
-              <div class="label">1M</div>
-              <div id="insight1M" class="value">–</div>
-            </div>
-            <div class="insight-cell">
-              <div class="label">3M</div>
-              <div id="insight3M" class="value">–</div>
-            </div>
-            <div class="insight-cell">
-              <div class="label">6M</div>
-              <div id="insight6M" class="value">–</div>
-            </div>
-            <div class="insight-cell">
-              <div class="label">YTD</div>
-              <div id="insightYTD" class="value">–</div>
-            </div>
-            <div class="insight-cell">
-              <div class="label">1Y</div>
-              <div id="insight1Y" class="value">–</div>
-            </div>
-          </div>
-          <div class="insight-profile" id="insightProfile">
-            Loading profile…
-          </div>
+    </div>
+    <div class="row-resizer" data-row="1"></div>
+    <div class="tile tile-news" id="tile-news">
+      <div class="tile-header">News</div>
+      <div class="tile-body news-body">
+        <div id="newsList" class="news-list">
+          <div class="muted">Loading news…</div>
         </div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <!-- Row 2: Movers + News -->
-    <section class="tile-row" data-row="2">
-      <div class="tile tile-movers" data-tile="movers">
-        <div class="tile-header">
-          <span>Top Movers (Watchlist)</span>
-        </div>
-        <div class="tile-body movers-body">
-          <div class="movers-columns">
-            <div>
-              <div class="movers-heading">Top Gainers</div>
-              <table>
-                <tbody id="gainersBody"></tbody>
-              </table>
-            </div>
-            <div>
-              <div class="movers-heading">Top Losers</div>
-              <table>
-                <tbody id="losersBody"></tbody>
-              </table>
-            </div>
+  <!-- Row 2: Insights | DOM -->
+  <section class="row" data-row="2">
+    <div class="tile tile-insights" id="tile-insights">
+      <div class="tile-header">Market Insights: <span id="insightsSymbol">AAPL</span></div>
+      <div class="tile-body insights-body">
+        <div class="perf-grid">
+          <div class="perf-item">
+            <div class="label">1W</div><div class="value" id="perf1W">—</div>
+          </div>
+          <div class="perf-item">
+            <div class="label">1M</div><div class="value" id="perf1M">—</div>
+          </div>
+          <div class="perf-item">
+            <div class="label">3M</div><div class="value" id="perf3M">—</div>
+          </div>
+          <div class="perf-item">
+            <div class="label">6M</div><div class="value" id="perf6M">—</div>
+          </div>
+          <div class="perf-item">
+            <div class="label">YTD</div><div class="value" id="perfYTD">—</div>
+          </div>
+          <div class="perf-item">
+            <div class="label">1Y</div><div class="value" id="perf1Y">—</div>
           </div>
         </div>
-      </div>
-
-      <div class="row-resizer" data-row-resizer></div>
-
-      <div class="tile tile-news" data-tile="news">
-        <div class="tile-header">
-          <span>News</span>
+        <div class="profile-text" id="profileText">
+          Loading profile…
         </div>
-        <div class="tile-body news-body">
-          <div id="newsList" class="news-list">
-            Loading news…
+      </div>
+    </div>
+    <div class="row-resizer" data-row="2"></div>
+    <div class="tile tile-dom" id="tile-dom">
+      <div class="tile-header">Depth of Market (simulated)</div>
+      <div class="tile-body dom-body">
+        <table class="dom-table">
+          <thead>
+          <tr>
+            <th>Bid Size</th>
+            <th>Bid</th>
+            <th>Ask</th>
+            <th>Ask Size</th>
+          </tr>
+          </thead>
+          <tbody id="domBody">
+          <tr><td colspan="4" class="muted">Waiting for price…</td></tr>
+          </tbody>
+        </table>
+        <div class="dom-note muted">
+          This is a simulated depth-of-market view based on last price levels, not a live order book.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Row 3: Calendar | Movers -->
+  <section class="row" data-row="3">
+    <div class="tile tile-calendar" id="tile-calendar">
+      <div class="tile-header">Economic Calendar (US)</div>
+      <div class="tile-body calendar-body">
+        <div id="tv_calendar_container" class="calendar-widget"></div>
+      </div>
+    </div>
+    <div class="row-resizer" data-row="3"></div>
+    <div class="tile tile-movers" id="tile-movers">
+      <div class="tile-header">Top Movers (Watchlist)</div>
+      <div class="tile-body movers-body">
+        <div class="movers-columns">
+          <div>
+            <div class="subhead">Top Gainers</div>
+            <table class="movers-table">
+              <tbody id="gainersBody">
+              <tr><td class="muted">No data.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <div class="subhead">Top Losers</div>
+            <table class="movers-table">
+              <tbody id="losersBody">
+              <tr><td class="muted">No data.</td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
-    </section>
+    </div>
+  </section>
+</main>
 
-    <!-- Row 3: Economic Calendar + DOM -->
-    <section class="tile-row" data-row="3">
-      <div class="tile tile-calendar" data-tile="calendar">
-        <div class="tile-header">
-          <span>Economic Calendar (US)</span>
-        </div>
-        <div id="tv_calendar" class="tile-body tv-embed-body"></div>
-      </div>
-
-      <div class="row-resizer" data-row-resizer></div>
-
-      <div class="tile tile-dom" data-tile="dom">
-        <div class="tile-header">
-          <span>Depth of Market (NAS100)</span>
-        </div>
-        <div id="tv_dom" class="tile-body tv-embed-body"></div>
-      </div>
-    </section>
-  </main>
-
-  <script src="/static/main.js"></script>
+<script>
+  window.DEFAULT_SYMBOL = "{{ default_symbol }}";
+</script>
+<script src="/static/main.js"></script>
 </body>
 </html>
