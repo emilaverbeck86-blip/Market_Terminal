@@ -1,237 +1,251 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
-    <meta charset="UTF-8" />
-    <title>Market Terminal</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="/static/style.css" />
-    <script src="https://s3.tradingview.com/tv.js"></script>
+  <meta charset="UTF-8" />
+  <title>Market Terminal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
-<body>
-<header class="top-bar">
+<body class="theme-dark">
+  <header class="top-bar">
     <div class="brand">MARKET TERMINAL</div>
-
-    <div class="ticker-strip" id="tickerStrip">
-        <div class="ticker-inner" id="tickerInner"></div>
+    <div id="tickerBar" class="ticker-bar">
+      <div id="tickerScroll" class="ticker-scroll"></div>
     </div>
-
     <div class="top-actions">
-        <button class="top-button" type="button" onclick="window.marketTerminal.showFundamentals()">
-            Fundamentals
-        </button>
+      <button id="fundamentalsBtn" class="top-btn">Fundamentals</button>
 
-        <div class="menu-wrapper">
-            <button id="menuToggle" class="top-button" type="button">Menu ▾</button>
-            <div id="menuDropdown" class="menu-dropdown">
-                <div class="menu-section">
-                    <div class="menu-section-title">Theme</div>
-                    <div class="theme-toggle">
-                        <span class="theme-icon">🌙</span>
-                        <label class="switch">
-                            <input type="checkbox" id="themeToggle" />
-                            <span class="slider"></span>
-                        </label>
-                        <span class="theme-icon">☀</span>
-                    </div>
-                </div>
-
-                <div class="menu-section">
-                    <div class="menu-section-title">Shortcuts</div>
-                    <button class="shortcut-btn" data-symbol="OANDA:US500USD">
-                        S&amp;P 500 (US500)
-                    </button>
-                    <button class="shortcut-btn" data-symbol="OANDA:NAS100USD">
-                        NASDAQ 100 (NAS100)
-                    </button>
-                </div>
-
-                <div class="menu-section">
-                    <div class="menu-section-title">Tiles</div>
-                    <label class="menu-checkbox">
-                        <input type="checkbox" data-tile="#chartRow" checked />
-                        <span>Chart &amp; News</span>
-                    </label>
-                    <label class="menu-checkbox">
-                        <input type="checkbox" data-tile="#insightsRow" checked />
-                        <span>Market Insights</span>
-                    </label>
-                    <label class="menu-checkbox">
-                        <input type="checkbox" data-tile="#bottomRow" checked />
-                        <span>Calendar &amp; Movers</span>
-                    </label>
-                </div>
+      <div class="menu-wrapper">
+        <button id="menuToggle" class="top-btn">Menu ▾</button>
+        <div id="menuPanel" class="menu-panel">
+          <div class="menu-section">
+            <div class="menu-label">
+              Theme
+              <span class="theme-icons">
+                <span class="icon-sun">☀️</span>
+                <label class="switch">
+                  <input id="themeSwitch" type="checkbox" />
+                  <span class="slider"></span>
+                </label>
+                <span class="icon-moon">🌙</span>
+              </span>
             </div>
+          </div>
+
+          <div class="menu-section">
+            <div class="menu-label">Shortcuts</div>
+            <button class="menu-shortcut" data-symbol="OANDA:US500USD">
+              S&amp;P 500 (US500)
+            </button>
+            <button class="menu-shortcut" data-symbol="OANDA:NAS100USD">
+              NASDAQ 100 (NAS100)
+            </button>
+          </div>
+
+          <div class="menu-section">
+            <div class="menu-label">Tiles</div>
+            <label class="menu-check">
+              <input type="checkbox" data-tile-toggle="chart" checked />
+              <span>Chart</span>
+            </label>
+            <label class="menu-check">
+              <input type="checkbox" data-tile-toggle="news" checked />
+              <span>News</span>
+            </label>
+            <label class="menu-check">
+              <input type="checkbox" data-tile-toggle="insights" checked />
+              <span>Market Insights</span>
+            </label>
+            <label class="menu-check">
+              <input type="checkbox" data-tile-toggle="macro" checked />
+              <span>Macro Maps</span>
+            </label>
+            <label class="menu-check">
+              <input type="checkbox" data-tile-toggle="calendar" checked />
+              <span>Economic Calendar</span>
+            </label>
+            <label class="menu-check">
+              <input type="checkbox" data-tile-toggle="movers" checked />
+              <span>Top Movers</span>
+            </label>
+            <label class="menu-check">
+              <input type="checkbox" data-tile-toggle="heatmap" checked />
+              <span>S&amp;P 500 Heatmap</span>
+            </label>
+          </div>
         </div>
+      </div>
     </div>
-</header>
+  </header>
 
-<main id="dashboardRoot" class="layout-root">
-    <!-- Row 1: chart + news with column resizer -->
-    <section class="row row1" id="chartRow">
-        <article class="tile tile-chart" id="chartTile">
-            <header class="tile-header">
-                <h2 id="chartTitle">Chart – AAPL</h2>
-            </header>
-            <div id="tv_chart" class="tile-body chart-body"></div>
-        </article>
-
-        <article class="tile tile-news" id="newsTile">
-            <header class="tile-header">
-                <h2 id="newsTitle">News</h2>
-            </header>
-            <div id="newsList" class="tile-body news-body">
-                <div class="placeholder">Loading news…</div>
+  <main id="mainLayout" class="layout">
+    <!-- ROW 1: chart + news -->
+    <section id="row1" class="row row-1">
+      <div class="row-inner">
+        <article id="tile-chart" class="tile tile-chart" data-tile-id="chart">
+          <header class="tile-header">
+            <div class="tile-title">
+              Chart – <span id="chartTitle">AAPL</span>
             </div>
+            <button class="tile-close" data-close-tile="chart">−</button>
+          </header>
+          <div id="tv_container" class="tv-container"></div>
         </article>
 
-        <div id="colResizer" class="col-resizer"></div>
+        <div id="colResizerRow1" class="col-resizer"></div>
+
+        <article id="tile-news" class="tile tile-news" data-tile-id="news">
+          <header class="tile-header">
+            <div class="tile-title">
+              News – <span id="newsSymbol">AAPL</span>
+            </div>
+            <button class="tile-close" data-close-tile="news">−</button>
+          </header>
+          <div id="newsList" class="news-list">
+            <div class="muted">Loading news…</div>
+          </div>
+        </article>
+      </div>
+      <div id="rowResizer1" class="row-resizer"></div>
     </section>
 
-    <div class="row-resizer" data-top="#chartRow" data-bottom="#insightsRow"></div>
-
-    <!-- Row 2: Market insights full width -->
-    <section class="row row2" id="insightsRow">
-        <article class="tile tile-insights">
-            <header class="tile-header">
-                <h2 id="insightsTitle">Market Insights: AAPL</h2>
-            </header>
-            <div class="tile-body insights-body">
-                <div class="insights-grid" id="insightsGrid"></div>
-                <div class="insights-description" id="insightsDescription">
-                    Loading profile…
-                </div>
+    <!-- ROW 2: insights + macro -->
+    <section id="row2" class="row row-2">
+      <div class="row-inner">
+        <article id="tile-insights" class="tile tile-insights" data-tile-id="insights">
+          <header class="tile-header">
+            <div class="tile-title">
+              Market Insights: <span id="insightsSymbol">AAPL</span>
             </div>
-        </article>
-    </section>
-
-    <div class="row-resizer" data-top="#insightsRow" data-bottom="#bottomRow"></div>
-
-    <!-- Row 3: Calendar + Movers -->
-    <section class="row row3" id="bottomRow">
-        <article class="tile tile-calendar">
-            <header class="tile-header">
-                <h2>Economic Calendar (US)</h2>
-            </header>
-            <div class="tile-body calendar-body">
-                <table class="cal-table">
-                    <thead>
-                    <tr>
-                        <th>Time</th>
-                        <th>Country</th>
-                        <th>Event</th>
-                        <th>Actual</th>
-                        <th>Forecast</th>
-                        <th>Previous</th>
-                    </tr>
-                    </thead>
-                    <tbody id="calendarBody">
-                    <tr><td colspan="6" class="placeholder">Loading events…</td></tr>
-                    </tbody>
-                </table>
+            <button class="tile-close" data-close-tile="insights">−</button>
+          </header>
+          <div class="insights-body">
+            <div class="insights-grid">
+              <div class="insight-cell">
+                <div class="label">1W</div>
+                <div id="perf1W" class="value">—</div>
+              </div>
+              <div class="insight-cell">
+                <div class="label">1M</div>
+                <div id="perf1M" class="value">—</div>
+              </div>
+              <div class="insight-cell">
+                <div class="label">3M</div>
+                <div id="perf3M" class="value">—</div>
+              </div>
+              <div class="insight-cell">
+                <div class="label">6M</div>
+                <div id="perf6M" class="value">—</div>
+              </div>
+              <div class="insight-cell">
+                <div class="label">YTD</div>
+                <div id="perfYTD" class="value">—</div>
+              </div>
+              <div class="insight-cell">
+                <div class="label">1Y</div>
+                <div id="perf1Y" class="value">—</div>
+              </div>
             </div>
-        </article>
-
-        <article class="tile tile-movers">
-            <header class="tile-header">
-                <h2>Top Movers (Watchlist)</h2>
-            </header>
-            <div class="tile-body movers-body">
-                <div class="movers-columns">
-                    <div class="movers-col">
-                        <div class="movers-title">Top Gainers</div>
-                        <table>
-                            <tbody id="gainersBody">
-                            <tr><td class="placeholder">No data.</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="movers-col">
-                        <div class="movers-title">Top Losers</div>
-                        <table>
-                            <tbody id="losersBody">
-                            <tr><td class="placeholder">No data.</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </article>
-    </section>
-</main>
-
-<!-- Fundamentals view (same page, toggled) -->
-<main id="fundamentalsRoot" class="fundamentals-root hidden">
-    <section class="fundamentals-hero">
-        <div>
-            <h1>Index Fundamentals &amp; Positioning</h1>
-            <p>
-                Overview of the S&amp;P 500 and NASDAQ 100: price action plus
-                positioning-style summary cards. You can later wire real COT
-                data into these panels.
+            <p id="companyProfile" class="company-profile">
+              No profile available.
             </p>
+          </div>
+        </article>
+
+        <article id="tile-macro" class="tile tile-macro" data-tile-id="macro">
+          <header class="tile-header">
+            <div class="tile-title">Macro Maps</div>
+            <button class="tile-close" data-close-tile="macro">−</button>
+          </header>
+          <div class="macro-body">
+            <!-- Macro map via TradingView (iframe) -->
+            <iframe
+              title="Macro Maps"
+              src="https://www.tradingview.com/macro/"
+              loading="lazy"
+              referrerpolicy="no-referrer-when-downgrade">
+            </iframe>
+          </div>
+        </article>
+      </div>
+      <div id="rowResizer2" class="row-resizer"></div>
+    </section>
+
+    <!-- ROW 3: economic calendar + movers -->
+    <section id="row3" class="row row-3">
+      <div class="row-inner row3-inner">
+        <article id="tile-calendar" class="tile tile-calendar" data-tile-id="calendar">
+          <header class="tile-header">
+            <div class="tile-title">Economic Calendar (US)</div>
+            <button class="tile-close" data-close-tile="calendar">−</button>
+          </header>
+          <div class="calendar-body">
+            <iframe
+              title="Economic Calendar"
+              src="https://www.tradingview.com/economic-calendar/calendar?countries=us"
+              loading="lazy"
+              referrerpolicy="no-referrer-when-downgrade">
+            </iframe>
+          </div>
+        </article>
+
+        <article id="tile-movers" class="tile tile-movers" data-tile-id="movers">
+          <header class="tile-header">
+            <div class="tile-title">Top Movers (Watchlist)</div>
+            <button class="tile-close" data-close-tile="movers">−</button>
+          </header>
+          <div class="movers-body">
+            <div class="movers-cols">
+              <div>
+                <div class="subheader">Top Gainers</div>
+                <table>
+                  <tbody id="gainersBody"></tbody>
+                </table>
+              </div>
+              <div>
+                <div class="subheader">Top Losers</div>
+                <table>
+                  <tbody id="losersBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ROW 4: S&P 500 heatmap -->
+    <section id="row4" class="row row-4">
+      <article id="tile-heatmap" class="tile tile-heatmap" data-tile-id="heatmap">
+        <header class="tile-header">
+          <div class="tile-title">S&amp;P 500 Heatmap</div>
+          <button class="tile-close" data-close-tile="heatmap">−</button>
+        </header>
+        <div class="heatmap-body">
+          <!-- TradingView heatmap widget -->
+          <div class="tv-heatmap-container">
+            <div class="tradingview-widget-container">
+              <div id="tv-heatmap"></div>
+              <script type="text/javascript">
+                new TradingView.MarketHeatMapWidget({
+                  container_id: "tv-heatmap",
+                  width: "100%",
+                  height: "100%",
+                  dataSource: "S&P500",
+                  grouping: "sector",
+                  blockColor: "change",
+                  locale: "en",
+                  signallers: [],
+                });
+              </script>
+            </div>
+          </div>
         </div>
-        <button class="top-button" type="button" onclick="window.marketTerminal.showDashboard()">
-            ← Back to Dashboard
-        </button>
+      </article>
     </section>
+  </main>
 
-    <section class="fundamentals-row">
-        <article class="fund-card">
-            <header class="fund-card-header">
-                <h2>S&amp;P 500 Overview (US500)</h2>
-            </header>
-            <div class="fund-card-body">
-                <div id="fundChartSPX" class="fund-chart"></div>
-                <div class="fund-metrics">
-                    <div class="fund-metric">
-                        <span class="label">Price Trend</span>
-                        <span class="value" id="spxTrend">Loading…</span>
-                    </div>
-                    <div class="fund-metric">
-                        <span class="label">Volatility Regime</span>
-                        <span class="value" id="spxVol">Loading…</span>
-                    </div>
-                    <div class="fund-metric">
-                        <span class="label">Net Position Bias*</span>
-                        <span class="value" id="spxBias">Sample: Mild Long</span>
-                    </div>
-                </div>
-                <p class="fund-note">
-                    *Net position bias is a conceptual summary here. Replace this
-                    with your preferred COT feed when ready.
-                </p>
-            </div>
-        </article>
-
-        <article class="fund-card">
-            <header class="fund-card-header">
-                <h2>NASDAQ 100 Overview (NAS100)</h2>
-            </header>
-            <div class="fund-card-body">
-                <div id="fundChartNDX" class="fund-chart"></div>
-                <div class="fund-metrics">
-                    <div class="fund-metric">
-                        <span class="label">Price Trend</span>
-                        <span class="value" id="ndxTrend">Loading…</span>
-                    </div>
-                    <div class="fund-metric">
-                        <span class="label">Volatility Regime</span>
-                        <span class="value" id="ndxVol">Loading…</span>
-                    </div>
-                    <div class="fund-metric">
-                        <span class="label">Net Position Bias*</span>
-                        <span class="value" id="ndxBias">Sample: Neutral</span>
-                    </div>
-                </div>
-                <p class="fund-note">
-                    *Again, this is a placeholder field you can wire to live
-                    positioning data later.
-                </p>
-            </div>
-        </article>
-    </section>
-</main>
-
-<script src="/static/main.js"></script>
+  <script src="/static/main.js"></script>
 </body>
 </html>
