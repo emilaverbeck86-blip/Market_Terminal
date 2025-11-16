@@ -1,652 +1,464 @@
-// ---------- API ENDPOINTS ----------
+// ========================
+// Config
+// ========================
 const ENDPOINTS = {
-  tickers: "/api/tickers",
-  news: "/api/news",
-  insights: "/api/insights",
-  movers: "/api/movers",
-  calendar: "/api/calendar",
-  dom: "/api/dom"
+    tickers: "/api/tickers",
+    news: "/api/news",
+    insights: "/api/insights",
+    calendar: "/api/calendar",
+    movers: "/api/movers"
 };
 
-// ---------- STATE ----------
-let currentSymbol = "AAPL";
-let currentCompanyName = "Apple Inc.";
-let tickerNodes = new Map();
+const DEFAULT_SYMBOL = "AAPL";
 
-const layoutState = {
-  colResize: null,
-  rowResize: null
-};
+let currentSymbol = DEFAULT_SYMBOL;
+let currentTheme = "dark";
+let tvReady = false;
 
-// ---------- DOM ----------
-const tickerScroll = document.getElementById("tickerScroll");
-
-const chartTitle = document.getElementById("chartTitle");
-const tvContainer = document.getElementById("tv_container");
-
-const newsList = document.getElementById("newsList");
-const newsHeader = document.getElementById("newsHeader");
-
-const insightsSymbol = document.getElementById("insightsSymbol");
-const descEl = document.getElementById("companyDescription");
-const insightEls = {
-  "1w": document.getElementById("insight-1w"),
-  "1m": document.getElementById("insight-1m"),
-  "3m": document.getElementById("insight-3m"),
-  "6m": document.getElementById("insight-6m"),
-  ytd: document.getElementById("insight-ytd"),
-  "1y": document.getElementById("insight-1y")
-};
-
-const domBody = document.getElementById("domBody");
-const calendarBody = document.getElementById("calendarBody");
-const gainersBody = document.getElementById("gainersBody");
-const losersBody = document.getElementById("losersBody");
-
-// tiles
-const tiles = {
-  chart: document.getElementById("tile-chart"),
-  news: document.getElementById("tile-news"),
-  insights: document.getElementById("tile-insights"),
-  dom: document.getElementById("tile-dom"),
-  calendar: document.getElementById("tile-calendar"),
-  movers: document.getElementById("tile-movers")
-};
-
-// menu
-const menuButton = document.getElementById("menuButton");
-const menuDropdown = document.getElementById("menuDropdown");
-const themeToggle = document.getElementById("themeToggle");
-
-// ---------- UTIL ----------
-
-function fmtPct(v) {
-  if (v == null || !isFinite(v)) return "—";
-  const sign = v > 0 ? "+" : v < 0 ? "−" : "";
-  return `${sign}${Math.abs(v).toFixed(2)}%`;
-}
-
-function classForChange(v) {
-  if (v > 0) return "pos";
-  if (v < 0) return "neg";
-  return "";
-}
-
-// ---------- THEME ----------
-
-function setTheme(theme) {
-  const body = document.body;
-  body.classList.remove("theme-dark", "theme-light");
-  body.classList.add(theme === "light" ? "theme-light" : "theme-dark");
-  localStorage.setItem("mt-theme", theme);
-}
-
+// ========================
+// Theme + menu
+// ========================
 function initTheme() {
-  const saved = localStorage.getItem("mt-theme") || "dark";
-  setTheme(saved);
+    const stored = localStorage.getItem("mt_theme");
+    currentTheme = stored === "light" ? "light" : "dark";
+    document.body.classList.toggle("light-theme", currentTheme === "light");
 
-  themeToggle.addEventListener("click", () => {
-    const current = document.body.classList.contains("theme-light")
-      ? "light"
-      : "dark";
-    setTheme(current === "light" ? "dark" : "light");
-  });
+    const toggle = document.getElementById("themeToggle");
+    if (toggle) {
+        toggle.checked = currentTheme === "light";
+        toggle.addEventListener("change", () => {
+            currentTheme = toggle.checked ? "light" : "dark";
+            document.body.classList.toggle("light-theme", currentTheme === "light");
+            localStorage.setItem("mt_theme", currentTheme);
+            // re-mount chart if on dashboard
+            if (document.body.classList.contains("dashboard")) {
+                mountChart(currentSymbol);
+            }
+        });
+    }
 }
-
-// ---------- MENU / TILE TOGGLE ----------
 
 function initMenu() {
-  menuButton.addEventListener("click", (e) => {
-    e.stopPropagation();
-    menuDropdown.classList.toggle("open");
-  });
+    const btn = document.getElementById("menuToggle");
+    const dd = document.getElementById("menuDropdown");
+    if (!btn || !dd) return;
 
-  document.addEventListener("click", (e) => {
-    if (!menuDropdown.contains(e.target) && e.target !== menuButton) {
-      menuDropdown.classList.remove("open");
-    }
-  });
-
-  // shortcuts
-  menuDropdown
-    .querySelectorAll(".menu-shortcut")
-    .forEach((btn) =>
-      btn.addEventListener("click", () => {
-        const symbol = btn.dataset.symbol;
-        if (symbol) selectSymbol(symbol);
-        menuDropdown.classList.remove("open");
-      })
-    );
-
-  // tile checkboxes
-  menuDropdown
-    .querySelectorAll("input[data-tile-toggle]")
-    .forEach((cb) => {
-      const id = cb.dataset.tileToggle;
-      cb.addEventListener("change", () => {
-        const tile = tiles[id];
-        if (!tile) return;
-        tile.classList.toggle("hidden", !cb.checked);
-        refreshRowLayouts();
-      });
-    });
-
-  // tile close buttons
-  document.querySelectorAll(".tile-close").forEach((btn) => {
-    const id = btn.dataset.close;
     btn.addEventListener("click", () => {
-      const tile = tiles[id];
-      if (!tile) return;
-      tile.classList.add("hidden");
-      const menuCb = menuDropdown.querySelector(
-        `input[data-tile-toggle="${id}"]`
-      );
-      if (menuCb) menuCb.checked = false;
-      refreshRowLayouts();
+        dd.classList.toggle("open");
     });
-  });
+
+    document.addEventListener("click", (e) => {
+        if (!dd.contains(e.target) && e.target !== btn) {
+            dd.classList.remove("open");
+        }
+    });
+
+    // Tile toggles (only relevant on dashboard)
+    const tileCheckboxes = dd.querySelectorAll("input[type='checkbox'][data-tile]");
+    tileCheckboxes.forEach((cb) => {
+        const selector = cb.getAttribute("data-tile");
+        const tile = document.querySelector(selector);
+        if (!tile) return;
+        cb.checked = !tile.classList.contains("hidden");
+        cb.addEventListener("change", () => {
+            tile.classList.toggle("hidden", !cb.checked);
+        });
+    });
+
+    // Shortcuts
+    const shortcuts = dd.querySelectorAll(".shortcut-btn");
+    shortcuts.forEach((btnShortcut) => {
+        btnShortcut.addEventListener("click", () => {
+            const symbol = btnShortcut.getAttribute("data-symbol");
+            if (!symbol) return;
+            if (document.body.classList.contains("dashboard")) {
+                onSymbolChange(symbol);
+            } else {
+                // on fundamentals we just jump back to dashboard with symbol in hash
+                window.location.href = "/#symbol=" + encodeURIComponent(symbol);
+            }
+            dd.classList.remove("open");
+        });
+    });
 }
 
-// ---------- ROW / COL LAYOUT ----------
+// ========================
+// TradingView
+// ========================
+function ensureTV() {
+    if (tvReady || typeof TradingView === "undefined") return;
+    tvReady = !!TradingView;
+}
 
-function refreshRowLayouts() {
-  ["row1", "row2", "row3"].forEach((rowId) => {
-    const row = document.getElementById(rowId);
-    if (!row) return;
-    const [leftTile, colResizer, rightTile] = row.children;
-    const leftHidden = leftTile.classList.contains("hidden");
-    const rightHidden = rightTile.classList.contains("hidden");
+function mountChart(symbol) {
+    const container = document.getElementById("tv_chart");
+    ensureTV();
+    if (!container || !tvReady) return;
 
-    if (leftHidden && rightHidden) {
-      row.style.display = "none";
-      if (colResizer) colResizer.style.display = "none";
-      return;
+    currentSymbol = symbol;
+    container.innerHTML = "";
+
+    // Use TradingView widget
+    new TradingView.widget({
+        symbol: symbol,
+        container_id: "tv_chart",
+        autosize: true,
+        interval: "60",
+        timezone: "Etc/UTC",
+        theme: currentTheme === "light" ? "light" : "dark",
+        style: "1",
+        locale: "en",
+        hide_top_toolbar: false,
+        hide_legend: false,
+        allow_symbol_change: false
+    });
+
+    const title = document.getElementById("chartTitle");
+    if (title) {
+        title.textContent = "Chart – " + symbol;
+    }
+    const newsTitle = document.getElementById("newsTitle");
+    if (newsTitle) {
+        newsTitle.textContent = "News – " + symbol;
+    }
+    const insightsTitle = document.getElementById("insightsTitle");
+    if (insightsTitle) {
+        insightsTitle.textContent = "Market Insights: " + symbol;
     }
 
-    row.style.display = "flex";
-
-    if (leftHidden || rightHidden) {
-      if (leftHidden) {
-        rightTile.style.flex = "1 1 auto";
-        leftTile.style.flex = "0 0 auto";
-      } else {
-        leftTile.style.flex = "1 1 auto";
-        rightTile.style.flex = "0 0 auto";
-      }
-      if (colResizer) colResizer.style.display = "none";
-    } else {
-      leftTile.style.flex = "";
-      rightTile.style.flex = "";
-      if (colResizer) colResizer.style.display = "";
-    }
-  });
+    // Fetch per-symbol data
+    loadNews(symbol);
+    loadInsights(symbol);
 }
 
-// ---------- RESIZE (COLUMNS) ----------
-
-function startColResize(e, rowIndex) {
-  const row = document.getElementById(`row${rowIndex}`);
-  const [leftTile, resizer, rightTile] = row.children;
-  if (leftTile.classList.contains("hidden") || rightTile.classList.contains("hidden")) {
-    return;
-  }
-
-  const rect = row.getBoundingClientRect();
-  layoutState.colResize = {
-    rowIndex,
-    startX: e.clientX,
-    rowWidth: rect.width,
-    leftWidth: leftTile.getBoundingClientRect().width,
-    rightWidth: rightTile.getBoundingClientRect().width
-  };
-  resizer.classList.add("active");
-  document.body.classList.add("resizing");
-}
-
-function moveColResize(e) {
-  const state = layoutState.colResize;
-  if (!state) return;
-
-  const row = document.getElementById(`row${state.rowIndex}`);
-  const [leftTile, resizer, rightTile] = row.children;
-
-  const dx = e.clientX - state.startX;
-  const min = 180;
-  let newLeft = state.leftWidth + dx;
-  let newRight = state.rightWidth - dx;
-  if (newLeft < min) {
-    newLeft = min;
-    newRight = state.rowWidth - min - resizer.offsetWidth;
-  }
-  if (newRight < min) {
-    newRight = min;
-    newLeft = state.rowWidth - min - resizer.offsetWidth;
-  }
-
-  leftTile.style.flex = `0 0 ${newLeft}px`;
-  rightTile.style.flex = `0 0 ${newRight}px`;
-}
-
-function stopColResize() {
-  const state = layoutState.colResize;
-  if (!state) return;
-  const row = document.getElementById(`row${state.rowIndex}`);
-  const [, resizer] = row.children;
-  resizer.classList.remove("active");
-  layoutState.colResize = null;
-  document.body.classList.remove("resizing");
-}
-
-// ---------- RESIZE (ROWS) ----------
-
-function getRowHeights() {
-  return ["row1", "row2", "row3"].map((id) => {
-    const row = document.getElementById(id);
-    return row ? row.getBoundingClientRect().height : 0;
-  });
-}
-
-function startRowResize(e, rowIndex) {
-  const layout = document.getElementById("layout");
-  const rect = layout.getBoundingClientRect();
-  layoutState.rowResize = {
-    startY: e.clientY,
-    rowIndex,
-    totalHeight: rect.height,
-    heights: getRowHeights()
-  };
-  const bar = document.querySelector(`.row-resizer[data-row="${rowIndex}"]`);
-  if (bar) bar.classList.add("active");
-  document.body.classList.add("resizing");
-}
-
-function moveRowResize(e) {
-  const state = layoutState.rowResize;
-  if (!state) return;
-
-  const dy = e.clientY - state.startY;
-  const min = 100;
-
-  const h1 = state.heights[0];
-  const h2 = state.heights[1];
-  const h3 = state.heights[2];
-
-  let newHeights = [h1, h2, h3];
-
-  if (state.rowIndex === 1) {
-    let new1 = h1 + dy;
-    let new2 = h2 - dy;
-    new1 = Math.max(min, new1);
-    new2 = Math.max(min, new2);
-    newHeights = [new1, new2, h3];
-  } else if (state.rowIndex === 2) {
-    let new2 = h2 + dy;
-    let new3 = h3 - dy;
-    new2 = Math.max(min, new2);
-    new3 = Math.max(min, new3);
-    newHeights = [h1, new2, new3];
-  }
-
-  ["row1", "row2", "row3"].forEach((id, idx) => {
-    const row = document.getElementById(id);
-    if (row) row.style.height = `${newHeights[idx]}px`;
-  });
-}
-
-function stopRowResize() {
-  const state = layoutState.rowResize;
-  if (!state) return;
-  const bar = document.querySelector(`.row-resizer[data-row="${state.rowIndex}"]`);
-  if (bar) bar.classList.remove("active");
-  layoutState.rowResize = null;
-  document.body.classList.remove("resizing");
-}
-
-// ---------- TICKERS ----------
-
-function buildTickerRow(items) {
-  tickerScroll.innerHTML = "";
-  tickerNodes.clear();
-  const dup = [...items, ...items];
-  dup.forEach((tk) => {
-    const item = document.createElement("div");
-    item.className = "ticker-item";
-    item.dataset.symbol = tk.symbol;
-
-    const sym = document.createElement("span");
-    sym.className = "sym";
-    sym.textContent = tk.symbol;
-
-    const chg = document.createElement("span");
-    chg.className = `chg ${classForChange(tk.change_pct)}`;
-    chg.textContent = fmtPct(tk.change_pct);
-
-    item.appendChild(sym);
-    item.appendChild(chg);
-    item.addEventListener("click", () => selectSymbol(tk.symbol));
-    tickerScroll.appendChild(item);
-    tickerNodes.set(tk.symbol, { node: item, chg });
-  });
-
-  // pause on hover
-  tickerScroll.addEventListener("mouseenter", () =>
-    tickerScroll.classList.add("paused")
-  );
-  tickerScroll.addEventListener("mouseleave", () =>
-    tickerScroll.classList.remove("paused")
-  );
-}
-
-function updateTickerRow(items) {
-  items.forEach((tk) => {
-    const entry = tickerNodes.get(tk.symbol);
-    if (!entry) return;
-    entry.chg.className = `chg ${classForChange(tk.change_pct)}`;
-    entry.chg.textContent = fmtPct(tk.change_pct);
-  });
-}
-
+// ========================
+// Ticker strip
+// ========================
 async function loadTickers() {
-  try {
-    const res = await fetch(ENDPOINTS.tickers);
-    if (!res.ok) throw new Error("tickers");
-    const data = await res.json();
-    if (!tickerScroll.childElementCount) {
-      buildTickerRow(data);
-    } else {
-      updateTickerRow(data);
+    const strip = document.getElementById("tickerInner");
+    if (!strip) return;
+
+    try {
+        const res = await fetch(ENDPOINTS.tickers);
+        const data = await res.json();
+        if (!Array.isArray(data) || data.length === 0) return;
+
+        // Duplicate for seamless scroll
+        const doubled = [...data, ...data];
+
+        strip.innerHTML = "";
+        doubled.forEach((t) => {
+            const item = document.createElement("div");
+            item.className = "ticker-item";
+            item.dataset.symbol = t.symbol;
+            item.innerHTML = `
+                <span class="ticker-symbol">${t.symbol}</span>
+                <span class="ticker-price">${t.price ?? "--"}</span>
+                <span class="ticker-chg ${t.change_pct > 0 ? "pos" : t.change_pct < 0 ? "neg" : ""}">
+                    ${formatChange(t.change_pct)}
+                </span>
+            `;
+            item.addEventListener("click", () => {
+                if (document.body.classList.contains("dashboard")) {
+                    onSymbolChange(t.symbol);
+                } else {
+                    window.location.href = "/#symbol=" + encodeURIComponent(t.symbol);
+                }
+            });
+            strip.appendChild(item);
+        });
+    } catch (e) {
+        // fail silently
+        console.error("tickers error", e);
     }
-  } catch (e) {
-    // silent
-  }
 }
 
-// ---------- TRADINGVIEW CHART ----------
-
-function mountTradingView(symbol) {
-  chartTitle.textContent = symbol;
-  tvContainer.innerHTML = "";
-
-  if (typeof TradingView === "undefined" || !TradingView.widget) {
-    const d = document.createElement("div");
-    d.className = "muted";
-    d.textContent = "TradingView widget failed to load.";
-    tvContainer.appendChild(d);
-    return;
-  }
-
-  new TradingView.widget({
-    symbol,
-    interval: "60",
-    theme: document.body.classList.contains("theme-light") ? "light" : "dark",
-    container_id: "tv_container",
-    style: "1",
-    locale: "en",
-    hide_top_toolbar: false,
-    autosize: true
-  });
+function formatChange(v) {
+    if (v == null || !isFinite(v)) return "0.00%";
+    const s = v > 0 ? "+" : v < 0 ? "−" : "";
+    return `${s}${Math.abs(v).toFixed(2)}%`;
 }
 
-// ---------- NEWS ----------
-
-function renderNews(list) {
-  newsList.innerHTML = "";
-  if (!Array.isArray(list) || !list.length) {
-    newsList.innerHTML = '<div class="muted">No headlines.</div>';
-    return;
-  }
-  list.forEach((n) => {
-    const item = document.createElement("div");
-    item.className = "news-item";
-    const a = document.createElement("a");
-    a.href = n.url || "#";
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.textContent = n.title || "(untitled)";
-    const meta = document.createElement("div");
-    meta.className = "news-meta";
-    meta.textContent = `${n.source || "Source"} · ${n.time || ""}`;
-    item.appendChild(a);
-    item.appendChild(meta);
-    newsList.appendChild(item);
-  });
-}
-
+// ========================
+// News
+// ========================
 async function loadNews(symbol) {
-  newsList.innerHTML = '<div class="muted">Loading news…</div>';
-  newsHeader.textContent = `News – ${symbol}`;
-  try {
-    const res = await fetch(
-      `${ENDPOINTS.news}?symbol=${encodeURIComponent(symbol)}`
-    );
-    const data = await res.json();
-    renderNews(data);
-  } catch (e) {
-    newsList.innerHTML =
-      '<div class="muted">Could not load news. Using fallback…</div>';
-  }
+    const list = document.getElementById("newsList");
+    if (!list) return;
+    list.innerHTML = '<div class="placeholder">Loading news…</div>';
+
+    try {
+        const res = await fetch(`${ENDPOINTS.news}?symbol=${encodeURIComponent(symbol)}`);
+        const news = await res.json();
+        list.innerHTML = "";
+
+        if (!Array.isArray(news) || news.length === 0) {
+            list.innerHTML = '<div class="placeholder">No headlines.</div>';
+            return;
+        }
+
+        news.slice(0, 40).forEach((n) => {
+            const div = document.createElement("div");
+            div.className = "news-item";
+            const a = document.createElement("a");
+            a.href = n.url || "#";
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.textContent = n.title || "(untitled)";
+            const meta = document.createElement("div");
+            meta.className = "news-meta";
+            const src = n.source || "Source";
+            const time = n.time || "";
+            meta.textContent = `${src}${time ? " · " + time : ""}`;
+            div.appendChild(a);
+            div.appendChild(meta);
+            list.appendChild(div);
+        });
+    } catch (e) {
+        console.error("news error", e);
+        list.innerHTML = '<div class="placeholder">Failed to load news.</div>';
+    }
 }
 
-// ---------- INSIGHTS ----------
-
-function setInsight(id, val) {
-  const el = insightEls[id];
-  if (!el) return;
-  if (val == null || !isFinite(val)) {
-    el.textContent = "—";
-    el.className = "insight-value";
-    return;
-  }
-  el.textContent = fmtPct(val);
-  el.className = `insight-value ${classForChange(val)}`;
-}
-
+// ========================
+// Insights
+// ========================
 async function loadInsights(symbol) {
-  insightsSymbol.textContent = symbol;
-  descEl.textContent = "Loading profile…";
-  Object.keys(insightEls).forEach((k) => setInsight(k, null));
+    const grid = document.getElementById("insightsGrid");
+    const desc = document.getElementById("insightsDescription");
+    if (!grid || !desc) return;
 
-  try {
-    const res = await fetch(
-      `${ENDPOINTS.insights}?symbol=${encodeURIComponent(symbol)}`
-    );
-    if (!res.ok) throw new Error("insights");
-    const data = await res.json();
+    grid.innerHTML = "";
+    desc.textContent = "Loading profile…";
 
-    setInsight("1w", data.pct_1w);
-    setInsight("1m", data.pct_1m);
-    setInsight("3m", data.pct_3m);
-    setInsight("6m", data.pct_6m);
-    setInsight("ytd", data.pct_ytd);
-    setInsight("1y", data.pct_1y);
+    try {
+        const res = await fetch(`${ENDPOINTS.insights}?symbol=${encodeURIComponent(symbol)}`);
+        const data = await res.json();
 
-    descEl.textContent = data.profile || "No profile available.";
-  } catch (e) {
-    descEl.textContent = "No profile available.";
-  }
-}
+        const periods = data.periods || [];
+        if (periods.length === 0) {
+            grid.innerHTML = '<div class="placeholder">No performance snapshot.</div>';
+        } else {
+            periods.forEach((p) => {
+                const cell = document.createElement("div");
+                cell.className = "insight-cell";
+                const label = document.createElement("div");
+                label.className = "insight-label";
+                label.textContent = p.label;
+                const val = document.createElement("div");
+                val.className =
+                    "insight-value " +
+                    (p.change > 0 ? "pos" : p.change < 0 ? "neg" : "");
+                val.textContent = formatChange(p.change);
+                cell.appendChild(label);
+                cell.appendChild(val);
+                grid.appendChild(cell);
+            });
+        }
 
-// ---------- DOM (simulated) ----------
-
-async function loadDom(symbol) {
-  domBody.innerHTML = "";
-  try {
-    const res = await fetch(
-      `${ENDPOINTS.dom}?symbol=${encodeURIComponent(symbol)}`
-    );
-    const data = await res.json();
-    const rows = data.levels || [];
-    if (!rows.length) {
-      domBody.innerHTML =
-        '<tr><td colspan="4" class="muted">No depth data.</td></tr>';
-      return;
+        const profile = data.profile;
+        if (profile) {
+            desc.textContent = profile;
+        } else {
+            desc.textContent =
+                "No company profile available at this time.";
+        }
+    } catch (e) {
+        console.error("insights error", e);
+        grid.innerHTML = '<div class="placeholder">Failed to load snapshot.</div>';
+        desc.textContent = "Profile unavailable.";
     }
-    rows.forEach((r) => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${r.bid_size}</td><td>${r.bid}</td><td>${r.ask}</td><td>${r.ask_size}</td>`;
-      domBody.appendChild(tr);
-    });
-  } catch (e) {
-    domBody.innerHTML =
-      '<tr><td colspan="4" class="muted">Depth data unavailable.</td></tr>';
-  }
 }
 
-// ---------- MOVERS ----------
-
-async function loadMovers() {
-  gainersBody.innerHTML = "";
-  losersBody.innerHTML = "";
-  try {
-    const res = await fetch(ENDPOINTS.movers);
-    const data = await res.json();
-    const gainers = data.gainers || [];
-    const losers = data.losers || [];
-
-    if (!gainers.length) {
-      gainersBody.innerHTML =
-        '<tr><td colspan="2" class="muted">No data</td></tr>';
-    } else {
-      gainers.forEach((row) => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `<td>${row.symbol}</td><td class="change ${classForChange(
-          row.change_pct
-        )}">${fmtPct(row.change_pct)}</td>`;
-        tr.addEventListener("click", () => selectSymbol(row.symbol));
-        gainersBody.appendChild(tr);
-      });
-    }
-
-    if (!losers.length) {
-      losersBody.innerHTML =
-        '<tr><td colspan="2" class="muted">No data</td></tr>';
-    } else {
-      losers.forEach((row) => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `<td>${row.symbol}</td><td class="change ${classForChange(
-          row.change_pct
-        )}">${fmtPct(row.change_pct)}</td>`;
-        tr.addEventListener("click", () => selectSymbol(row.symbol));
-        losersBody.appendChild(tr);
-      });
-    }
-  } catch (e) {
-    gainersBody.innerHTML =
-      '<tr><td colspan="2" class="muted">Failed</td></tr>';
-    losersBody.innerHTML =
-      '<tr><td colspan="2" class="muted">Failed</td></tr>';
-  }
-}
-
-// ---------- CALENDAR ----------
-
-function renderCalendar(rows) {
-  calendarBody.innerHTML = "";
-  const header = document.createElement("div");
-  header.className = "calendar-row header";
-  header.innerHTML =
-    "<div>Time</div><div>Country</div><div>Event</div><div>Actual</div><div>Forecast</div><div>Previous</div>";
-  calendarBody.appendChild(header);
-
-  if (!Array.isArray(rows) || !rows.length) {
-    const d = document.createElement("div");
-    d.className = "muted";
-    d.style.marginTop = "6px";
-    d.textContent = "No events.";
-    calendarBody.appendChild(d);
-    return;
-  }
-
-  rows.forEach((ev) => {
-    const row = document.createElement("div");
-    row.className = "calendar-row";
-    row.innerHTML = `
-      <div>${ev.time || ""}</div>
-      <div>${ev.country || ""}</div>
-      <div>${ev.event || ""}</div>
-      <div>${ev.actual ?? ""}</div>
-      <div>${ev.forecast ?? ""}</div>
-      <div>${ev.previous ?? ""}</div>
-    `;
-    calendarBody.appendChild(row);
-  });
-}
-
+// ========================
+// Calendar
+// ========================
 async function loadCalendar() {
-  calendarBody.innerHTML = '<div class="muted">Loading calendar…</div>';
-  try {
-    const res = await fetch(ENDPOINTS.calendar);
-    const data = await res.json();
-    renderCalendar(data);
-  } catch (e) {
-    calendarBody.innerHTML =
-      '<div class="muted">Calendar data unavailable.</div>';
-  }
+    const body = document.getElementById("calendarBody");
+    if (!body) return;
+
+    body.innerHTML = `<tr><td colspan="6" class="placeholder">Loading events…</td></tr>`;
+
+    try {
+        const res = await fetch(ENDPOINTS.calendar);
+        const events = await res.json();
+
+        if (!Array.isArray(events) || events.length === 0) {
+            body.innerHTML = `<tr><td colspan="6" class="placeholder">No events.</td></tr>`;
+            return;
+        }
+
+        body.innerHTML = "";
+        events.forEach((ev) => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                <td>${ev.time || ""}</td>
+                <td>${ev.country || ""}</td>
+                <td>${ev.event || ""}</td>
+                <td>${ev.actual ?? ""}</td>
+                <td>${ev.forecast ?? ""}</td>
+                <td>${ev.previous ?? ""}</td>
+            `;
+            body.appendChild(tr);
+        });
+    } catch (e) {
+        console.error("calendar error", e);
+        body.innerHTML = `<tr><td colspan="6" class="placeholder">Failed to load events.</td></tr>`;
+    }
 }
 
-// ---------- SELECT SYMBOL ----------
+// ========================
+// Movers
+// ========================
+async function loadMovers() {
+    const gBody = document.getElementById("gainersBody");
+    const lBody = document.getElementById("losersBody");
+    if (!gBody || !lBody) return;
 
-async function selectSymbol(symbol) {
-  currentSymbol = symbol;
-  mountTradingView(symbol);
-  await Promise.all([
-    loadNews(symbol),
-    loadInsights(symbol),
-    loadDom(symbol)
-  ]);
+    gBody.innerHTML = `<tr><td class="placeholder">Loading…</td></tr>`;
+    lBody.innerHTML = `<tr><td class="placeholder">Loading…</td></tr>`;
+
+    try {
+        const res = await fetch(ENDPOINTS.movers);
+        const data = await res.json();
+        const gainers = data.gainers || [];
+        const losers = data.losers || [];
+
+        const fill = (tbody, rows) => {
+            tbody.innerHTML = "";
+            if (rows.length === 0) {
+                tbody.innerHTML =
+                    `<tr><td class="placeholder">No data.</td></tr>`;
+                return;
+            }
+            rows.forEach((r) => {
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td>${r.symbol}</td>
+                    <td style="text-align:right;">${r.price ?? "--"}</td>
+                    <td style="text-align:right; color:${
+                        r.change_pct > 0
+                            ? "var(--success)"
+                            : r.change_pct < 0
+                            ? "var(--danger)"
+                            : "var(--text-muted)"
+                    }">${formatChange(r.change_pct)}</td>
+                `;
+                tr.addEventListener("click", () => onSymbolChange(r.symbol));
+                tbody.appendChild(tr);
+            });
+        };
+
+        fill(gBody, gainers);
+        fill(lBody, losers);
+    } catch (e) {
+        console.error("movers error", e);
+        gBody.innerHTML = `<tr><td class="placeholder">Failed.</td></tr>`;
+        lBody.innerHTML = `<tr><td class="placeholder">Failed.</td></tr>`;
+    }
 }
 
-// ---------- INIT RESIZERS ----------
-
-function initResizers() {
-  document
-    .querySelectorAll(".col-resizer")
-    .forEach((res) =>
-      res.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        const rowIndex = Number(res.dataset.row);
-        startColResize(e, rowIndex);
-      })
-    );
-
-  document
-    .querySelectorAll(".row-resizer")
-    .forEach((res) =>
-      res.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        const rowIndex = Number(res.dataset.row);
-        startRowResize(e, rowIndex);
-      })
-    );
-
-  window.addEventListener("mousemove", (e) => {
-    if (layoutState.colResize) moveColResize(e);
-    if (layoutState.rowResize) moveRowResize(e);
-  });
-
-  window.addEventListener("mouseup", () => {
-    if (layoutState.colResize) stopColResize();
-    if (layoutState.rowResize) stopRowResize();
-  });
+// ========================
+// Symbol selection
+// ========================
+function onSymbolChange(symbol) {
+    currentSymbol = symbol;
+    mountChart(symbol);
 }
 
-// ---------- BOOT ----------
+// ========================
+// Fundamentals TV charts
+// ========================
+function initFundamentalsCharts() {
+    if (typeof TradingView === "undefined") return;
+    const spxContainer = document.getElementById("fundChartSPX");
+    const ndxContainer = document.getElementById("fundChartNDX");
 
-async function boot() {
-  initTheme();
-  initMenu();
-  initResizers();
-  refreshRowLayouts();
+    if (spxContainer) {
+        new TradingView.widget({
+            symbol: "OANDA:US500USD",
+            container_id: "fundChartSPX",
+            autosize: true,
+            interval: "D",
+            timezone: "Etc/UTC",
+            theme: document.body.classList.contains("light-theme")
+                ? "light"
+                : "dark",
+            style: "1",
+            locale: "en",
+            hide_top_toolbar: true,
+            hide_legend: true,
+            allow_symbol_change: false
+        });
+    }
 
-  // initial symbol
-  selectSymbol(currentSymbol);
-  loadTickers();
-  loadMovers();
-  loadCalendar();
+    if (ndxContainer) {
+        new TradingView.widget({
+            symbol: "OANDA:NAS100USD",
+            container_id: "fundChartNDX",
+            autosize: true,
+            interval: "D",
+            timezone: "Etc/UTC",
+            theme: document.body.classList.contains("light-theme")
+                ? "light"
+                : "dark",
+            style: "1",
+            locale: "en",
+            hide_top_toolbar: true,
+            hide_legend: true,
+            allow_symbol_change: false
+        });
+    }
 
-  setInterval(loadTickers, 15000);
-  setInterval(loadMovers, 60000);
-  setInterval(loadCalendar, 60 * 60 * 1000);
+    // simple dummy text for metrics (you can wire real analytics later)
+    const spxTrend = document.getElementById("spxTrend");
+    const spxVol = document.getElementById("spxVol");
+    const ndxTrend = document.getElementById("ndxTrend");
+    const ndxVol = document.getElementById("ndxVol");
+    if (spxTrend) spxTrend.textContent = "Uptrend (last 3 months)";
+    if (spxVol) spxVol.textContent = "Moderate";
+    if (ndxTrend) ndxTrend.textContent = "Range-bound";
+    if (ndxVol) ndxVol.textContent = "Elevated";
 }
 
-document.addEventListener("DOMContentLoaded", boot);
+// ========================
+// Boot
+// ========================
+document.addEventListener("DOMContentLoaded", () => {
+    initTheme();
+    initMenu();
+    loadTickers();
+
+    if (document.body.classList.contains("dashboard")) {
+        // handle symbol passed in hash from fundamentals shortcuts
+        const hash = window.location.hash || "";
+        const m = hash.match(/symbol=([^&]+)/i);
+        if (m) {
+            currentSymbol = decodeURIComponent(m[1]);
+        } else {
+            currentSymbol = DEFAULT_SYMBOL;
+        }
+
+        // Wait a bit for TradingView to be ready
+        const tryMount = () => {
+            ensureTV();
+            if (tvReady) {
+                mountChart(currentSymbol);
+                loadCalendar();
+                loadMovers();
+            } else {
+                setTimeout(tryMount, 200);
+            }
+        };
+        tryMount();
+    } else if (document.body.classList.contains("fundamentals-page")) {
+        const tryFundCharts = () => {
+            if (typeof TradingView === "undefined") {
+                setTimeout(tryFundCharts, 200);
+                return;
+            }
+            initFundamentalsCharts();
+        };
+        tryFundCharts();
+    }
+});
