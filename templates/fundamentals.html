@@ -1,125 +1,46 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
-    <meta charset="UTF-8" />
-    <title>Market Terminal – Fundamentals</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="/static/style.css" />
-    <script src="https://s3.tradingview.com/tv.js"></script>
+  <meta charset="UTF-8" />
+  <title>Fundamentals – Market Terminal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body class="fundamentals-page">
-<header class="top-bar">
-    <div class="brand" onclick="window.location.href='/'" style="cursor:pointer;">
-        MARKET TERMINAL
+<body class="theme-dark fundamentals-body">
+  <header class="top-bar">
+    <div class="brand clickable" onclick="window.location.href='/'">
+      MARKET TERMINAL
     </div>
-
-    <div class="ticker-strip" id="tickerStrip">
-        <div class="ticker-inner" id="tickerInner"></div>
-    </div>
-
     <div class="top-actions">
-        <button class="top-button" onclick="window.location.href='/'">
-            Dashboard
-        </button>
-
-        <div class="menu-wrapper">
-            <button id="menuToggle" class="top-button">Menu ▾</button>
-            <div id="menuDropdown" class="menu-dropdown">
-                <div class="menu-section">
-                    <div class="menu-section-title">Theme</div>
-                    <div class="theme-toggle">
-                        <span class="theme-icon">☀</span>
-                        <label class="switch">
-                            <input type="checkbox" id="themeToggle" />
-                            <span class="slider"></span>
-                        </label>
-                        <span class="theme-icon">🌙</span>
-                    </div>
-                </div>
-
-                <div class="menu-section">
-                    <div class="menu-section-title">Shortcuts</div>
-                    <button class="shortcut-btn" data-symbol="OANDA:US500USD">
-                        S&amp;P 500 (US500)
-                    </button>
-                    <button class="shortcut-btn" data-symbol="OANDA:NAS100USD">
-                        NASDAQ 100 (NAS100)
-                    </button>
-                </div>
-            </div>
-        </div>
+      <button class="top-btn active">Fundamentals</button>
+      <button class="top-btn" onclick="window.location.href='/'">Terminal</button>
     </div>
-</header>
+  </header>
 
-<main class="fundamentals-root">
-    <section class="fundamentals-hero">
-        <div>
-            <h1>Index Fundamentals &amp; Positioning</h1>
-            <p>
-                High-level view of the S&amp;P 500 and NASDAQ 100: price action plus
-                positioning-style summary cards (COT-style net bias, trend strength,
-                and volatility regime). This is a visual overview – you can
-                extend it with real COT data later.
-            </p>
-        </div>
+  <main class="fundamentals-layout">
+    <section class="fund-section">
+      <h2>Commitments of Traders – S&amp;P 500 E-Mini</h2>
+      <div class="fund-iframe-wrapper">
+        <iframe
+          title="S&P 500 COT"
+          src="https://market-bulls.com/cot-report-s-and-p-500-e-mini/"
+          loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade">
+        </iframe>
+      </div>
     </section>
 
-    <section class="fundamentals-row">
-        <article class="fund-card">
-            <header class="fund-card-header">
-                <h2>S&amp;P 500 Overview (US500)</h2>
-            </header>
-            <div class="fund-card-body">
-                <div id="fundChartSPX" class="fund-chart"></div>
-                <div class="fund-metrics">
-                    <div class="fund-metric">
-                        <span class="label">Price Trend</span>
-                        <span class="value" id="spxTrend">Loading…</span>
-                    </div>
-                    <div class="fund-metric">
-                        <span class="label">Volatility Regime</span>
-                        <span class="value" id="spxVol">Loading…</span>
-                    </div>
-                    <div class="fund-metric">
-                        <span class="label">Net Position Bias*</span>
-                        <span class="value" id="spxBias">Sample: Mild Long</span>
-                    </div>
-                </div>
-                <p class="fund-note">
-                    *Net position bias is a conceptual summary here. You can
-                    replace this with live COT data from your preferred source.
-                </p>
-            </div>
-        </article>
-
-        <article class="fund-card">
-            <header class="fund-card-header">
-                <h2>NASDAQ 100 Overview (NAS100)</h2>
-            </header>
-            <div class="fund-card-body">
-                <div id="fundChartNDX" class="fund-chart"></div>
-                <div class="fund-metrics">
-                    <div class="fund-metric">
-                        <span class="label">Price Trend</span>
-                        <span class="value" id="ndxTrend">Loading…</span>
-                    </div>
-                    <div class="fund-metric">
-                        <span class="label">Volatility Regime</span>
-                        <span class="value" id="ndxVol">Loading…</span>
-                    </div>
-                    <div class="fund-metric">
-                        <span class="label">Net Position Bias*</span>
-                        <span class="value" id="ndxBias">Sample: Neutral</span>
-                    </div>
-                </div>
-                <p class="fund-note">
-                    *Again, this is a placeholder field you can wire to COT data.
-                </p>
-            </div>
-        </article>
+    <section class="fund-section">
+      <h2>Commitments of Traders – Nasdaq 100 E-Mini</h2>
+      <div class="fund-iframe-wrapper">
+        <iframe
+          title="Nasdaq 100 COT"
+          src="https://market-bulls.com/cot-report-nasdaq-100/"
+          loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade">
+        </iframe>
+      </div>
     </section>
-</main>
-
-<script src="/static/main.js"></script>
+  </main>
 </body>
 </html>
