@@ -5,7 +5,6 @@
   <title>Market Terminal</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="/static/style.css" />
-  <!-- TradingView core script -->
   <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body class="theme-dark">
@@ -17,8 +16,7 @@
   </div>
 
   <div class="header-actions">
-    <button class="shortcut-btn" data-symbol="CURRENCYCOM:US500">S&P 500</button>
-    <button class="shortcut-btn" data-symbol="CURRENCYCOM:US100">NASDAQ</button>
+    <button id="fundamentalsBtn" class="shortcut-btn">Fundamentals</button>
 
     <div class="menu">
       <button id="menuToggle" class="menu-toggle">Menu ▾</button>
@@ -31,10 +29,34 @@
           </label>
           <span class="theme-icon" id="themeIcon">🌙</span>
         </div>
+        <div class="menu-divider"></div>
+        <div class="menu-section-column">
+          <span class="menu-label">Shortcuts</span>
+          <button class="menu-shortcut" data-role="shortcut" data-symbol="OANDA:US500USD">
+            S&amp;P 500 (US500)
+          </button>
+          <button class="menu-shortcut" data-role="shortcut" data-symbol="OANDA:NAS100USD">
+            NASDAQ 100 (NAS100)
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </header>
+
+<!-- Fundamentals side panel (simple placeholder) -->
+<aside id="fundamentalsPanel" class="fundamentals-panel">
+  <div class="fundamentals-header">
+    <span>Fundamentals – <span id="fundamentalsSymbol">AAPL</span></span>
+    <button id="fundamentalsClose" class="fundamentals-close">✕</button>
+  </div>
+  <div class="fundamentals-body">
+    <p class="muted">
+      Fundamentals view is a placeholder for now. It will eventually show valuation,
+      profitability and balance sheet metrics for the selected symbol.
+    </p>
+  </div>
+</aside>
 
 <main id="gridRoot">
   <!-- Row 1: Chart | News -->
@@ -45,7 +67,7 @@
         <div id="tv_container" class="tv-container"></div>
       </div>
     </div>
-    <div class="row-resizer" data-row="1"></div>
+    <div class="col-resizer" data-row="1"></div>
     <div class="tile tile-news" id="tile-news">
       <div class="tile-header">News</div>
       <div class="tile-body news-body">
@@ -55,6 +77,8 @@
       </div>
     </div>
   </section>
+
+  <div class="row-resizer" data-between="1-2"></div>
 
   <!-- Row 2: Insights | DOM -->
   <section class="row" data-row="2">
@@ -86,7 +110,7 @@
         </div>
       </div>
     </div>
-    <div class="row-resizer" data-row="2"></div>
+    <div class="col-resizer" data-row="2"></div>
     <div class="tile tile-dom" id="tile-dom">
       <div class="tile-header">Depth of Market (simulated)</div>
       <div class="tile-body dom-body">
@@ -110,6 +134,8 @@
     </div>
   </section>
 
+  <div class="row-resizer" data-between="2-3"></div>
+
   <!-- Row 3: Calendar | Movers -->
   <section class="row" data-row="3">
     <div class="tile tile-calendar" id="tile-calendar">
@@ -118,7 +144,7 @@
         <div id="tv_calendar_container" class="calendar-widget"></div>
       </div>
     </div>
-    <div class="row-resizer" data-row="3"></div>
+    <div class="col-resizer" data-row="3"></div>
     <div class="tile tile-movers" id="tile-movers">
       <div class="tile-header">Top Movers (Watchlist)</div>
       <div class="tile-body movers-body">
