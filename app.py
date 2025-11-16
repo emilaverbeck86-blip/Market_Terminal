@@ -9,9 +9,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-# -------------------------------------------------------------------
-# FastAPI setup
-# -------------------------------------------------------------------
 app = FastAPI()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,9 +20,6 @@ if not os.path.isdir(static_dir):
 
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-# -------------------------------------------------------------------
-# Universe / watchlist
-# -------------------------------------------------------------------
 WATCHLIST: List[str] = [
     "AAPL", "MSFT", "NVDA", "AMZN", "META",
     "GOOGL", "TSLA", "AVGO", "AMD", "NFLX",
@@ -33,13 +27,9 @@ WATCHLIST: List[str] = [
     "JPM", "BAC", "WFC", "GS", "MS",
 ]
 
-# initial symbol for chart
 DEFAULT_SYMBOL = "AAPL"
 
 
-# -------------------------------------------------------------------
-# Helpers
-# -------------------------------------------------------------------
 def _safe_float(v: Any) -> float | None:
     try:
         if v is None:
@@ -56,11 +46,7 @@ def _format_time(ts: datetime | None) -> str:
 
 
 async def fetch_quote(symbol: str) -> Dict[str, Any]:
-    """
-    Basic quote using yfinance. Uses fast_info when possible.
-    """
     ticker = yf.Ticker(symbol)
-    info = {}
     try:
         fi = ticker.fast_info
         last = _safe_float(getattr(fi, "last_price", None))
@@ -94,11 +80,8 @@ async def fetch_quote(symbol: str) -> Dict[str, Any]:
 
 
 async def fetch_performance(symbol: str) -> Dict[str, Any]:
-    """
-    1W, 1M, 3M, 6M, YTD, 1Y performance using yfinance daily history.
-    """
     now = datetime.utcnow()
-    start = now - timedelta(days=365 * 1 + 30)
+    start = now - timedelta(days=365 + 30)
     try:
         hist = yf.download(symbol, start=start.date(), end=now.date(), progress=False)
     except Exception:
@@ -144,9 +127,6 @@ async def fetch_performance(symbol: str) -> Dict[str, Any]:
 
 
 async def fetch_profile(symbol: str) -> str:
-    """
-    Short business description; at most ~6 sentences.
-    """
     try:
         info = yf.Ticker(symbol).info
     except Exception:
@@ -156,7 +136,6 @@ async def fetch_profile(symbol: str) -> str:
     if not text:
         return ""
 
-    # Keep it compact: first 6 sentences max
     parts = [p.strip() for p in text.replace("\n", " ").split(".") if p.strip()]
     short = ". ".join(parts[:6])
     if short and not short.endswith("."):
@@ -165,9 +144,6 @@ async def fetch_profile(symbol: str) -> str:
 
 
 async def fetch_tickers() -> List[Dict[str, Any]]:
-    """
-    Quotes for all watchlist symbols.
-    """
     out: List[Dict[str, Any]] = []
     for sym in WATCHLIST:
         q = await fetch_quote(sym)
@@ -176,9 +152,6 @@ async def fetch_tickers() -> List[Dict[str, Any]]:
 
 
 async def fetch_movers() -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Top 5 gainers and losers from watchlist.
-    """
     quotes = await fetch_tickers()
     valid = [q for q in quotes if q.get("change_pct") is not None]
     sorted_list = sorted(valid, key=lambda x: x["change_pct"])
@@ -188,9 +161,6 @@ async def fetch_movers() -> Dict[str, List[Dict[str, Any]]]:
 
 
 async def fetch_news_yahoo(symbol: str | None = None, limit: int = 20) -> List[Dict[str, Any]]:
-    """
-    Try Yahoo Finance RSS for symbol-specific or market news.
-    """
     if symbol:
         url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
     else:
@@ -219,9 +189,6 @@ async def fetch_news_yahoo(symbol: str | None = None, limit: int = 20) -> List[D
 
 
 async def fetch_news_google(symbol: str | None = None, limit: int = 20) -> List[Dict[str, Any]]:
-    """
-    Fallback: Google News RSS.
-    """
     query = f"{symbol} stock" if symbol else "stock market"
     url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
     items: List[Dict[str, Any]] = []
@@ -249,20 +216,12 @@ async def fetch_news_google(symbol: str | None = None, limit: int = 20) -> List[
 
 
 async def fetch_news(symbol: str | None = None, limit: int = 20) -> List[Dict[str, Any]]:
-    """
-    News with Yahoo -> Google fallback.
-    """
     for provider in (fetch_news_yahoo, fetch_news_google):
         try:
             return await provider(symbol, limit=limit)
         except Exception:
             continue
     return []
-
-
-# -------------------------------------------------------------------
-# Routes
-# -------------------------------------------------------------------
 
 
 @app.get("/", response_class=HTMLResponse)
