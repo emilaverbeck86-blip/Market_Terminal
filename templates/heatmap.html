@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <title>S&amp;P 500 Heatmap – Market Terminal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="theme-dark fundamentals-body">
+  <header class="top-bar">
+    <div class="brand clickable" onclick="window.location.href='/'">
+      MARKET TERMINAL
+    </div>
+    <div class="top-actions">
+      <button class="top-btn" onclick="window.location.href='/'">Terminal</button>
+      <button class="top-btn" onclick="window.location.href='/fundamentals'">
+        Fundamentals
+      </button>
+    </div>
+  </header>
+
+  <main class="fundamentals-layout">
+    <section class="fund-section">
+      <h2>S&amp;P 500 Heatmap</h2>
+      <div class="fund-iframe-wrapper">
+        <iframe
+          title="S&P 500 Heatmap"
+          src="https://www.tradingview.com/heatmap/stock/?section=SPX&group=sector&color=change"
+          loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade">
+        </iframe>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
