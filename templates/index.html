@@ -5,10 +5,9 @@
     <title>Market Terminal</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="/static/style.css" />
-    <!-- TradingView JS -->
     <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
-<body class="dashboard">
+<body>
 <header class="top-bar">
     <div class="brand">MARKET TERMINAL</div>
 
@@ -17,22 +16,22 @@
     </div>
 
     <div class="top-actions">
-        <button class="top-button" onclick="window.location.href='/fundamentals'">
+        <button class="top-button" type="button" onclick="window.marketTerminal.showFundamentals()">
             Fundamentals
         </button>
 
         <div class="menu-wrapper">
-            <button id="menuToggle" class="top-button">Menu ▾</button>
+            <button id="menuToggle" class="top-button" type="button">Menu ▾</button>
             <div id="menuDropdown" class="menu-dropdown">
                 <div class="menu-section">
                     <div class="menu-section-title">Theme</div>
                     <div class="theme-toggle">
-                        <span class="theme-icon">☀</span>
+                        <span class="theme-icon">🌙</span>
                         <label class="switch">
                             <input type="checkbox" id="themeToggle" />
                             <span class="slider"></span>
                         </label>
-                        <span class="theme-icon">🌙</span>
+                        <span class="theme-icon">☀</span>
                     </div>
                 </div>
 
@@ -66,17 +65,17 @@
     </div>
 </header>
 
-<main class="layout-root">
-    <!-- Row 1: Chart + News -->
+<main id="dashboardRoot" class="layout-root">
+    <!-- Row 1: chart + news with column resizer -->
     <section class="row row1" id="chartRow">
-        <article class="tile tile-chart">
+        <article class="tile tile-chart" id="chartTile">
             <header class="tile-header">
                 <h2 id="chartTitle">Chart – AAPL</h2>
             </header>
             <div id="tv_chart" class="tile-body chart-body"></div>
         </article>
 
-        <article class="tile tile-news">
+        <article class="tile tile-news" id="newsTile">
             <header class="tile-header">
                 <h2 id="newsTitle">News</h2>
             </header>
@@ -84,24 +83,28 @@
                 <div class="placeholder">Loading news…</div>
             </div>
         </article>
+
+        <div id="colResizer" class="col-resizer"></div>
     </section>
 
-    <!-- Row 2: Market Insights (full width now) -->
+    <div class="row-resizer" data-top="#chartRow" data-bottom="#insightsRow"></div>
+
+    <!-- Row 2: Market insights full width -->
     <section class="row row2" id="insightsRow">
         <article class="tile tile-insights">
             <header class="tile-header">
                 <h2 id="insightsTitle">Market Insights: AAPL</h2>
             </header>
             <div class="tile-body insights-body">
-                <div class="insights-grid" id="insightsGrid">
-                    <!-- filled by JS -->
-                </div>
+                <div class="insights-grid" id="insightsGrid"></div>
                 <div class="insights-description" id="insightsDescription">
                     Loading profile…
                 </div>
             </div>
         </article>
     </section>
+
+    <div class="row-resizer" data-top="#insightsRow" data-bottom="#bottomRow"></div>
 
     <!-- Row 3: Calendar + Movers -->
     <section class="row row3" id="bottomRow">
@@ -151,6 +154,79 @@
                         </table>
                     </div>
                 </div>
+            </div>
+        </article>
+    </section>
+</main>
+
+<!-- Fundamentals view (same page, toggled) -->
+<main id="fundamentalsRoot" class="fundamentals-root hidden">
+    <section class="fundamentals-hero">
+        <div>
+            <h1>Index Fundamentals &amp; Positioning</h1>
+            <p>
+                Overview of the S&amp;P 500 and NASDAQ 100: price action plus
+                positioning-style summary cards. You can later wire real COT
+                data into these panels.
+            </p>
+        </div>
+        <button class="top-button" type="button" onclick="window.marketTerminal.showDashboard()">
+            ← Back to Dashboard
+        </button>
+    </section>
+
+    <section class="fundamentals-row">
+        <article class="fund-card">
+            <header class="fund-card-header">
+                <h2>S&amp;P 500 Overview (US500)</h2>
+            </header>
+            <div class="fund-card-body">
+                <div id="fundChartSPX" class="fund-chart"></div>
+                <div class="fund-metrics">
+                    <div class="fund-metric">
+                        <span class="label">Price Trend</span>
+                        <span class="value" id="spxTrend">Loading…</span>
+                    </div>
+                    <div class="fund-metric">
+                        <span class="label">Volatility Regime</span>
+                        <span class="value" id="spxVol">Loading…</span>
+                    </div>
+                    <div class="fund-metric">
+                        <span class="label">Net Position Bias*</span>
+                        <span class="value" id="spxBias">Sample: Mild Long</span>
+                    </div>
+                </div>
+                <p class="fund-note">
+                    *Net position bias is a conceptual summary here. Replace this
+                    with your preferred COT feed when ready.
+                </p>
+            </div>
+        </article>
+
+        <article class="fund-card">
+            <header class="fund-card-header">
+                <h2>NASDAQ 100 Overview (NAS100)</h2>
+            </header>
+            <div class="fund-card-body">
+                <div id="fundChartNDX" class="fund-chart"></div>
+                <div class="fund-metrics">
+                    <div class="fund-metric">
+                        <span class="label">Price Trend</span>
+                        <span class="value" id="ndxTrend">Loading…</span>
+                    </div>
+                    <div class="fund-metric">
+                        <span class="label">Volatility Regime</span>
+                        <span class="value" id="ndxVol">Loading…</span>
+                    </div>
+                    <div class="fund-metric">
+                        <span class="label">Net Position Bias*</span>
+                        <span class="value" id="ndxBias">Sample: Neutral</span>
+                    </div>
+                </div>
+                <p class="fund-note">
+                    *Again, this is a placeholder field you can wire to live
+                    positioning data later.
+                </p>
             </div>
         </article>
     </section>
