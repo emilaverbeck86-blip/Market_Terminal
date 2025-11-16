@@ -1,6 +1,3 @@
-// ========================
-// Config
-// ========================
 const ENDPOINTS = {
     tickers: "/api/tickers",
     news: "/api/news",
@@ -15,9 +12,8 @@ let currentSymbol = DEFAULT_SYMBOL;
 let currentTheme = "dark";
 let tvReady = false;
 
-// ========================
-// Theme + menu
-// ========================
+// ================= THEME =================
+
 function initTheme() {
     const stored = localStorage.getItem("mt_theme");
     currentTheme = stored === "light" ? "light" : "dark";
@@ -30,13 +26,17 @@ function initTheme() {
             currentTheme = toggle.checked ? "light" : "dark";
             document.body.classList.toggle("light-theme", currentTheme === "light");
             localStorage.setItem("mt_theme", currentTheme);
-            // re-mount chart if on dashboard
-            if (document.body.classList.contains("dashboard")) {
+            if (document.getElementById("dashboardRoot") && !document.getElementById("dashboardRoot").classList.contains("hidden")) {
                 mountChart(currentSymbol);
+            }
+            if (document.getElementById("fundamentalsRoot") && !document.getElementById("fundamentalsRoot").classList.contains("hidden")) {
+                initFundamentalsCharts(true);
             }
         });
     }
 }
+
+// ================= MENU =================
 
 function initMenu() {
     const btn = document.getElementById("menuToggle");
@@ -53,38 +53,35 @@ function initMenu() {
         }
     });
 
-    // Tile toggles (only relevant on dashboard)
     const tileCheckboxes = dd.querySelectorAll("input[type='checkbox'][data-tile]");
     tileCheckboxes.forEach((cb) => {
         const selector = cb.getAttribute("data-tile");
-        const tile = document.querySelector(selector);
-        if (!tile) return;
-        cb.checked = !tile.classList.contains("hidden");
+        const el = document.querySelector(selector);
+        if (!el) return;
+        cb.checked = !el.classList.contains("hidden");
         cb.addEventListener("change", () => {
-            tile.classList.toggle("hidden", !cb.checked);
+            el.classList.toggle("hidden", !cb.checked);
         });
     });
 
-    // Shortcuts
     const shortcuts = dd.querySelectorAll(".shortcut-btn");
     shortcuts.forEach((btnShortcut) => {
         btnShortcut.addEventListener("click", () => {
             const symbol = btnShortcut.getAttribute("data-symbol");
             if (!symbol) return;
-            if (document.body.classList.contains("dashboard")) {
+            if (!document.getElementById("dashboardRoot").classList.contains("hidden")) {
                 onSymbolChange(symbol);
             } else {
-                // on fundamentals we just jump back to dashboard with symbol in hash
-                window.location.href = "/#symbol=" + encodeURIComponent(symbol);
+                showDashboard();
+                onSymbolChange(symbol);
             }
             dd.classList.remove("open");
         });
     });
 }
 
-// ========================
-// TradingView
-// ========================
+// ================= TRADINGVIEW =================
+
 function ensureTV() {
     if (tvReady || typeof TradingView === "undefined") return;
     tvReady = !!TradingView;
@@ -98,7 +95,6 @@ function mountChart(symbol) {
     currentSymbol = symbol;
     container.innerHTML = "";
 
-    // Use TradingView widget
     new TradingView.widget({
         symbol: symbol,
         container_id: "tv_chart",
@@ -113,27 +109,19 @@ function mountChart(symbol) {
         allow_symbol_change: false
     });
 
-    const title = document.getElementById("chartTitle");
-    if (title) {
-        title.textContent = "Chart – " + symbol;
-    }
+    const chartTitle = document.getElementById("chartTitle");
     const newsTitle = document.getElementById("newsTitle");
-    if (newsTitle) {
-        newsTitle.textContent = "News – " + symbol;
-    }
     const insightsTitle = document.getElementById("insightsTitle");
-    if (insightsTitle) {
-        insightsTitle.textContent = "Market Insights: " + symbol;
-    }
+    if (chartTitle) chartTitle.textContent = "Chart – " + symbol;
+    if (newsTitle) newsTitle.textContent = "News – " + symbol;
+    if (insightsTitle) insightsTitle.textContent = "Market Insights: " + symbol;
 
-    // Fetch per-symbol data
     loadNews(symbol);
     loadInsights(symbol);
 }
 
-// ========================
-// Ticker strip
-// ========================
+// ================= TICKERS =================
+
 async function loadTickers() {
     const strip = document.getElementById("tickerInner");
     if (!strip) return;
@@ -143,10 +131,9 @@ async function loadTickers() {
         const data = await res.json();
         if (!Array.isArray(data) || data.length === 0) return;
 
-        // Duplicate for seamless scroll
         const doubled = [...data, ...data];
-
         strip.innerHTML = "";
+
         doubled.forEach((t) => {
             const item = document.createElement("div");
             item.className = "ticker-item";
@@ -159,16 +146,12 @@ async function loadTickers() {
                 </span>
             `;
             item.addEventListener("click", () => {
-                if (document.body.classList.contains("dashboard")) {
-                    onSymbolChange(t.symbol);
-                } else {
-                    window.location.href = "/#symbol=" + encodeURIComponent(t.symbol);
-                }
+                showDashboard();
+                onSymbolChange(t.symbol);
             });
             strip.appendChild(item);
         });
     } catch (e) {
-        // fail silently
         console.error("tickers error", e);
     }
 }
@@ -179,9 +162,8 @@ function formatChange(v) {
     return `${s}${Math.abs(v).toFixed(2)}%`;
 }
 
-// ========================
-// News
-// ========================
+// ================= NEWS =================
+
 async function loadNews(symbol) {
     const list = document.getElementById("newsList");
     if (!list) return;
@@ -197,7 +179,7 @@ async function loadNews(symbol) {
             return;
         }
 
-        news.slice(0, 40).forEach((n) => {
+        news.slice(0, 50).forEach((n) => {
             const div = document.createElement("div");
             div.className = "news-item";
             const a = document.createElement("a");
@@ -220,9 +202,8 @@ async function loadNews(symbol) {
     }
 }
 
-// ========================
-// Insights
-// ========================
+// ================= INSIGHTS =================
+
 async function loadInsights(symbol) {
     const grid = document.getElementById("insightsGrid");
     const desc = document.getElementById("insightsDescription");
@@ -260,8 +241,7 @@ async function loadInsights(symbol) {
         if (profile) {
             desc.textContent = profile;
         } else {
-            desc.textContent =
-                "No company profile available at this time.";
+            desc.textContent = "No company profile available at this time.";
         }
     } catch (e) {
         console.error("insights error", e);
@@ -270,9 +250,8 @@ async function loadInsights(symbol) {
     }
 }
 
-// ========================
-// Calendar
-// ========================
+// ================= CALENDAR =================
+
 async function loadCalendar() {
     const body = document.getElementById("calendarBody");
     if (!body) return;
@@ -307,9 +286,8 @@ async function loadCalendar() {
     }
 }
 
-// ========================
-// Movers
-// ========================
+// ================= MOVERS =================
+
 async function loadMovers() {
     const gBody = document.getElementById("gainersBody");
     const lBody = document.getElementById("losersBody");
@@ -358,59 +336,156 @@ async function loadMovers() {
     }
 }
 
-// ========================
-// Symbol selection
-// ========================
-function onSymbolChange(symbol) {
-    currentSymbol = symbol;
-    mountChart(symbol);
+// ================= RESIZERS =================
+
+function initRowResizers() {
+    const container = document.querySelector(".layout-root");
+    if (!container) return;
+
+    const resizers = document.querySelectorAll(".row-resizer");
+    let isDragging = false;
+    let startY = 0;
+    let topRow, bottomRow;
+    let topHeight, bottomHeight;
+
+    resizers.forEach((resizer) => {
+        resizer.addEventListener("mousedown", (e) => {
+            const topSel = resizer.getAttribute("data-top");
+            const bottomSel = resizer.getAttribute("data-bottom");
+            topRow = document.querySelector(topSel);
+            bottomRow = document.querySelector(bottomSel);
+            if (!topRow || !bottomRow) return;
+
+            isDragging = true;
+            startY = e.clientY;
+            topHeight = topRow.getBoundingClientRect().height;
+            bottomHeight = bottomRow.getBoundingClientRect().height;
+
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
+            e.preventDefault();
+        });
+    });
+
+    function onMove(e) {
+        if (!isDragging) return;
+        const dy = e.clientY - startY;
+
+        let newTop = topHeight + dy;
+        let newBottom = bottomHeight - dy;
+        const minHeight = 120;
+        if (newTop < minHeight || newBottom < minHeight) return;
+
+        topRow.style.flex = "0 0 auto";
+        bottomRow.style.flex = "0 0 auto";
+        topRow.style.height = `${newTop}px`;
+        bottomRow.style.height = `${newBottom}px`;
+    }
+
+    function onUp() {
+        if (!isDragging) return;
+        isDragging = false;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+    }
 }
 
-// ========================
-// Fundamentals TV charts
-// ========================
-function initFundamentalsCharts() {
+function initColResizer() {
+    const row = document.getElementById("chartRow");
+    const resizer = document.getElementById("colResizer");
+    const leftTile = document.getElementById("chartTile");
+    const rightTile = document.getElementById("newsTile");
+    if (!row || !resizer || !leftTile || !rightTile) return;
+
+    function positionHandle() {
+        const rowRect = row.getBoundingClientRect();
+        const leftRect = leftTile.getBoundingClientRect();
+        const offset = leftRect.right - rowRect.left;
+        resizer.style.left = `${offset}px`;
+    }
+
+    positionHandle();
+    window.addEventListener("resize", positionHandle);
+
+    let isDragging = false;
+    let startX = 0;
+    let leftWidth = 0;
+    let rightWidth = 0;
+
+    resizer.addEventListener("mousedown", (e) => {
+        const rowRect = row.getBoundingClientRect();
+        const leftRect = leftTile.getBoundingClientRect();
+        const rightRect = rightTile.getBoundingClientRect();
+        leftWidth = leftRect.width;
+        rightWidth = rightRect.width;
+        startX = e.clientX;
+        isDragging = true;
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+        e.preventDefault();
+    });
+
+    function onMove(e) {
+        if (!isDragging) return;
+        const dx = e.clientX - startX;
+        let newLeft = leftWidth + dx;
+        let newRight = rightWidth - dx;
+        const minWidth = 220;
+        if (newLeft < minWidth || newRight < minWidth) return;
+
+        row.style.gridTemplateColumns = `${newLeft}px ${newRight}px`;
+        positionHandle();
+    }
+
+    function onUp() {
+        if (!isDragging) return;
+        isDragging = false;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+    }
+}
+
+// ================= FUNDAMENTALS =================
+
+function initFundamentalsCharts(forceRemount = false) {
     if (typeof TradingView === "undefined") return;
     const spxContainer = document.getElementById("fundChartSPX");
     const ndxContainer = document.getElementById("fundChartNDX");
+    if (!spxContainer || !ndxContainer) return;
 
-    if (spxContainer) {
-        new TradingView.widget({
-            symbol: "OANDA:US500USD",
-            container_id: "fundChartSPX",
-            autosize: true,
-            interval: "D",
-            timezone: "Etc/UTC",
-            theme: document.body.classList.contains("light-theme")
-                ? "light"
-                : "dark",
-            style: "1",
-            locale: "en",
-            hide_top_toolbar: true,
-            hide_legend: true,
-            allow_symbol_change: false
-        });
+    if (forceRemount) {
+        spxContainer.innerHTML = "";
+        ndxContainer.innerHTML = "";
     }
 
-    if (ndxContainer) {
-        new TradingView.widget({
-            symbol: "OANDA:NAS100USD",
-            container_id: "fundChartNDX",
-            autosize: true,
-            interval: "D",
-            timezone: "Etc/UTC",
-            theme: document.body.classList.contains("light-theme")
-                ? "light"
-                : "dark",
-            style: "1",
-            locale: "en",
-            hide_top_toolbar: true,
-            hide_legend: true,
-            allow_symbol_change: false
-        });
-    }
+    new TradingView.widget({
+        symbol: "OANDA:US500USD",
+        container_id: "fundChartSPX",
+        autosize: true,
+        interval: "D",
+        timezone: "Etc/UTC",
+        theme: currentTheme === "light" ? "light" : "dark",
+        style: "1",
+        locale: "en",
+        hide_top_toolbar: true,
+        hide_legend: true,
+        allow_symbol_change: false
+    });
 
-    // simple dummy text for metrics (you can wire real analytics later)
+    new TradingView.widget({
+        symbol: "OANDA:NAS100USD",
+        container_id: "fundChartNDX",
+        autosize: true,
+        interval: "D",
+        timezone: "Etc/UTC",
+        theme: currentTheme === "light" ? "light" : "dark",
+        style: "1",
+        locale: "en",
+        hide_top_toolbar: true,
+        hide_legend: true,
+        allow_symbol_change: false
+    });
+
     const spxTrend = document.getElementById("spxTrend");
     const spxVol = document.getElementById("spxVol");
     const ndxTrend = document.getElementById("ndxTrend");
@@ -421,44 +496,85 @@ function initFundamentalsCharts() {
     if (ndxVol) ndxVol.textContent = "Elevated";
 }
 
-// ========================
-// Boot
-// ========================
+// ================= VIEW SWITCH =================
+
+function showDashboard() {
+    const dash = document.getElementById("dashboardRoot");
+    const fund = document.getElementById("fundamentalsRoot");
+    if (dash) dash.classList.remove("hidden");
+    if (fund) fund.classList.add("hidden");
+}
+
+function showFundamentals() {
+    const dash = document.getElementById("dashboardRoot");
+    const fund = document.getElementById("fundamentalsRoot");
+    if (dash) dash.classList.add("hidden");
+    if (fund) fund.classList.remove("hidden");
+    ensureTV();
+    if (tvReady) {
+        initFundamentalsCharts(true);
+    } else {
+        const tryInit = () => {
+            ensureTV();
+            if (tvReady) {
+                initFundamentalsCharts(true);
+            } else {
+                setTimeout(tryInit, 200);
+            }
+        };
+        tryInit();
+    }
+}
+
+// expose for HTML
+window.marketTerminal = {
+    showDashboard,
+    showFundamentals
+};
+
+// ================= SYMBOL =================
+
+function onSymbolChange(symbol) {
+    currentSymbol = symbol;
+    ensureTV();
+    const tryMount = () => {
+        ensureTV();
+        if (tvReady) {
+            mountChart(symbol);
+        } else {
+            setTimeout(tryMount, 200);
+        }
+    };
+    tryMount();
+}
+
+// ================= BOOT =================
+
 document.addEventListener("DOMContentLoaded", () => {
     initTheme();
     initMenu();
     loadTickers();
 
-    if (document.body.classList.contains("dashboard")) {
-        // handle symbol passed in hash from fundamentals shortcuts
+    const dashRoot = document.getElementById("dashboardRoot");
+    if (dashRoot) {
+        // optional symbol from hash
         const hash = window.location.hash || "";
         const m = hash.match(/symbol=([^&]+)/i);
-        if (m) {
-            currentSymbol = decodeURIComponent(m[1]);
-        } else {
-            currentSymbol = DEFAULT_SYMBOL;
-        }
+        currentSymbol = m ? decodeURIComponent(m[1]) : DEFAULT_SYMBOL;
 
-        // Wait a bit for TradingView to be ready
-        const tryMount = () => {
+        const tryInit = () => {
             ensureTV();
             if (tvReady) {
                 mountChart(currentSymbol);
                 loadCalendar();
                 loadMovers();
             } else {
-                setTimeout(tryMount, 200);
+                setTimeout(tryInit, 200);
             }
         };
-        tryMount();
-    } else if (document.body.classList.contains("fundamentals-page")) {
-        const tryFundCharts = () => {
-            if (typeof TradingView === "undefined") {
-                setTimeout(tryFundCharts, 200);
-                return;
-            }
-            initFundamentalsCharts();
-        };
-        tryFundCharts();
+        tryInit();
+
+        initRowResizers();
+        initColResizer();
     }
 });
