@@ -3,168 +3,150 @@
 <head>
   <meta charset="UTF-8" />
   <title>Market Terminal</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
   <link rel="stylesheet" href="/static/style.css" />
-  <script src="https://s3.tradingview.com/tv.js"></script>
-  <script defer src="/static/main.js"></script>
+
+  <!-- TradingView base script -->
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body class="theme-dark">
-  <header class="top-bar">
-    <div class="top-left">
-      <span class="brand">MARKET TERMINAL</span>
+  <header class="top-header">
+    <div class="brand">MARKET TERMINAL</div>
+
+    <div id="tickerBar" class="ticker-bar">
+      <div id="tickerTrack" class="ticker-track"></div>
     </div>
 
-    <div class="ticker-wrap">
-      <div id="tickerScroll" class="ticker-scroll"></div>
-    </div>
-
-    <div class="top-right">
-      <button id="sp500Button" class="top-btn">S&P 500</button>
-      <button id="nasdaqButton" class="top-btn">NASDAQ</button>
+    <div class="shortcuts">
+      <button class="shortcut-btn" data-core-symbol="SP500" data-tv-symbol="CURRENCYCOM:US500">S&amp;P 500</button>
+      <button class="shortcut-btn" data-core-symbol="NASDAQ" data-tv-symbol="CURRENCYCOM:US100">NASDAQ</button>
 
       <div class="menu-wrapper">
-        <button id="settingsButton" class="top-btn">Menu ▾</button>
-        <div id="settingsMenu" class="settings-menu hidden">
-          <div class="menu-section">
-            <div class="menu-section-title">Theme</div>
-            <label class="toggle-row">
-              <span class="icon">🌙</span>
-              <span class="toggle-label">Dark</span>
-              <label class="switch">
-                <input type="checkbox" id="themeToggle" checked />
-                <span class="slider round"></span>
-              </label>
-              <span class="icon">☀️</span>
+        <button id="menuToggle" class="menu-toggle">Menu ▾</button>
+        <div id="menuDropdown" class="menu-dropdown">
+          <div class="menu-group">
+            <div class="menu-label">Theme</div>
+            <label class="switch">
+              <input id="themeToggle" type="checkbox" />
+              <span class="slider"></span>
+              <span class="sun">☀</span>
+              <span class="moon">🌙</span>
             </label>
-          </div>
-
-          <div class="menu-section">
-            <div class="menu-section-title">Tiles</div>
-            <label class="check-row">
-              <input type="checkbox" data-tile="tile-chart" checked />
-              <span>Chart</span>
-            </label>
-            <label class="check-row">
-              <input type="checkbox" data-tile="tile-insights" checked />
-              <span>Market Insights</span>
-            </label>
-            <label class="check-row">
-              <input type="checkbox" data-tile="tile-movers" checked />
-              <span>Top Movers</span>
-            </label>
-            <label class="check-row">
-              <input type="checkbox" data-tile="tile-news" checked />
-              <span>News</span>
-            </label>
-          </div>
-
-          <div class="menu-section">
-            <div class="menu-section-title">Shortcuts</div>
-            <button id="heatmapButton" class="menu-link">S&P 500 Heatmap</button>
           </div>
         </div>
       </div>
     </div>
   </header>
 
-  <!-- heatmap overlay -->
-  <div id="heatmapOverlay" class="heatmap-overlay">
-    <div class="heatmap-inner">
-      <button id="heatmapClose" class="heatmap-close">✕</button>
-      <div id="heatmapWidget" class="heatmap-widget"></div>
-    </div>
-  </div>
-
-  <!-- MAIN GRID: 2x2, always filled -->
-  <main id="gridRoot" class="grid-root">
-    <!-- row 1 left -->
-    <section class="tile" id="tile-chart" data-row="1">
-      <div class="tile-header">
-        <span id="chartTitle">Chart – AAPL</span>
-        <button class="tile-close" data-tile-close="tile-chart">–</button>
-      </div>
-      <div class="tile-body chart-body">
-        <div id="tv_container" class="tv-container"></div>
-      </div>
-      <div class="resize-handle"></div>
-    </section>
-
-    <!-- row 1 right -->
-    <section class="tile" id="tile-insights" data-row="1">
-      <div class="tile-header">
-        <span id="insightsTitle">Market Insights: AAPL</span>
-        <button class="tile-close" data-tile-close="tile-insights">–</button>
-      </div>
-      <div class="tile-body insights-body">
-        <div class="insights-grid">
-          <div class="insight-box">
-            <div class="label">1W</div>
-            <div class="value" id="perf-1W">—</div>
-          </div>
-          <div class="insight-box">
-            <div class="label">1M</div>
-            <div class="value" id="perf-1M">—</div>
-          </div>
-          <div class="insight-box">
-            <div class="label">3M</div>
-            <div class="value" id="perf-3M">—</div>
-          </div>
-          <div class="insight-box">
-            <div class="label">6M</div>
-            <div class="value" id="perf-6M">—</div>
-          </div>
-          <div class="insight-box">
-            <div class="label">YTD</div>
-            <div class="value" id="perf-YTD">—</div>
-          </div>
-          <div class="insight-box">
-            <div class="label">1Y</div>
-            <div class="value" id="perf-1Y">—</div>
-          </div>
+  <main id="layoutRoot">
+    <!-- Row 1: Chart + Insights -->
+    <section class="tile-row" data-row="1">
+      <div class="tile tile-chart" data-tile="chart">
+        <div class="tile-header">
+          <span id="chartTitle">Chart – AAPL</span>
         </div>
-        <p id="insightsDescription" class="insights-description">
-          Loading description…
-        </p>
+        <div id="tv_chart" class="tile-body chart-body"></div>
       </div>
-      <div class="resize-handle"></div>
-    </section>
 
-    <!-- row 2 left -->
-    <section class="tile" id="tile-movers" data-row="2">
-      <div class="tile-header">
-        <span>Top Movers (Watchlist)</span>
-        <button class="tile-close" data-tile-close="tile-movers">–</button>
-      </div>
-      <div class="tile-body movers-body">
-        <div class="movers-columns">
-          <div class="movers-col">
-            <div class="movers-title">Top Gainers</div>
-            <table class="movers-table">
-              <tbody id="gainersBody"></tbody>
-            </table>
+      <div class="row-resizer" data-row-resizer></div>
+
+      <div class="tile tile-insights" data-tile="insights">
+        <div class="tile-header">
+          <span id="insightsTitle">Market Insights: AAPL</span>
+        </div>
+        <div class="tile-body insights-body" id="insightsBody">
+          <div class="insight-grid">
+            <div class="insight-cell">
+              <div class="label">1W</div>
+              <div id="insight1W" class="value">–</div>
+            </div>
+            <div class="insight-cell">
+              <div class="label">1M</div>
+              <div id="insight1M" class="value">–</div>
+            </div>
+            <div class="insight-cell">
+              <div class="label">3M</div>
+              <div id="insight3M" class="value">–</div>
+            </div>
+            <div class="insight-cell">
+              <div class="label">6M</div>
+              <div id="insight6M" class="value">–</div>
+            </div>
+            <div class="insight-cell">
+              <div class="label">YTD</div>
+              <div id="insightYTD" class="value">–</div>
+            </div>
+            <div class="insight-cell">
+              <div class="label">1Y</div>
+              <div id="insight1Y" class="value">–</div>
+            </div>
           </div>
-          <div class="movers-col">
-            <div class="movers-title">Top Losers</div>
-            <table class="movers-table">
-              <tbody id="losersBody"></tbody>
-            </table>
+          <div class="insight-profile" id="insightProfile">
+            Loading profile…
           </div>
         </div>
       </div>
-      <div class="resize-handle"></div>
     </section>
 
-    <!-- row 2 right -->
-    <section class="tile" id="tile-news" data-row="2">
-      <div class="tile-header">
-        <span>News</span>
-        <button class="tile-close" data-tile-close="tile-news">–</button>
+    <!-- Row 2: Movers + News -->
+    <section class="tile-row" data-row="2">
+      <div class="tile tile-movers" data-tile="movers">
+        <div class="tile-header">
+          <span>Top Movers (Watchlist)</span>
+        </div>
+        <div class="tile-body movers-body">
+          <div class="movers-columns">
+            <div>
+              <div class="movers-heading">Top Gainers</div>
+              <table>
+                <tbody id="gainersBody"></tbody>
+              </table>
+            </div>
+            <div>
+              <div class="movers-heading">Top Losers</div>
+              <table>
+                <tbody id="losersBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="tile-body news-body" id="newsList">
-        Loading news…
+
+      <div class="row-resizer" data-row-resizer></div>
+
+      <div class="tile tile-news" data-tile="news">
+        <div class="tile-header">
+          <span>News</span>
+        </div>
+        <div class="tile-body news-body">
+          <div id="newsList" class="news-list">
+            Loading news…
+          </div>
+        </div>
       </div>
-      <div class="resize-handle"></div>
+    </section>
+
+    <!-- Row 3: Economic Calendar + DOM -->
+    <section class="tile-row" data-row="3">
+      <div class="tile tile-calendar" data-tile="calendar">
+        <div class="tile-header">
+          <span>Economic Calendar (US)</span>
+        </div>
+        <div id="tv_calendar" class="tile-body tv-embed-body"></div>
+      </div>
+
+      <div class="row-resizer" data-row-resizer></div>
+
+      <div class="tile tile-dom" data-tile="dom">
+        <div class="tile-header">
+          <span>Depth of Market (NAS100)</span>
+        </div>
+        <div id="tv_dom" class="tile-body tv-embed-body"></div>
+      </div>
     </section>
   </main>
+
+  <script src="/static/main.js"></script>
 </body>
 </html>
