@@ -27,6 +27,7 @@ const fundamentalsBtn = document.getElementById("fundamentalsBtn");
 const menuToggle = document.getElementById("menuToggle");
 const menuPanel = document.getElementById("menuPanel");
 const themeSwitch = document.getElementById("themeSwitch");
+const heatmapShortcut = document.getElementById("heatmapShortcut");
 
 const row1 = document.getElementById("row1");
 const row2 = document.getElementById("row2");
@@ -43,7 +44,7 @@ const tileNews = document.getElementById("tile-news");
 let currentSymbol = "AAPL";
 let tickerNodes = new Map();
 let tickerDataCache = [];
-let theme = "dark"; // "dark" | "light"
+let theme = "dark";
 let tvWidget = null;
 
 // ---------- Utils ----------
@@ -78,7 +79,7 @@ const setTheme = (mode) => {
   body.classList.add(mode === "dark" ? "theme-dark" : "theme-light");
   themeSwitch.checked = mode === "light";
   localStorage.setItem("mt_theme", mode);
-  // remount chart with new theme
+
   if (currentSymbol) {
     mountTradingView(currentSymbol);
   }
@@ -134,7 +135,7 @@ function buildTickerRow(items) {
   tickerNodes.clear();
   tickerDataCache = items.slice();
 
-  const repeated = [...items, ...items]; // helps with continuous scroll
+  const repeated = [...items, ...items];
   repeated.forEach((tk) => {
     const item = document.createElement("div");
     item.className = "ticker-item";
@@ -187,6 +188,7 @@ function liveUpdateTickers(items) {
 async function loadTickers() {
   try {
     const r = await fetch(TICKER_ENDPOINT);
+    if (!r.ok) return;
     const data = await r.json();
     if (!tickerScroll.childElementCount) {
       buildTickerRow(data);
@@ -197,7 +199,7 @@ async function loadTickers() {
       liveUpdateTickers(data);
     }
   } catch (e) {
-    // keep previous
+    // ignore
   }
 }
 
@@ -234,6 +236,7 @@ async function loadNews(symbol) {
   newsList.innerHTML = '<div class="muted">Loading news…</div>';
   try {
     const r = await fetch(`${NEWS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
+    if (!r.ok) throw new Error("news error");
     const data = await r.json();
     renderNewsList(symbol, data);
   } catch (e) {
@@ -245,7 +248,6 @@ async function loadNews(symbol) {
 // ---------- Insights ----------
 function renderInsights(symbol, data) {
   insightsSymbolEl.textContent = symbol;
-
   const perf = data.perf || {};
   ["1W", "1M", "3M", "6M", "YTD", "1Y"].forEach((key) => {
     const el = perfEls[key];
@@ -275,6 +277,7 @@ async function loadInsights(symbol) {
     const r = await fetch(
       `${INSIGHTS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`
     );
+    if (!r.ok) throw new Error("insights error");
     const data = await r.json();
     renderInsights(symbol, data);
   } catch (e) {
@@ -316,6 +319,7 @@ function renderMovers(data) {
 async function loadMovers() {
   try {
     const r = await fetch(MOVERS_ENDPOINT);
+    if (!r.ok) return;
     const data = await r.json();
     renderMovers(data);
   } catch (e) {
@@ -330,7 +334,7 @@ async function onSymbolSelect(symbol) {
   await Promise.all([loadNews(symbol), loadInsights(symbol)]);
 }
 
-// ---------- Menu / theme / shortcuts ----------
+// ---------- Menu / theme / tiles ----------
 function initMenu() {
   menuToggle.addEventListener("click", () => {
     menuPanel.classList.toggle("open");
@@ -346,12 +350,18 @@ function initMenu() {
     setTheme(themeSwitch.checked ? "light" : "dark");
   });
 
-  document.querySelectorAll(".menu-shortcut").forEach((btn) => {
+  document.querySelectorAll(".menu-shortcut[data-symbol]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const sym = btn.dataset.symbol;
       if (sym) onSymbolSelect(sym);
     });
   });
+
+  if (heatmapShortcut) {
+    heatmapShortcut.addEventListener("click", () => {
+      window.location.href = "/heatmap";
+    });
+  }
 
   document.querySelectorAll("[data-tile-toggle]").forEach((check) => {
     check.addEventListener("change", () => {
@@ -458,7 +468,7 @@ function initColResizingRow1() {
   });
 }
 
-// ---------- Ticker scroll pause on hover ----------
+// ---------- Ticker scroll pause ----------
 function initTickerScrollPause() {
   const bar = document.querySelector(".ticker-bar");
   bar.addEventListener("mouseenter", () => {
@@ -477,7 +487,6 @@ document.addEventListener("DOMContentLoaded", () => {
   initColResizingRow1();
   initTickerScrollPause();
 
-  // starting layout heights
   row1.style.height = "420px";
   row2.style.height = "260px";
   row3.style.height = "260px";
@@ -487,6 +496,8 @@ document.addEventListener("DOMContentLoaded", () => {
   loadInsights(currentSymbol);
   loadTickers();
   loadMovers();
-  setInterval(loadTickers, 15000);
-  setInterval(loadMovers, 45000);
+
+  // Longer intervals to avoid hammering Yahoo
+  setInterval(loadTickers, 60000); // 60s
+  setInterval(loadMovers, 120000); // 2 min
 });
