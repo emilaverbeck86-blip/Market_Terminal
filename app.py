@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 
 import requests
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -33,20 +33,25 @@ YAHOO_PROFILE_URL = (
     "https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}"
     "?modules=assetProfile"
 )
-YAHOO_NEWS_URL = (
-    "https://query2.finance.yahoo.com/v1/finance/search"
-)  # q, newsCount
+YAHOO_NEWS_URL = "https://query2.finance.yahoo.com/v1/finance/search"
 
 
 # ---------- Utility helpers ----------
 
 def yahoo_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Fetch latest quotes from Yahoo. Never raise – on error returns {}."""
     if not symbols:
         return {}
-    params = {"symbols": ",".join(symbols)}
-    r = requests.get(YAHOO_QUOTE_URL, params=params, timeout=8)
-    r.raise_for_status()
-    data = r.json().get("quoteResponse", {}).get("result", [])
+    try:
+        params = {"symbols": ",".join(symbols)}
+        r = requests.get(YAHOO_QUOTE_URL, params=params, timeout=8)
+        # Yahoo sometimes returns 429; just bail out gracefully.
+        if r.status_code != 200:
+            return {}
+        data = r.json().get("quoteResponse", {}).get("result", [])
+    except requests.RequestException:
+        return {}
+
     out: Dict[str, Dict[str, Any]] = {}
     for q in data:
         sym = q.get("symbol")
@@ -63,12 +68,9 @@ def yahoo_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
 
 
 def yahoo_perf_and_profile(symbol: str) -> Dict[str, Any]:
-    # Performance: use 1Y daily chart and compute 1W/1M/3M/6M/YTD/1Y
-    out = {
-        "symbol": symbol,
-        "perf": {},
-        "profile": "",
-    }
+    out = {"symbol": symbol, "perf": {}, "profile": ""}
+
+    # Performance
     try:
         chart_params = {"range": "1y", "interval": "1d"}
         cr = requests.get(
@@ -76,7 +78,8 @@ def yahoo_perf_and_profile(symbol: str) -> Dict[str, Any]:
             params=chart_params,
             timeout=10,
         )
-        cr.raise_for_status()
+        if cr.status_code != 200:
+            raise ValueError("chart error")
         cdata = cr.json()["chart"]["result"][0]
         closes = cdata["indicators"]["quote"][0]["close"]
         timestamps = cdata["timestamp"]
@@ -96,9 +99,8 @@ def yahoo_perf_and_profile(symbol: str) -> Dict[str, Any]:
         end_date = series[-1][0].date()
 
         def pct_change(days: int) -> float | None:
-            target_date = end_date.toordinal() - days
-            # find first point with date ordinal <= target_date
-            candidates = [p for (d, p) in series if d.date().toordinal() <= target_date]
+            target_ord = end_date.toordinal() - days
+            candidates = [p for (d, p) in series if d.date().toordinal() <= target_ord]
             if not candidates:
                 return None
             start = candidates[-1]
@@ -118,12 +120,12 @@ def yahoo_perf_and_profile(symbol: str) -> Dict[str, Any]:
     # Profile
     try:
         pr = requests.get(YAHOO_PROFILE_URL.format(symbol=symbol), timeout=8)
-        pr.raise_for_status()
+        if pr.status_code != 200:
+            raise ValueError("profile error")
         result = pr.json()["quoteSummary"]["result"]
         if result:
             summary = result[0]["assetProfile"].get("longBusinessSummary", "")
             if summary:
-                # shorten to ~6 sentences
                 parts = summary.split(". ")
                 out["profile"] = ". ".join(parts[:6]).strip()
     except Exception:
@@ -136,54 +138,54 @@ def yahoo_symbol_news(symbol: str, limit: int = 30) -> List[Dict[str, Any]]:
     try:
         params = {"q": symbol, "newsCount": limit}
         r = requests.get(YAHOO_NEWS_URL, params=params, timeout=8)
-        r.raise_for_status()
+        if r.status_code != 200:
+            return []
         data = r.json()
         items = data.get("news", [])
-        out = []
-        for n in items:
-            title = n.get("title")
-            link = n.get("link")
-            publisher = n.get("publisher")
-            ts = n.get("providerPublishTime")
-            if not title or not link:
-                continue
-            when = ""
-            if ts:
-                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-                when = dt.strftime("%Y-%m-%d %H:%M UTC")
-            out.append(
-                {
-                    "title": title,
-                    "url": link,
-                    "source": publisher or "",
-                    "published_at": when,
-                }
-            )
-        return out
-    except Exception:
-        # fallback: empty list
+    except requests.RequestException:
         return []
 
+    out: List[Dict[str, Any]] = []
+    for n in items:
+        title = n.get("title")
+        link = n.get("link")
+        publisher = n.get("publisher")
+        ts = n.get("providerPublishTime")
+        if not title or not link:
+            continue
+        when = ""
+        if ts:
+            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            when = dt.strftime("%Y-%m-%d %H:%M UTC")
+        out.append(
+            {
+                "title": title,
+                "url": link,
+                "source": publisher or "",
+                "published_at": when,
+            }
+        )
+    return out
 
-# ---------- Routes: pages ----------
+
+# ---------- Pages ----------
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse(
-        "index.html",
-        {"request": request},
-    )
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.get("/fundamentals", response_class=HTMLResponse)
 async def fundamentals_page(request: Request):
-    return templates.TemplateResponse(
-        "fundamentals.html",
-        {"request": request},
-    )
+    return templates.TemplateResponse("fundamentals.html", {"request": request})
 
 
-# ---------- Routes: APIs ----------
+@app.get("/heatmap", response_class=HTMLResponse)
+async def heatmap_page(request: Request):
+    return templates.TemplateResponse("heatmap.html", {"request": request})
+
+
+# ---------- APIs ----------
 
 @app.get("/api/tickers")
 async def api_tickers():
@@ -198,7 +200,6 @@ async def api_tickers():
 @app.get("/api/insights")
 async def api_insights(symbol: str):
     info = yahoo_perf_and_profile(symbol)
-    # convert None to null-friendly
     return JSONResponse(info)
 
 
@@ -221,7 +222,6 @@ async def api_movers():
     return JSONResponse({"gainers": gainers, "losers": losers})
 
 
-# simple health check
 @app.get("/health")
 async def health():
     return {"status": "ok"}
