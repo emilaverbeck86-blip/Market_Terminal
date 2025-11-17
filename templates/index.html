@@ -1,9 +1,8 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <title>Market Terminal</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="/static/style.css" />
   <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
@@ -11,210 +10,217 @@
   <header class="top-bar">
     <div class="brand">MARKET TERMINAL</div>
 
-    <div class="ticker-bar">
-      <div id="tickerScroll" class="ticker-scroll"></div>
+    <div class="ticker-bar" id="ticker-bar">
+      <div class="ticker-track" id="ticker-track"></div>
     </div>
 
     <div class="top-actions">
-      <button id="fundamentalsBtn" class="top-btn">Fundamentals</button>
-
       <div class="menu-wrapper">
-        <button id="menuToggle" class="top-btn">Menu ▾</button>
-        <div id="menuPanel" class="menu-panel">
+        <button id="menu-toggle" class="menu-button">Menu ▾</button>
+        <div id="menu-panel" class="menu-panel">
           <div class="menu-section">
-            <div class="menu-label">
-              Theme
-              <span class="theme-icons">
-                <span class="icon-sun">☀️</span>
-                <label class="switch">
-                  <input id="themeSwitch" type="checkbox" />
-                  <span class="slider"></span>
-                </label>
-                <span class="icon-moon">🌙</span>
-              </span>
+            <div class="menu-label">Theme</div>
+            <div class="theme-toggle">
+              <span class="theme-icon">🌙</span>
+              <label class="switch">
+                <input type="checkbox" id="theme-toggle" />
+                <span class="slider"></span>
+              </label>
+              <span class="theme-icon">☀️</span>
             </div>
           </div>
 
           <div class="menu-section">
             <div class="menu-label">Shortcuts</div>
-            <button class="menu-shortcut" data-symbol="OANDA:US500USD">
+            <button class="shortcut-btn" data-symbol="OANDA:US500USD">
               S&amp;P 500 (US500)
             </button>
-            <button class="menu-shortcut" data-symbol="OANDA:NAS100USD">
+            <button class="shortcut-btn" data-symbol="OANDA:NAS100USD">
               NASDAQ 100 (NAS100)
-            </button>
-            <button id="heatmapShortcut" class="menu-shortcut">
-              S&amp;P 500 Heatmap
             </button>
           </div>
 
           <div class="menu-section">
             <div class="menu-label">Tiles</div>
-            <label class="menu-check">
-              <input type="checkbox" data-tile-toggle="chart" checked />
+            <label class="tile-toggle">
+              <input type="checkbox" class="tile-checkbox" data-tile="chart" checked />
               <span>Chart</span>
             </label>
-            <label class="menu-check">
-              <input type="checkbox" data-tile-toggle="news" checked />
+            <label class="tile-toggle">
+              <input type="checkbox" class="tile-checkbox" data-tile="news" checked />
               <span>News</span>
             </label>
-            <label class="menu-check">
-              <input type="checkbox" data-tile-toggle="insights" checked />
+            <label class="tile-toggle">
+              <input type="checkbox" class="tile-checkbox" data-tile="insights" checked />
               <span>Market Insights</span>
             </label>
-            <label class="menu-check">
-              <input type="checkbox" data-tile-toggle="macro" checked />
+            <label class="tile-toggle">
+              <input type="checkbox" class="tile-checkbox" data-tile="macro" checked />
               <span>Macro Maps</span>
             </label>
-            <label class="menu-check">
-              <input type="checkbox" data-tile-toggle="calendar" checked />
+            <label class="tile-toggle">
+              <input type="checkbox" class="tile-checkbox" data-tile="calendar" checked />
               <span>Economic Calendar</span>
             </label>
-            <label class="menu-check">
-              <input type="checkbox" data-tile-toggle="movers" checked />
+            <label class="tile-toggle">
+              <input type="checkbox" class="tile-checkbox" data-tile="movers" checked />
               <span>Top Movers</span>
             </label>
+          </div>
+
+          <div class="menu-section">
+            <div class="menu-label">Tools</div>
+            <button id="heatmap-link" class="shortcut-btn">S&amp;P 500 Heatmap</button>
           </div>
         </div>
       </div>
     </div>
   </header>
 
-  <main id="mainLayout" class="layout">
+  <main class="layout">
     <!-- Row 1: chart + news -->
-    <section id="row1" class="row row-1">
-      <div class="row-inner">
-        <article id="tile-chart" class="tile tile-chart" data-tile-id="chart">
-          <header class="tile-header">
-            <div class="tile-title">
-              Chart – <span id="chartTitle">AAPL</span>
-            </div>
-            <button class="tile-close" data-close-tile="chart">−</button>
-          </header>
-          <div id="tv_container" class="tv-container"></div>
-        </article>
+    <section class="row" data-row="1">
+      <article class="tile" id="tile-chart">
+        <header class="tile-header">
+          <h2 id="chart-title">Chart – AAPL</h2>
+          <button class="tile-close" data-tile="chart">−</button>
+        </header>
+        <div class="tile-body chart-body">
+          <div id="tv-chart" class="tv-chart"></div>
+        </div>
+      </article>
 
-        <div id="colResizerRow1" class="col-resizer"></div>
+      <div class="col-resizer" data-resizer="1"></div>
 
-        <article id="tile-news" class="tile tile-news" data-tile-id="news">
-          <header class="tile-header">
-            <div class="tile-title">
-              News – <span id="newsSymbol">AAPL</span>
-            </div>
-            <button class="tile-close" data-close-tile="news">−</button>
-          </header>
-          <div id="newsList" class="news-list">
-            <div class="muted">Loading news…</div>
+      <article class="tile" id="tile-news">
+        <header class="tile-header">
+          <h2>News – <span id="news-symbol">AAPL</span></h2>
+          <button class="tile-close" data-tile="news">−</button>
+        </header>
+        <div class="tile-body news-body">
+          <div id="news-list" class="news-list">
+            <div class="placeholder">Loading news…</div>
           </div>
-        </article>
-      </div>
-      <div id="rowResizer1" class="row-resizer"></div>
+        </div>
+      </article>
     </section>
+
+    <div class="row-resizer" data-row="1"></div>
 
     <!-- Row 2: insights + macro -->
-    <section id="row2" class="row row-2">
-      <div class="row-inner">
-        <article id="tile-insights" class="tile tile-insights" data-tile-id="insights">
-          <header class="tile-header">
-            <div class="tile-title">
-              Market Insights: <span id="insightsSymbol">AAPL</span>
+    <section class="row" data-row="2">
+      <article class="tile" id="tile-insights">
+        <header class="tile-header">
+          <h2>Market Insights: <span id="insights-symbol">AAPL</span></h2>
+          <button class="tile-close" data-tile="insights">−</button>
+        </header>
+        <div class="tile-body insights-body">
+          <div class="insights-grid">
+            <div class="insight-cell">
+              <div class="insight-label">1W</div>
+              <div class="insight-value" id="insight-1W">—</div>
             </div>
-            <button class="tile-close" data-close-tile="insights">−</button>
-          </header>
-          <div class="insights-body">
-            <div class="insights-grid">
-              <div class="insight-cell">
-                <div class="label">1W</div>
-                <div id="perf1W" class="value">—</div>
-              </div>
-              <div class="insight-cell">
-                <div class="label">1M</div>
-                <div id="perf1M" class="value">—</div>
-              </div>
-              <div class="insight-cell">
-                <div class="label">3M</div>
-                <div id="perf3M" class="value">—</div>
-              </div>
-              <div class="insight-cell">
-                <div class="label">6M</div>
-                <div id="perf6M" class="value">—</div>
-              </div>
-              <div class="insight-cell">
-                <div class="label">YTD</div>
-                <div id="perfYTD" class="value">—</div>
-              </div>
-              <div class="insight-cell">
-                <div class="label">1Y</div>
-                <div id="perf1Y" class="value">—</div>
-              </div>
+            <div class="insight-cell">
+              <div class="insight-label">1M</div>
+              <div class="insight-value" id="insight-1M">—</div>
             </div>
-            <p id="companyProfile" class="company-profile">
-              No profile available.
-            </p>
+            <div class="insight-cell">
+              <div class="insight-label">3M</div>
+              <div class="insight-value" id="insight-3M">—</div>
+            </div>
+            <div class="insight-cell">
+              <div class="insight-label">6M</div>
+              <div class="insight-value" id="insight-6M">—</div>
+            </div>
+            <div class="insight-cell">
+              <div class="insight-label">YTD</div>
+              <div class="insight-value" id="insight-YTD">—</div>
+            </div>
+            <div class="insight-cell">
+              <div class="insight-label">1Y</div>
+              <div class="insight-value" id="insight-1Y">—</div>
+            </div>
           </div>
-        </article>
+          <p class="insights-note" id="insights-note">
+            No performance snapshot.
+          </p>
+        </div>
+      </article>
 
-        <article id="tile-macro" class="tile tile-macro" data-tile-id="macro">
-          <header class="tile-header">
-            <div class="tile-title">Macro Maps</div>
-            <button class="tile-close" data-close-tile="macro">−</button>
-          </header>
-          <div class="macro-body">
-            <iframe
-              title="Macro Maps"
-              src="https://www.tradingview.com/macro/"
-              loading="lazy"
-              referrerpolicy="no-referrer-when-downgrade">
-            </iframe>
+      <div class="col-resizer" data-resizer="2"></div>
+
+      <article class="tile" id="tile-macro">
+        <header class="tile-header">
+          <h2>Macro Maps</h2>
+          <button class="tile-close" data-tile="macro">−</button>
+        </header>
+        <div class="tile-body macro-body">
+          <p class="macro-text">
+            TradingView’s Macro Maps page cannot be embedded directly (their
+            website blocks iframes), but you can open the full interactive map
+            in a new tab:
+          </p>
+          <div class="macro-links">
+            <a href="https://www.tradingview.com/macro/" target="_blank" rel="noreferrer">
+              Open TradingView Macro Maps
+            </a>
           </div>
-        </article>
-      </div>
-      <div id="rowResizer2" class="row-resizer"></div>
+        </div>
+      </article>
     </section>
+
+    <div class="row-resizer" data-row="2"></div>
 
     <!-- Row 3: calendar + movers -->
-    <section id="row3" class="row row-3">
-      <div class="row-inner row3-inner">
-        <article id="tile-calendar" class="tile tile-calendar" data-tile-id="calendar">
-          <header class="tile-header">
-            <div class="tile-title">Economic Calendar (US)</div>
-            <button class="tile-close" data-close-tile="calendar">−</button>
-          </header>
-          <div class="calendar-body">
-            <iframe
-              title="Economic Calendar"
-              src="https://www.tradingview.com/economic-calendar/calendar?countries=us"
-              loading="lazy"
-              referrerpolicy="no-referrer-when-downgrade">
-            </iframe>
+    <section class="row" data-row="3">
+      <article class="tile" id="tile-calendar">
+        <header class="tile-header">
+          <h2>Economic Calendar (US)</h2>
+          <button class="tile-close" data-tile="calendar">−</button>
+        </header>
+        <div class="tile-body calendar-body">
+          <!-- TradingView official events widget (no iframe issues) -->
+          <div class="tradingview-widget-container">
+            <div class="tradingview-widget-container__widget" id="tv-calendar-widget"></div>
           </div>
-        </article>
+        </div>
+      </article>
 
-        <article id="tile-movers" class="tile tile-movers" data-tile-id="movers">
-          <header class="tile-header">
-            <div class="tile-title">Top Movers (Watchlist)</div>
-            <button class="tile-close" data-close-tile="movers">−</button>
-          </header>
-          <div class="movers-body">
-            <div class="movers-cols">
-              <div>
-                <div class="subheader">Top Gainers</div>
-                <table>
-                  <tbody id="gainersBody"></tbody>
-                </table>
-              </div>
-              <div>
-                <div class="subheader">Top Losers</div>
-                <table>
-                  <tbody id="losersBody"></tbody>
-                </table>
-              </div>
+      <div class="col-resizer" data-resizer="3"></div>
+
+      <article class="tile" id="tile-movers">
+        <header class="tile-header">
+          <h2>Top Movers (Watchlist)</h2>
+          <button class="tile-close" data-tile="movers">−</button>
+        </header>
+        <div class="tile-body movers-body">
+          <div class="movers-columns">
+            <div>
+              <h3>Top Gainers</h3>
+              <ul id="gainers-list" class="movers-list"></ul>
+            </div>
+            <div>
+              <h3>Top Losers</h3>
+              <ul id="losers-list" class="movers-list"></ul>
             </div>
           </div>
-        </article>
-      </div>
+        </div>
+      </article>
     </section>
   </main>
+
+  <!-- TradingView calendar widget script (keeps loading even with theme changes) -->
+  <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-events.js" async>
+  {
+    "width": "100%",
+    "height": "100%",
+    "colorTheme": "dark",
+    "isTransparent": true,
+    "locale": "en",
+    "importanceFilter": "-1,0,1",
+    "country": "US"
+  }
+  </script>
 
   <script src="/static/main.js"></script>
 </body>
