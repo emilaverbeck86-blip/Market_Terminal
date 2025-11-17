@@ -1,239 +1,167 @@
-import os
+import time
+import math
+from datetime import datetime, timedelta
 from typing import List, Dict, Any
 
 import requests
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 app = FastAPI()
 
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
-# ---------------------------------------------------------------------
-# Watchlist / static fallbacks
-# ---------------------------------------------------------------------
+# -------------------------------------------------------------------
+# Config
+# -------------------------------------------------------------------
 
-WATCHLIST: List[str] = [
+YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
+YAHOO_NEWS_RSS = "https://feeds.finance.yahoo.com/rss/2.0/headline"
+
+WATCHLIST = [
     "AAPL", "MSFT", "NVDA", "META", "GOOGL", "TSLA", "AVGO", "AMD",
     "NFLX", "ADBE", "INTC", "CSCO", "QCOM", "TXN", "CRM",
     "JPM", "BAC", "WFC", "GS", "V", "MA",
-    "XOM", "CVX",
-    "UNH", "LLY", "ABBV",
-    "SPY", "QQQ"
+    "XOM", "CVX", "UNH", "LLY", "ABBV"
 ]
 
-# simple always-available fallback so UI never looks empty
-STATIC_TICKERS: List[Dict[str, Any]] = [
-    {"symbol": "AAPL", "price": 272.5, "changePercent": -0.2},
-    {"symbol": "MSFT", "price": 510.2, "changePercent": 1.1},
-    {"symbol": "NVDA", "price": 190.1, "changePercent": 1.8},
-    {"symbol": "META", "price": 320.4, "changePercent": -0.4},
-    {"symbol": "GOOGL", "price": 276.4, "changePercent": 0.6},
-    {"symbol": "TSLA", "price": 202.0, "changePercent": -0.9},
-    {"symbol": "AVGO", "price": 342.7, "changePercent": 0.7},
-    {"symbol": "AMD", "price": 156.3, "changePercent": -0.5},
-    {"symbol": "NFLX", "price": 112.1, "changePercent": -3.6},
-    {"symbol": "ADBE", "price": 333.4, "changePercent": -0.8},
-    {"symbol": "INTC", "price": 35.8, "changePercent": -1.3},
-    {"symbol": "CSCO", "price": 78.0, "changePercent": 0.8},
-    {"symbol": "QCOM", "price": 173.9, "changePercent": -0.3},
-    {"symbol": "TXN", "price": 159.3, "changePercent": -1.9},
-    {"symbol": "CRM", "price": 255.4, "changePercent": 0.4},
-    {"symbol": "JPM", "price": 303.6, "changePercent": 1.3},
-    {"symbol": "BAC", "price": 52.4, "changePercent": -0.5},
-    {"symbol": "WFC", "price": 85.0, "changePercent": 0.3},
-    {"symbol": "GS", "price": 309.8, "changePercent": 0.1},
-    {"symbol": "V", "price": 265.0, "changePercent": 0.2},
-    {"symbol": "MA", "price": 405.1, "changePercent": -0.1},
-    {"symbol": "XOM", "price": 112.5, "changePercent": -0.6},
-    {"symbol": "CVX", "price": 148.2, "changePercent": 0.3},
-    {"symbol": "UNH", "price": 510.7, "changePercent": 0.5},
-    {"symbol": "LLY", "price": 785.3, "changePercent": 0.9},
-    {"symbol": "ABBV", "price": 168.4, "changePercent": -0.2},
-    {"symbol": "SPY", "price": 675.9, "changePercent": -0.1},
-    {"symbol": "QQQ", "price": 525.4, "changePercent": -0.2},
-]
+# simple in-memory caches to avoid 429s
+_ticker_cache: Dict[str, Any] = {"data": None, "ts": 0.0}
+_movers_cache: Dict[str, Any] = {"data": None, "ts": 0.0}
 
-YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
 
+# -------------------------------------------------------------------
+# Helpers
+# -------------------------------------------------------------------
 
 def yahoo_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
-    """Safely fetch quotes from Yahoo. On any error, return empty list."""
-    if not symbols:
-        return []
-    try:
-        params = {"symbols": ",".join(symbols)}
-        resp = requests.get(YAHOO_QUOTE_URL, params=params, timeout=6)
-        if resp.status_code != 200:
-            return []
-        data = resp.json().get("quoteResponse", {}).get("result", [])
-    except Exception:
-        return []
-
-    out: List[Dict[str, Any]] = []
+    """Fetch quotes from Yahoo Finance."""
+    params = {"symbols": ",".join(symbols)}
+    r = requests.get(YAHOO_QUOTE_URL, params=params, timeout=6)
+    r.raise_for_status()
+    data = r.json().get("quoteResponse", {}).get("result", [])
+    quotes: List[Dict[str, Any]] = []
     for q in data:
         symbol = q.get("symbol")
         price = q.get("regularMarketPrice")
-        change_pct = q.get("regularMarketChangePercent")
-        if symbol is None or price is None:
+        change = q.get("regularMarketChangePercent")
+        if symbol is None or price is None or change is None:
             continue
-        out.append(
+        quotes.append(
             {
                 "symbol": symbol,
-                "price": float(price),
-                "changePercent": float(change_pct) if change_pct is not None else 0.0,
+                "price": round(float(price), 2),
+                "change_pct": round(float(change), 2),
             }
         )
-    return out
+    return quotes
 
 
-# ---------------------------------------------------------------------
-# RSS helper for news (no extra libs)
-# ---------------------------------------------------------------------
-
-def _between(text: str, start: str, end: str) -> str:
+def yahoo_news(symbol: str, max_items: int = 15) -> List[Dict[str, Any]]:
+    """Return news headlines for symbol from Yahoo Finance RSS."""
+    params = {"s": symbol, "region": "US", "lang": "en-US"}
     try:
-        i = text.index(start) + len(start)
-        j = text.index(end, i)
-        return text[i:j].strip()
-    except ValueError:
-        return ""
-
-
-def fetch_yahoo_news(symbol: str, limit: int = 15) -> List[Dict[str, str]]:
-    url = (
-        "https://feeds.finance.yahoo.com/rss/2.0/headline"
-        f"?s={symbol}&region=US&lang=en-US"
-    )
-    try:
-        resp = requests.get(url, timeout=6)
-        if resp.status_code != 200:
-            return []
-        xml = resp.text
+        r = requests.get(YAHOO_NEWS_RSS, params=params, timeout=6)
+        r.raise_for_status()
     except Exception:
         return []
 
-    parts = xml.split("<item>")[1:]
-    items: List[Dict[str, str]] = []
+    import xml.etree.ElementTree as ET
 
-    for raw in parts[:limit]:
-        title = _between(raw, "<title>", "</title>")
-        link = _between(raw, "<link>", "</link>")
-        pub = _between(raw, "<pubDate>", "</pubDate>")
-        # source tag may have attributes
-        source_block = _between(raw, "<source", "</source>")
-        if ">" in source_block:
-            source_block = source_block.split(">")[-1].strip()
-
-        if not title:
-            continue
-
-        items.append(
-            {
-                "title": title,
-                "link": link or "",
-                "source": source_block or "Yahoo Finance",
-                "published": pub or "",
-            }
-        )
+    items: List[Dict[str, Any]] = []
+    try:
+        root = ET.fromstring(r.content)
+        for item in root.findall(".//item")[:max_items]:
+            title = (item.findtext("title") or "").strip()
+            link = (item.findtext("link") or "").strip()
+            pub = (item.findtext("pubDate") or "").strip()
+            source = (item.findtext("source") or "").strip()
+            if not title or not link:
+                continue
+            items.append(
+                {
+                    "title": title,
+                    "url": link,
+                    "source": source or "Yahoo Finance",
+                    "published_at": pub,
+                }
+            )
+    except Exception:
+        return []
     return items
 
 
-# ---------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------
+def simple_insights(symbol: str) -> Dict[str, Any]:
+    """
+    Very lightweight performance snapshot:
+    uses 1 year daily chart endpoint and computes %
+    changes for a few horizons.
+    """
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    params = {"range": "1y", "interval": "1d"}
+    try:
+        r = requests.get(url, params=params, timeout=8)
+        r.raise_for_status()
+        data = r.json()
+        result = data["chart"]["result"][0]
+        closes = result["indicators"]["quote"][0]["close"]
+        timestamps = result["timestamp"]
+    except Exception:
+        return {
+            "symbol": symbol.upper(),
+            "periods": {},
+            "profile": "No performance snapshot available at this time."
+        }
 
+    prices = [p for p in closes if p is not None]
+    if len(prices) < 5:
+        return {
+            "symbol": symbol.upper(),
+            "periods": {},
+            "profile": "No performance snapshot available at this time."
+        }
 
-@app.get("/")
-async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    latest = float(prices[-1])
 
+    def pct_change(days: int) -> float:
+        try:
+            # find index roughly N trading days ago
+            idx = max(0, len(prices) - 1 - days)
+            base = float(prices[idx])
+            if base <= 0:
+                return 0.0
+            return round((latest - base) / base * 100, 2)
+        except Exception:
+            return 0.0
 
-@app.get("/heatmap")
-async def heatmap(request: Request):
-    return templates.TemplateResponse("heatmap.html", {"request": request})
-
-
-@app.get("/api/tickers")
-async def api_tickers():
-    quotes = yahoo_quotes(WATCHLIST)
-    if not quotes:
-        quotes = STATIC_TICKERS
-    return JSONResponse(quotes)
-
-
-@app.get("/api/movers")
-async def api_movers():
-    quotes = yahoo_quotes(WATCHLIST)
-    if not quotes:
-        # fallback: compute from static
-        quotes = STATIC_TICKERS
-
-    sorted_quotes = sorted(quotes, key=lambda q: q.get("changePercent", 0.0))
-    losers = sorted_quotes[:5]
-    gainers = sorted_quotes[-5:]
-    return JSONResponse({"gainers": gainers[::-1], "losers": losers})
-
-
-@app.get("/api/news")
-async def api_news(symbol: str):
-    symbol = symbol.upper()
-    headlines = fetch_yahoo_news(symbol)
-    if not headlines:
-        # simple fallback headlines so tile never empty
-        headlines = [
-            {
-                "title": f"{symbol} overview and latest market commentary",
-                "link": "",
-                "source": "Market Terminal",
-                "published": "",
-            }
-        ]
-    return JSONResponse(headlines)
-
-
-@app.get("/api/insights")
-async def api_insights(symbol: str):
-    symbol = symbol.upper()
-    quote_list = yahoo_quotes([symbol])
-
-    performance = {
-        "1W": 1.15,
-        "1M": 3.2,
-        "3M": 7.6,
-        "6M": 12.1,
-        "YTD": 18.3,
-        "1Y": 21.0,
+    periods = {
+        "1W": pct_change(5),
+        "1M": pct_change(21),
+        "3M": pct_change(63),
+        "6M": pct_change(126),
+        "YTD": pct_change(252),
+        "1Y": pct_change(252),
     }
 
-    description = (
-        f"{symbol} is a major public company followed by global investors. "
-        "This snapshot combines recent performance and a short descriptive profile "
+    profile = (
+        f"{symbol.upper()} is a major public company followed closely by global investors. "
+        "This snapshot combines recent price performance and a short descriptive profile "
         "to give you a quick fundamental impression inside the terminal."
     )
 
-    if not quote_list:
-        return JSONResponse(
-            {"symbol": symbol, "performance": performance, "description": description}
-        )
-
-    return JSONResponse(
-        {
-            "symbol": symbol,
-            "performance": performance,
-            "description": description,
-        }
-    )
+    return {
+        "symbol": symbol.upper(),
+        "periods": periods,
+        "profile": profile,
+    }
 
 
-@app.get("/api/calendar")
-async def api_calendar():
-    events = [
+def dummy_calendar() -> List[Dict[str, str]]:
+    """Static macro calendar stub – replace with real API if you like."""
+    return [
         {
             "time": "08:30",
             "country": "US",
@@ -259,9 +187,156 @@ async def api_calendar():
             "previous": "4.00%",
         },
     ]
-    return JSONResponse(events)
 
 
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+# -------------------------------------------------------------------
+# Pages
+# -------------------------------------------------------------------
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/heatmap", response_class=HTMLResponse)
+async def heatmap_page(request: Request):
+    return templates.TemplateResponse("heatmap.html", {"request": request})
+
+
+# -------------------------------------------------------------------
+# APIs
+# -------------------------------------------------------------------
+
+@app.get("/api/tickers")
+async def api_tickers():
+    global _ticker_cache
+    now = time.time()
+    if _ticker_cache["data"] and now - _ticker_cache["ts"] < 60:
+        return _ticker_cache["data"]
+
+    try:
+        quotes = yahoo_quotes(WATCHLIST)
+        payload = {"tickers": quotes}
+        _ticker_cache = {"data": payload, "ts": now}
+        return payload
+    except Exception:
+        if _ticker_cache["data"]:
+            return _ticker_cache["data"]
+        return {"tickers": []}
+
+
+@app.get("/api/news")
+async def api_news(symbol: str):
+    items = yahoo_news(symbol.upper())
+    if not items:
+        # friendly fallback so tile never looks broken
+        items = [
+            {
+                "title": f"{symbol.upper()} overview and latest market commentary",
+                "url": f"https://finance.yahoo.com/quote/{symbol.upper()}",
+                "source": "Market Terminal",
+                "published_at": "",
+            }
+        ]
+    return {"symbol": symbol.upper(), "items": items}
+
+
+@app.get("/api/insights")
+async def api_insights(symbol: str):
+    data = simple_insights(symbol.upper())
+    return data
+
+
+@app.get("/api/calendar")
+async def api_calendar():
+    return {"events": dummy_calendar()}
+
+
+@app.get("/api/movers")
+async def api_movers():
+    """
+    Top gainers / losers from WATCHLIST based on latest % change.
+    """
+    global _movers_cache
+    now = time.time()
+    if _movers_cache["data"] and now - _movers_cache["ts"] < 60:
+        return _movers_cache["data"]
+
+    try:
+        quotes = yahoo_quotes(WATCHLIST)
+        sorted_quotes = sorted(quotes, key=lambda q: q["change_pct"])
+        losers = sorted_quotes[:5]
+        gainers = list(reversed(sorted_quotes[-5:]))
+        payload = {"gainers": gainers, "losers": losers}
+        _movers_cache = {"data": payload, "ts": now}
+        return payload
+    except Exception:
+        if _movers_cache["data"]:
+            return _movers_cache["data"]
+        return {"gainers": [], "losers": []}
+
+
+# Simple macro data for world map – static demo values
+MACRO_DATA = {
+    "inflation": {
+        "US": 3.2,
+        "CA": 3.1,
+        "BR": 4.7,
+        "DE": 2.3,
+        "UK": 3.9,
+        "FR": 2.6,
+        "ZA": 5.8,
+        "IN": 4.5,
+        "CN": 1.2,
+        "JP": 2.1,
+        "AU": 3.4,
+    },
+    "rates": {
+        "US": 5.5,
+        "CA": 5.0,
+        "BR": 12.8,
+        "DE": 4.0,
+        "UK": 5.25,
+        "ZA": 8.25,
+        "IN": 6.5,
+        "CN": 3.45,
+        "JP": 0.1,
+        "AU": 4.1,
+    },
+    "gdp": {
+        "US": 2.1,
+        "CA": 1.5,
+        "BR": 2.3,
+        "DE": 0.8,
+        "UK": 1.0,
+        "IN": 6.4,
+        "CN": 4.9,
+        "JP": 1.3,
+        "AU": 2.0,
+        "ZA": 1.1,
+    },
+    "unemployment": {
+        "US": 3.8,
+        "CA": 5.5,
+        "BR": 7.7,
+        "DE": 3.0,
+        "UK": 4.3,
+        "IN": 7.2,
+        "CN": 5.2,
+        "JP": 2.7,
+        "AU": 3.6,
+        "ZA": 32.0,
+    },
+}
+
+
+@app.get("/api/macro")
+async def api_macro(metric: str = "inflation"):
+    metric = metric.lower()
+    if metric not in MACRO_DATA:
+        metric = "inflation"
+    data = [
+        {"code": code, "value": value}
+        for code, value in MACRO_DATA[metric].items()
+    ]
+    return {"metric": metric, "data": data}
