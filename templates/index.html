@@ -1,131 +1,170 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
-  <head>
-    <meta charset="UTF-8" />
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
     <title>Market Terminal</title>
-    <link rel="stylesheet" href="/static/style.css" />
-    <script src="https://s3.tradingview.com/tv.js"></script>
-  </head>
-  <body class="theme-dark">
-    <header class="top-bar">
-      <div class="brand">MARKET TERMINAL</div>
-      <div id="ticker-bar" class="ticker-bar">
-        <div id="ticker-track" class="ticker-track"></div>
-      </div>
-      <div class="menu-wrapper">
-        <button id="heatmapLink" class="menu-link">Heatmap</button>
-        <div class="menu">
-          <!-- removed the ▾ character here -->
-          <button id="menuButton" class="menu-button">Menu</button>
-          <div id="menuDropdown" class="menu-dropdown">
-            <div class="menu-section">
-              <span>Theme</span>
-              <div class="theme-toggle">
-                <span class="icon">☀</span>
-                <label class="switch">
-                  <input type="checkbox" id="themeToggle" />
-                  <span class="slider"></span>
-                </label>
-                <span class="icon">🌙</span>
-              </div>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="/static/style.css" rel="stylesheet">
+    <!-- TradingView widget script -->
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+</head>
+<body class="theme-dark">
+<header class="top-bar">
+    <div class="brand">MARKET TERMINAL</div>
+
+    <div id="ticker-marquee" class="ticker-marquee">
+        <div id="ticker-list" class="ticker-list"></div>
+    </div>
+
+    <div class="top-actions">
+        <button id="heatmap-btn" class="top-btn">Heatmap</button>
+        <div class="menu-wrapper">
+            <button id="menu-toggle" class="top-btn">Menu</button>
+            <div id="menu-dropdown" class="menu-dropdown hidden">
+                <div class="menu-section">
+                    <div class="menu-section-title">Theme</div>
+                    <label class="switch-row">
+                        <span>Light</span>
+                        <label class="switch">
+                            <input type="checkbox" id="theme-toggle">
+                            <span class="slider"></span>
+                        </label>
+                        <span>Dark</span>
+                    </label>
+                </div>
+                <div class="menu-section">
+                    <div class="menu-section-title">Shortcuts</div>
+                    <button class="menu-shortcut" data-symbol="SPY">S&amp;P 500 (SPY)</button>
+                    <button class="menu-shortcut" data-symbol="QQQ">NASDAQ 100 (QQQ)</button>
+                </div>
+                <div class="menu-section">
+                    <div class="menu-section-title">Tiles</div>
+                    <label class="menu-check">
+                        <input type="checkbox" data-tile="news-tile" checked> News
+                    </label>
+                    <label class="menu-check">
+                        <input type="checkbox" data-tile="insights-tile" checked> Market Insights
+                    </label>
+                    <label class="menu-check">
+                        <input type="checkbox" data-tile="macro-tile" checked> Macro Maps
+                    </label>
+                    <label class="menu-check">
+                        <input type="checkbox" data-tile="calendar-tile" checked> Economic Calendar
+                    </label>
+                    <label class="menu-check">
+                        <input type="checkbox" data-tile="movers-tile" checked> Top Movers
+                    </label>
+                </div>
             </div>
-            <div class="menu-section">
-              <span>Shortcuts</span>
-              <button class="shortcut" data-symbol="SPY">S&amp;P 500 (SPY)</button>
-              <button class="shortcut" data-symbol="QQQ">NASDAQ 100 (QQQ)</button>
+        </div>
+    </div>
+</header>
+
+<main class="terminal">
+
+    <!-- Row 1: Chart + News -->
+    <section id="row1" class="row row-top">
+        <article id="chart-tile" class="tile tile-chart">
+            <header class="tile-header">
+                <h2 id="chart-title">Chart – AAPL</h2>
+            </header>
+            <div id="tv_chart" class="chart-container"></div>
+        </article>
+
+        <div class="col-resizer" data-left="chart-tile" data-right="news-tile"></div>
+
+        <article id="news-tile" class="tile tile-news">
+            <header class="tile-header">
+                <h2 id="news-title">News – AAPL</h2>
+            </header>
+            <div id="news-list" class="news-list"></div>
+        </article>
+    </section>
+
+    <div class="row-resizer" data-top="row1" data-bottom="row2"></div>
+
+    <!-- Row 2: Insights + Macro -->
+    <section id="row2" class="row">
+        <article id="insights-tile" class="tile">
+            <header class="tile-header">
+                <h2 id="insights-title">Market Insights: AAPL</h2>
+            </header>
+            <div class="insights-grid">
+                <div class="insight-card"><div class="label">1W</div><div class="value" id="perf-1W">–</div></div>
+                <div class="insight-card"><div class="label">1M</div><div class="value" id="perf-1M">–</div></div>
+                <div class="insight-card"><div class="label">3M</div><div class="value" id="perf-3M">–</div></div>
+                <div class="insight-card"><div class="label">6M</div><div class="value" id="perf-6M">–</div></div>
+                <div class="insight-card"><div class="label">YTD</div><div class="value" id="perf-YTD">–</div></div>
+                <div class="insight-card"><div class="label">1Y</div><div class="value" id="perf-1Y">–</div></div>
             </div>
-          </div>
-        </div>
-      </div>
-    </header>
+            <div id="insights-description" class="insights-description">
+                No performance snapshot available at this time.
+            </div>
+        </article>
 
-    <main id="layout">
-      <!-- Row 1: chart + news -->
-      <section class="row row-1">
-        <div class="tile chart-tile" id="chart-tile">
-          <div class="tile-header">
-            <span id="chart-title">Chart – AAPL</span>
-          </div>
-          <div id="tv-chart-container" class="chart-container"></div>
-        </div>
-        <div class="tile news-tile">
-          <div class="tile-header">
-            <span id="news-title">News – AAPL</span>
-          </div>
-          <div id="news-list" class="news-list"></div>
-        </div>
-      </section>
-
-      <!-- Row 2: insights + macro map -->
-      <section class="row row-2">
-        <div class="tile insights-tile">
-          <div class="tile-header">
-            <span id="insights-title">Market Insights: AAPL</span>
-          </div>
-          <div id="insights-grid" class="insights-grid"></div>
-          <div id="insights-description" class="insights-description"></div>
-        </div>
-
-        <div class="tile macro-tile">
-          <div class="tile-header">
-            <span>Macro Maps</span>
-          </div>
-          <div id="macro-map" class="macro-map">
+        <article id="macro-tile" class="tile tile-macro">
+            <header class="tile-header">
+                <h2>Macro Maps</h2>
+                <div class="macro-controls">
+                    <button class="macro-btn active" data-metric="inflation">Inflation</button>
+                    <button class="macro-btn" data-metric="rates">Rates</button>
+                    <button class="macro-btn" data-metric="gdp">GDP</button>
+                    <button class="macro-btn" data-metric="unemployment">Unemployment</button>
+                </div>
+            </header>
+            <div id="macro-map" class="macro-map"></div>
             <div class="macro-legend">
-              <span>Inflation</span>
-              <div class="legend-items">
-                <span class="legend-box level-1"></span><span>&lt; 2%</span>
-                <span class="legend-box level-2"></span><span>2–4%</span>
-                <span class="legend-box level-3"></span><span>4–6%</span>
-                <span class="legend-box level-4"></span><span>&gt; 6%</span>
-              </div>
+                <span class="legend-box band1"></span><span>&lt; 2%</span>
+                <span class="legend-box band2"></span><span>2–4%</span>
+                <span class="legend-box band3"></span><span>4–6%</span>
+                <span class="legend-box band4"></span><span>&gt; 6%</span>
             </div>
-            <svg
-              id="macro-map-svg"
-              viewBox="0 0 800 400"
-              class="macro-svg"
-              role="img"
-              aria-label="World macro map"
-            >
-              <!-- simplified world shapes -->
-              <rect x="40" y="130" width="180" height="90" class="country us" />
-              <rect x="210" y="150" width="120" height="80" class="country eu" />
-              <rect x="350" y="160" width="160" height="80" class="country me" />
-              <rect x="520" y="150" width="140" height="90" class="country asia" />
-              <rect x="80" y="230" width="120" height="90" class="country latam" />
-              <rect x="520" y="240" width="120" height="70" class="country aus" />
-            </svg>
-            <div id="macro-tooltip" class="macro-tooltip"></div>
-          </div>
-        </div>
-      </section>
+        </article>
+    </section>
 
-      <!-- Row 3: economic calendar + movers -->
-      <section class="row row-3">
-        <div class="tile calendar-tile">
-          <div class="tile-header">
-            <span>Economic Calendar (US)</span>
-          </div>
-          <div id="calendar-container" class="calendar-container"></div>
-        </div>
-        <div class="tile movers-tile">
-          <div class="tile-header">
-            <span>Top Movers (Watchlist)</span>
-          </div>
-          <div class="movers-columns">
-            <div>
-              <div class="movers-title">Top Gainers</div>
-              <ul id="gainers-list" class="movers-list"></ul>
-            </div>
-            <div>
-              <div class="movers-title">Top Losers</div>
-              <ul id="losers-list" class="movers-list"></ul>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
+    <div class="row-resizer" data-top="row2" data-bottom="row3"></div>
 
-    <script src="/static/main.js"></script>
-  </body>
+    <!-- Row 3: Calendar + Movers -->
+    <section id="row3" class="row row-bottom">
+        <article id="calendar-tile" class="tile tile-calendar">
+            <header class="tile-header">
+                <h2>Economic Calendar (US)</h2>
+            </header>
+            <div class="calendar-body">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Country</th>
+                        <th>Event</th>
+                        <th>Actual</th>
+                        <th>Forecast</th>
+                        <th>Previous</th>
+                    </tr>
+                    </thead>
+                    <tbody id="calendar-body"></tbody>
+                </table>
+            </div>
+        </article>
+
+        <article id="movers-tile" class="tile tile-movers">
+            <header class="tile-header">
+                <h2>Top Movers (Watchlist)</h2>
+            </header>
+            <div class="movers-columns">
+                <div>
+                    <h3>Top Gainers</h3>
+                    <ul id="gainers-list"></ul>
+                </div>
+                <div>
+                    <h3>Top Losers</h3>
+                    <ul id="losers-list"></ul>
+                </div>
+            </div>
+        </article>
+    </section>
+</main>
+
+<script src="/static/main.js"></script>
+</body>
 </html>
