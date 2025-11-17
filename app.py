@@ -1,5 +1,6 @@
 import time
 from typing import List, Dict, Any
+import xml.etree.ElementTree as ET
 
 import requests
 from fastapi import FastAPI, Request
@@ -7,7 +8,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from requests.exceptions import HTTPError
-import feedparser
 
 app = FastAPI()
 
@@ -174,29 +174,54 @@ def yahoo_chart_percent_changes(symbol: str) -> Dict[str, Any]:
 
 def yahoo_rss_news(symbol: str) -> List[Dict[str, Any]]:
     """
-    Fetch finance headlines for a given symbol via Yahoo Finance RSS.
-    No API key required.
+    Fetch finance headlines for a given symbol via Yahoo Finance RSS,
+    using only the standard library for XML parsing.
     """
     url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
     try:
-        feed = feedparser.parse(url)
+        resp = requests.get(url, timeout=5)
+        resp.raise_for_status()
+        content = resp.text
+
+        root = ET.fromstring(content)
+
+        # RSS structure: <rss><channel><item>...</item></channel></rss>
+        channel = root.find("channel")
+        if channel is None:
+            # Some feeds use namespaces; try a very loose search for 'item'
+            items_xml = root.findall(".//item")
+        else:
+            items_xml = channel.findall("item")
+
         items: List[Dict[str, Any]] = []
-        for entry in feed.entries[:25]:
+
+        for item in items_xml[:25]:
+            title_el = item.find("title")
+            link_el = item.find("link")
+            pub_el = item.find("pubDate")
+
+            # source may be under <source> or with namespaces; best-effort
             source = "Yahoo Finance"
-            if hasattr(entry, "source") and getattr(entry, "source", None):
-                # feedparser sometimes exposes .source.title
-                try:
-                    source = entry.source.title  # type: ignore[attr-defined]
-                except Exception:
-                    pass
+            source_el = item.find("source")
+            if source_el is not None and source_el.text:
+                source = source_el.text
+
+            title = title_el.text if title_el is not None else ""
+            link = link_el.text if link_el is not None else ""
+            pub = pub_el.text if pub_el is not None else ""
+
+            if not title and not link:
+                continue
+
             items.append(
                 {
-                    "title": entry.title,
-                    "link": entry.link,
+                    "title": title,
+                    "link": link,
                     "source": source,
-                    "published": getattr(entry, "published", ""),
+                    "published": pub,
                 }
             )
+
         return items
     except Exception:
         return []
