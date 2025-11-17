@@ -26,7 +26,12 @@ const MACRO_METRIC_LABELS = {
 
 const ROW_MIN_HEIGHT = 180;
 const ROW_STORAGE_PREFIX = "mt-row-";
+<<<<<<< ours
 const COL_STORAGE_KEY = "mt-center-cols";
+=======
+const COL_STORAGE_PREFIX = "mt-cols-";
+let heatmapModalOpen = false;
+>>>>>>> theirs
 
 // --------------------------------------------------------------
 // Utilities
@@ -77,6 +82,7 @@ function applySavedRowHeights() {
   });
 }
 
+<<<<<<< ours
 function saveCenterCols(value) {
   safeStorageSet(COL_STORAGE_KEY, value);
 }
@@ -90,6 +96,26 @@ function applySavedCenterCols() {
     row.style.setProperty("--center-col1", left);
     row.style.setProperty("--center-col2", right);
   }
+=======
+function saveColWidths(key, value) {
+  safeStorageSet(`${COL_STORAGE_PREFIX}${key}`, value);
+}
+
+function applySavedColWidths() {
+  document.querySelectorAll(".mt-row[data-col-key]").forEach((row) => {
+    const key = row.getAttribute("data-col-key");
+    const leftVar = row.getAttribute("data-col-left");
+    const rightVar = row.getAttribute("data-col-right");
+    if (!key || !leftVar || !rightVar) return;
+    const stored = safeStorageGet(`${COL_STORAGE_PREFIX}${key}`);
+    if (!stored) return;
+    const [left, right] = stored.split(",");
+    if (left && right) {
+      row.style.setProperty(leftVar, left.trim());
+      row.style.setProperty(rightVar, right.trim());
+    }
+  });
+>>>>>>> theirs
 }
 
 // --------------------------------------------------------------
@@ -252,6 +278,7 @@ async function ensureWorldMap() {
     worldMapReady = true;
     return;
   }
+<<<<<<< ours
   try {
     const res = await fetch("/static/world-simple.geo.json");
     const geoJson = await res.json();
@@ -260,6 +287,25 @@ async function ensureWorldMap() {
   } catch (err) {
     console.error("world map error", err);
   }
+=======
+  const sources = [
+    "https://fastly.jsdelivr.net/npm/echarts@5/map/json/world.json",
+    "/static/world-simple.geo.json",
+  ];
+  for (const src of sources) {
+    try {
+      const res = await fetch(src);
+      if (!res.ok) continue;
+      const geoJson = await res.json();
+      echarts.registerMap("terminal-world", geoJson);
+      worldMapReady = true;
+      return;
+    } catch (err) {
+      console.warn("world map load failed", src, err);
+    }
+  }
+  console.error("world map error: no sources available");
+>>>>>>> theirs
 }
 
 async function loadMacroData(metric) {
@@ -423,6 +469,9 @@ function applyTheme(theme) {
     body.classList.remove("theme-light");
   }
   updateChartTheme();
+  if (heatmapModalOpen) {
+    loadHeatmapWidget();
+  }
 }
 
 function setupThemeToggle() {
@@ -455,8 +504,74 @@ function setupMenu() {
   });
 }
 
+function loadHeatmapWidget() {
+  const container = document.getElementById("heatmap-widget");
+  if (!container || !window.TradingView) return;
+  container.innerHTML = "";
+  const theme = lastTheme === "light" ? "light" : "dark";
+  new TradingView.widget({
+    container_id: "heatmap-widget",
+    width: "100%",
+    height: "100%",
+    dataSource: "S&P500",
+    exchange: "US",
+    blockSize: "market_cap_basic",
+    blockColor: "change",
+    colorTheme: theme,
+    locale: "en",
+    hasTopBar: false,
+    showSymbolLogo: true,
+    isDataSetEnabled: true,
+    isSymbolTooltipEnabled: true,
+    symbolSettings: [],
+    plotType: "heatmap",
+  });
+}
+
+function setupHeatmapModal() {
+  const trigger = document.getElementById("heatmap-link");
+  const modal = document.getElementById("heatmap-modal");
+  if (!trigger || !modal) return;
+  const closeBtn = modal.querySelector(".mt-modal-close");
+
+  const close = () => {
+    heatmapModalOpen = false;
+    modal.classList.remove("open");
+    document.body.classList.remove("mt-modal-open");
+  };
+
+  const open = () => {
+    heatmapModalOpen = true;
+    modal.classList.add("open");
+    document.body.classList.add("mt-modal-open");
+    loadHeatmapWidget();
+  };
+
+  trigger.addEventListener("click", (event) => {
+    event.preventDefault();
+    open();
+  });
+
+  if (closeBtn) {
+    closeBtn.addEventListener("click", close);
+  }
+
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) {
+      close();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && heatmapModalOpen) {
+      close();
+    }
+  });
+}
+
 // --------------------------------------------------------------
 // Layout resizing
+<<<<<<< ours
 // --------------------------------------------------------------
 
 function setupRowResizers() {
@@ -549,17 +664,114 @@ function startCenterColResize(event, row) {
 
 // --------------------------------------------------------------
 // Orchestration
+=======
+>>>>>>> theirs
+// --------------------------------------------------------------
+
+function setupRowResizers() {
+  document.querySelectorAll(".mt-row-resizer").forEach((handle) => {
+    handle.addEventListener("mousedown", (event) => startRowResize(event, handle));
+    handle.addEventListener(
+      "touchstart",
+      (event) => startRowResize(event, handle),
+      { passive: false }
+    );
+  });
+}
+
+function startRowResize(event, handle) {
+  if (event.cancelable) event.preventDefault();
+  const row = handle.previousElementSibling;
+  if (!row) return;
+  const varName = row.getAttribute("data-height-var");
+  if (!varName) return;
+  const startY = event.touches ? event.touches[0].clientY : event.clientY;
+  const startHeight = row.getBoundingClientRect().height;
+  document.body.classList.add("mt-resizing-row");
+
+  const onMove = (ev) => {
+    if (ev.cancelable) ev.preventDefault();
+    const clientY = ev.touches ? ev.touches[0].clientY : ev.clientY;
+    const delta = clientY - startY;
+    const newHeight = Math.max(ROW_MIN_HEIGHT, startHeight + delta);
+    document.documentElement.style.setProperty(varName, `${newHeight}px`);
+    saveRowHeight(varName, `${newHeight}px`);
+    window.dispatchEvent(new Event("resize"));
+  };
+
+  const onUp = () => {
+    document.body.classList.remove("mt-resizing-row");
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("touchmove", onMove);
+    window.removeEventListener("mouseup", onUp);
+    window.removeEventListener("touchend", onUp);
+  };
+
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("touchmove", onMove, { passive: false });
+  window.addEventListener("mouseup", onUp);
+  window.addEventListener("touchend", onUp);
+}
+
+function setupColResizers() {
+  document.querySelectorAll(".mt-col-resizer").forEach((handle) => {
+    const row = handle.closest(".mt-row");
+    if (!row) return;
+    const key = row.getAttribute("data-col-key");
+    const leftVar = row.getAttribute("data-col-left");
+    const rightVar = row.getAttribute("data-col-right");
+    if (!key || !leftVar || !rightVar) return;
+    const start = (event) =>
+      startColResize(event, row, { key, leftVar, rightVar });
+    handle.addEventListener("mousedown", start);
+    handle.addEventListener("touchstart", start, { passive: false });
+  });
+}
+
+function startColResize(event, row, config) {
+  if (event.cancelable) event.preventDefault();
+  document.body.classList.add("mt-resizing-col");
+
+  const onMove = (ev) => {
+    if (ev.cancelable) ev.preventDefault();
+    const rect = row.getBoundingClientRect();
+    if (!rect.width) return;
+    const clientX = ev.touches ? ev.touches[0].clientX : ev.clientX;
+    let ratio = (clientX - rect.left) / rect.width;
+    ratio = Math.min(0.75, Math.max(0.25, ratio));
+    const leftValue = Math.max(0.25, Math.round(ratio * 100) / 100);
+    const rightValue = Math.max(0.25, Math.round((1 - ratio) * 100) / 100);
+    row.style.setProperty(config.leftVar, `${leftValue}fr`);
+    row.style.setProperty(config.rightVar, `${rightValue}fr`);
+    saveColWidths(config.key, `${leftValue}fr,${rightValue}fr`);
+    window.dispatchEvent(new Event("resize"));
+  };
+
+  const onUp = () => {
+    document.body.classList.remove("mt-resizing-col");
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("touchmove", onMove);
+    window.removeEventListener("mouseup", onUp);
+    window.removeEventListener("touchend", onUp);
+  };
+
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("touchmove", onMove, { passive: false });
+  window.addEventListener("mouseup", onUp);
+  window.addEventListener("touchend", onUp);
+}
+
+// --------------------------------------------------------------
+// Orchestration
 // --------------------------------------------------------------
 
 function refreshAllForSymbol(symbol) {
-  refreshNews(symbol);
-  refreshInsights(symbol);
-}
-
-function setupHeatmapLink() {
-  document
-    .getElementById("heatmap-link")
-    .addEventListener("click", () => (window.location.href = "/heatmap"));
+  const sym = symbol.toUpperCase();
+  document.getElementById("chart-symbol").textContent = sym;
+  document.getElementById("news-symbol").textContent = sym;
+  document.getElementById("insights-symbol").textContent = sym;
+  refreshNews(sym);
+  refreshInsights(sym);
 }
 
 // --------------------------------------------------------------
@@ -574,19 +786,27 @@ window.addEventListener("resize", () => {
 
 window.addEventListener("DOMContentLoaded", async () => {
   applySavedRowHeights();
+<<<<<<< ours
   applySavedCenterCols();
+=======
+  applySavedColWidths();
+>>>>>>> theirs
   setupMenu();
   setupThemeToggle();
-  setupHeatmapLink();
+  setupHeatmapModal();
   setupMacroTabs();
   setupRowResizers();
+<<<<<<< ours
   setupCenterColResizer();
+=======
+  setupColResizers();
+>>>>>>> theirs
   loadChart(currentSymbol);
   refreshAllForSymbol(currentSymbol);
   refreshCalendar();
   refreshMovers();
   refreshTickerBar();
-  setInterval(refreshTickerBar, 60000);
+  setInterval(refreshTickerBar, 20000);
   setInterval(refreshMovers, 90000);
 
   await initMacroChart();

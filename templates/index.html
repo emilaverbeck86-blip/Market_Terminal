@@ -17,7 +17,7 @@
     <!-- filled by JS -->
   </div>
   <div class="mt-header-right">
-    <button id="heatmap-link" class="mt-button mt-button-ghost">Heatmap</button>
+    <button id="heatmap-link" type="button" class="mt-button mt-button-ghost">Heatmap</button>
     <div class="mt-menu">
       <button id="menu-toggle" class="mt-button mt-button-ghost">Menu</button>
       <div id="menu-dropdown" class="mt-menu-dropdown">
@@ -49,7 +49,11 @@
 <main class="mt-main">
   <!-- Row 1 -->
   <div class="mt-row-block" data-row-block="1">
+<<<<<<< ours
   <section class="mt-row mt-row-top" data-row="1" data-height-var="--row1-height">
+=======
+  <section class="mt-row mt-row-top" data-row="1" data-height-var="--row1-height" data-col-key="row1" data-col-left="--row1-col1" data-col-right="--row1-col2">
+>>>>>>> theirs
     <div class="mt-tile mt-tile-chart">
       <div class="mt-tile-header">
         <span>Chart – <span id="chart-symbol">AAPL</span></span>
@@ -58,6 +62,9 @@
         <div id="tv-chart"></div>
       </div>
     </div>
+
+    <div class="mt-col-resizer" data-col-resizer="row1" role="separator" aria-label="Resize chart and news panels"></div>
+
     <div class="mt-tile mt-tile-news">
       <div class="mt-tile-header">
         <span>News – <span id="news-symbol">AAPL</span></span>
@@ -72,7 +79,11 @@
 
   <!-- Row 2 -->
   <div class="mt-row-block" data-row-block="2">
+<<<<<<< ours
   <section class="mt-row mt-row-center" data-row="2" data-height-var="--row2-height">
+=======
+  <section class="mt-row" data-row="2" data-height-var="--row2-height" data-col-key="row2" data-col-left="--row2-col1" data-col-right="--row2-col2">
+>>>>>>> theirs
     <div class="mt-tile mt-tile-insights">
       <div class="mt-tile-header">
         <span>Market Insights: <span id="insights-symbol">AAPL</span></span>
@@ -110,6 +121,7 @@
       </div>
     </div>
 
+<<<<<<< ours
     <div class="mt-col-resizer" data-col-resizer="center" role="separator" aria-label="Resize center tiles"></div>
 
     <div class="mt-tile mt-tile-macro">
@@ -139,6 +151,10 @@
   <!-- Row 3 -->
   <div class="mt-row-block" data-row-block="3">
   <section class="mt-row" data-row="3" data-height-var="--row3-height">
+=======
+    <div class="mt-col-resizer" data-col-resizer="row2" role="separator" aria-label="Resize insights and calendar panels"></div>
+
+>>>>>>> theirs
     <div class="mt-tile mt-tile-calendar">
       <div class="mt-tile-header">
         <span>Economic Calendar (US)</span>
@@ -159,6 +175,35 @@
         </table>
       </div>
     </div>
+  </section>
+  <div class="mt-row-resizer" data-row="2" role="separator" aria-label="Resize middle row"></div>
+  </div>
+
+  <!-- Row 3 -->
+  <div class="mt-row-block" data-row-block="3">
+  <section class="mt-row" data-row="3" data-height-var="--row3-height" data-col-key="row3" data-col-left="--row3-col1" data-col-right="--row3-col2">
+    <div class="mt-tile mt-tile-macro">
+      <div class="mt-tile-header">
+        <span>Macro Maps</span>
+        <div class="mt-macro-tabs">
+          <button class="mt-macro-tab active" data-metric="inflation">Inflation</button>
+          <button class="mt-macro-tab" data-metric="rates">Rates</button>
+          <button class="mt-macro-tab" data-metric="gdp">GDP</button>
+          <button class="mt-macro-tab" data-metric="unemployment">Unemployment</button>
+        </div>
+      </div>
+      <div class="mt-tile-body">
+        <div id="macro-map"></div>
+        <div class="mt-macro-legend">
+          <span class="band band-a">&lt; 2%</span>
+          <span class="band band-b">2–4%</span>
+          <span class="band band-c">4–6%</span>
+          <span class="band band-d">&gt; 6%</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-col-resizer" data-col-resizer="row3" role="separator" aria-label="Resize macro and movers panels"></div>
 
     <div class="mt-tile mt-tile-movers">
       <div class="mt-tile-header">
@@ -179,6 +224,20 @@
   <div class="mt-row-resizer" data-row="3" role="separator" aria-label="Resize bottom row"></div>
   </div>
 </main>
+
+<div id="heatmap-modal" class="mt-modal" aria-hidden="true">
+  <div class="mt-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="heatmap-modal-title">
+    <div class="mt-modal-header">
+      <span id="heatmap-modal-title">S&amp;P 500 Heatmap</span>
+      <button class="mt-modal-close" type="button" aria-label="Close heatmap">&times;</button>
+    </div>
+    <div class="mt-modal-body">
+      <div class="tradingview-widget-container" id="heatmap-widget-container">
+        <div id="heatmap-widget"></div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script src="/static/main.js"></script>
 </body>
