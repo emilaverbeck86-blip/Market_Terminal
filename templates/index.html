@@ -48,7 +48,8 @@
 
 <main class="mt-main">
   <!-- Row 1 -->
-  <section class="mt-row mt-row-top">
+  <div class="mt-row-block" data-row-block="1">
+  <section class="mt-row mt-row-top" data-row="1" data-height-var="--row1-height">
     <div class="mt-tile mt-tile-chart">
       <div class="mt-tile-header">
         <span>Chart – <span id="chart-symbol">AAPL</span></span>
@@ -66,9 +67,12 @@
       </div>
     </div>
   </section>
+  <div class="mt-row-resizer" data-row="1" role="separator" aria-label="Resize first row"></div>
+  </div>
 
   <!-- Row 2 -->
-  <section class="mt-row">
+  <div class="mt-row-block" data-row-block="2">
+  <section class="mt-row mt-row-center" data-row="2" data-height-var="--row2-height">
     <div class="mt-tile mt-tile-insights">
       <div class="mt-tile-header">
         <span>Market Insights: <span id="insights-symbol">AAPL</span></span>
@@ -106,6 +110,8 @@
       </div>
     </div>
 
+    <div class="mt-col-resizer" data-col-resizer="center" role="separator" aria-label="Resize center tiles"></div>
+
     <div class="mt-tile mt-tile-macro">
       <div class="mt-tile-header">
         <span>Macro Maps</span>
@@ -127,9 +133,12 @@
       </div>
     </div>
   </section>
+  <div class="mt-row-resizer" data-row="2" role="separator" aria-label="Resize middle row"></div>
+  </div>
 
   <!-- Row 3 -->
-  <section class="mt-row">
+  <div class="mt-row-block" data-row-block="3">
+  <section class="mt-row" data-row="3" data-height-var="--row3-height">
     <div class="mt-tile mt-tile-calendar">
       <div class="mt-tile-header">
         <span>Economic Calendar (US)</span>
@@ -167,6 +176,8 @@
       </div>
     </div>
   </section>
+  <div class="mt-row-resizer" data-row="3" role="separator" aria-label="Resize bottom row"></div>
+  </div>
 </main>
 
 <script src="/static/main.js"></script>

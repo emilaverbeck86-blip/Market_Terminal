@@ -1,6 +1,32 @@
 let currentSymbol = "AAPL";
 let lastTheme = "dark";
 let macroChart = null;
+let worldMapReady = false;
+
+const COUNTRY_NAMES = {
+  US: "United States",
+  CA: "Canada",
+  BR: "Brazil",
+  DE: "Germany",
+  UK: "United Kingdom",
+  FR: "France",
+  ZA: "South Africa",
+  IN: "India",
+  CN: "China",
+  JP: "Japan",
+  AU: "Australia",
+};
+
+const MACRO_METRIC_LABELS = {
+  inflation: "Inflation",
+  rates: "Central Bank Rate",
+  gdp: "GDP Growth",
+  unemployment: "Unemployment",
+};
+
+const ROW_MIN_HEIGHT = 180;
+const ROW_STORAGE_PREFIX = "mt-row-";
+const COL_STORAGE_KEY = "mt-center-cols";
 
 // --------------------------------------------------------------
 // Utilities
@@ -17,6 +43,53 @@ function formatPct(p) {
   const v = Number(p);
   const sign = v > 0 ? "+" : "";
   return sign + v.toFixed(2) + "%";
+}
+
+function safeStorageSet(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (err) {
+    // ignore storage errors
+  }
+}
+
+function safeStorageGet(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch (err) {
+    return null;
+  }
+}
+
+function saveRowHeight(varName, value) {
+  safeStorageSet(`${ROW_STORAGE_PREFIX}${varName}`, value);
+}
+
+function applySavedRowHeights() {
+  document.querySelectorAll(".mt-row[data-height-var]").forEach((row) => {
+    const varName = row.getAttribute("data-height-var");
+    const stored = varName
+      ? safeStorageGet(`${ROW_STORAGE_PREFIX}${varName}`)
+      : null;
+    if (varName && stored) {
+      document.documentElement.style.setProperty(varName, stored);
+    }
+  });
+}
+
+function saveCenterCols(value) {
+  safeStorageSet(COL_STORAGE_KEY, value);
+}
+
+function applySavedCenterCols() {
+  const row = document.querySelector(".mt-row-center");
+  const stored = safeStorageGet(COL_STORAGE_KEY);
+  if (!row || !stored) return;
+  const [left, right] = stored.split(",");
+  if (left && right) {
+    row.style.setProperty("--center-col1", left);
+    row.style.setProperty("--center-col2", right);
+  }
 }
 
 // --------------------------------------------------------------
@@ -168,31 +241,72 @@ async function refreshInsights(symbol) {
 
 async function initMacroChart() {
   const dom = document.getElementById("macro-map");
-  macroChart = echarts.init(dom, null, {renderer: "canvas"});
+  if (!dom) return;
+  macroChart = echarts.init(dom, null, { renderer: "canvas" });
+  await ensureWorldMap();
   await loadMacroData("inflation");
+}
+
+async function ensureWorldMap() {
+  if (worldMapReady || echarts.getMap("terminal-world")) {
+    worldMapReady = true;
+    return;
+  }
+  try {
+    const res = await fetch("/static/world-simple.geo.json");
+    const geoJson = await res.json();
+    echarts.registerMap("terminal-world", geoJson);
+    worldMapReady = true;
+  } catch (err) {
+    console.error("world map error", err);
+  }
 }
 
 async function loadMacroData(metric) {
   if (!macroChart) return;
   try {
+    await ensureWorldMap();
     const data = await getJSON(`/api/macro?metric=${metric}`);
-    const metricName = data.metric;
+    const metricName = data.metric || metric;
     const values = data.data || [];
 
-    const seriesData = values.map((d) => ({
-      name: d.code,
-      value: d.value,
-    }));
+    const seriesData = values.map((d) => {
+      const rawValue =
+        d.value === null || d.value === undefined ? null : Number(d.value);
+      const numericValue = rawValue !== null && !isNaN(rawValue) ? rawValue : null;
+      return {
+        name: COUNTRY_NAMES[d.code] || d.code,
+        value: numericValue,
+        code: d.code,
+      };
+    });
+
+    const numericValues = seriesData
+      .map((d) => (typeof d.value === "number" && !isNaN(d.value) ? d.value : null))
+      .filter((v) => v !== null);
+    let minVal = numericValues.length ? Math.min(...numericValues) : 0;
+    let maxVal = numericValues.length ? Math.max(...numericValues) : 10;
+    if (minVal === maxVal) {
+      maxVal = minVal + 1;
+    }
+
+    const label = MACRO_METRIC_LABELS[metricName] || metricName.toUpperCase();
 
     const option = {
       tooltip: {
         trigger: "item",
-        formatter: (p) =>
-          `${p.name}<br/>${metricName.toUpperCase()}: ${p.value}%`,
+        formatter: (params) => {
+          const code = params.data?.code ? ` (${params.data.code})` : "";
+          const value =
+            params.value === undefined || params.value === null
+              ? "N/A"
+              : `${params.value}%`;
+          return `${params.name || params.data?.code || ""}${code}<br/>${label}: ${value}`;
+        },
       },
       visualMap: {
-        min: 0,
-        max: 10,
+        min: Math.floor(minVal),
+        max: Math.ceil(maxVal),
         left: "left",
         top: "bottom",
         text: ["High", "Low"],
@@ -204,22 +318,14 @@ async function loadMacroData(metric) {
       series: [
         {
           type: "map",
-          map: "world",
+          map: "terminal-world",
           roam: true,
-          emphasis: {label: {show: false}},
+          emphasis: { label: { show: false } },
           data: seriesData,
         },
       ],
     };
 
-    // load world geoJSON once
-    if (!echarts.getMap("world")) {
-      const res = await fetch(
-        "https://fastly.jsdelivr.net/npm/echarts@5/examples/data/asset/geo/world.json"
-      );
-      const geoJson = await res.json();
-      echarts.registerMap("world", geoJson);
-    }
     macroChart.setOption(option);
   } catch (e) {
     console.error("macro error", e);
@@ -350,6 +456,98 @@ function setupMenu() {
 }
 
 // --------------------------------------------------------------
+// Layout resizing
+// --------------------------------------------------------------
+
+function setupRowResizers() {
+  document.querySelectorAll(".mt-row-resizer").forEach((handle) => {
+    handle.addEventListener("mousedown", (event) => startRowResize(event, handle));
+    handle.addEventListener(
+      "touchstart",
+      (event) => startRowResize(event, handle),
+      { passive: false }
+    );
+  });
+}
+
+function startRowResize(event, handle) {
+  if (event.cancelable) event.preventDefault();
+  const row = handle.previousElementSibling;
+  if (!row) return;
+  const varName = row.getAttribute("data-height-var");
+  if (!varName) return;
+  const startY = event.touches ? event.touches[0].clientY : event.clientY;
+  const startHeight = row.getBoundingClientRect().height;
+  document.body.classList.add("mt-resizing-row");
+
+  const onMove = (ev) => {
+    if (ev.cancelable) ev.preventDefault();
+    const clientY = ev.touches ? ev.touches[0].clientY : ev.clientY;
+    const delta = clientY - startY;
+    const newHeight = Math.max(ROW_MIN_HEIGHT, startHeight + delta);
+    document.documentElement.style.setProperty(varName, `${newHeight}px`);
+    saveRowHeight(varName, `${newHeight}px`);
+    window.dispatchEvent(new Event("resize"));
+  };
+
+  const onUp = () => {
+    document.body.classList.remove("mt-resizing-row");
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("touchmove", onMove);
+    window.removeEventListener("mouseup", onUp);
+    window.removeEventListener("touchend", onUp);
+  };
+
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("touchmove", onMove, { passive: false });
+  window.addEventListener("mouseup", onUp);
+  window.addEventListener("touchend", onUp);
+}
+
+function setupCenterColResizer() {
+  const handle = document.querySelector(".mt-col-resizer[data-col-resizer='center']");
+  if (!handle) return;
+  const row = handle.closest(".mt-row");
+  if (!row) return;
+
+  const start = (event) => startCenterColResize(event, row);
+  handle.addEventListener("mousedown", start);
+  handle.addEventListener("touchstart", start, { passive: false });
+}
+
+function startCenterColResize(event, row) {
+  if (event.cancelable) event.preventDefault();
+  document.body.classList.add("mt-resizing-col");
+
+  const onMove = (ev) => {
+    if (ev.cancelable) ev.preventDefault();
+    const clientX = ev.touches ? ev.touches[0].clientX : ev.clientX;
+    const rect = row.getBoundingClientRect();
+    if (!rect.width) return;
+    const ratio = Math.min(0.75, Math.max(0.25, (clientX - rect.left) / rect.width));
+    const leftWeight = Math.round(ratio * 100);
+    const rightWeight = Math.max(20, 100 - leftWeight);
+    row.style.setProperty("--center-col1", `${leftWeight}fr`);
+    row.style.setProperty("--center-col2", `${rightWeight}fr`);
+    saveCenterCols(`${leftWeight}fr,${rightWeight}fr`);
+    window.dispatchEvent(new Event("resize"));
+  };
+
+  const onUp = () => {
+    document.body.classList.remove("mt-resizing-col");
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("touchmove", onMove);
+    window.removeEventListener("mouseup", onUp);
+    window.removeEventListener("touchend", onUp);
+  };
+
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("touchmove", onMove, { passive: false });
+  window.addEventListener("mouseup", onUp);
+  window.addEventListener("touchend", onUp);
+}
+
+// --------------------------------------------------------------
 // Orchestration
 // --------------------------------------------------------------
 
@@ -368,11 +566,21 @@ function setupHeatmapLink() {
 // Init
 // --------------------------------------------------------------
 
+window.addEventListener("resize", () => {
+  if (macroChart) {
+    macroChart.resize();
+  }
+});
+
 window.addEventListener("DOMContentLoaded", async () => {
+  applySavedRowHeights();
+  applySavedCenterCols();
   setupMenu();
   setupThemeToggle();
   setupHeatmapLink();
   setupMacroTabs();
+  setupRowResizers();
+  setupCenterColResizer();
   loadChart(currentSymbol);
   refreshAllForSymbol(currentSymbol);
   refreshCalendar();
