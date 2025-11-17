@@ -1,18 +1,19 @@
 import os
 import time
-from typing import List, Dict, Any
 import datetime as dt
+from typing import List, Dict, Any
+import xml.etree.ElementTree as ET
 
 import requests
-import feedparser
+from requests.exceptions import HTTPError
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from requests.exceptions import HTTPError
 
 app = FastAPI()
 
+# Static & templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
@@ -25,39 +26,41 @@ WATCHLIST = [
     "TSLA", "AVGO", "AMD", "NFLX", "ADBE",
     "INTC", "CSCO", "QCOM", "TXN", "CRM",
     "JPM", "BAC", "WFC", "GS", "V",
-    "MA", "XOM", "CVX", "UNH", "LLY", "ABBV"
+    "MA", "XOM", "CVX", "UNH", "LLY", "ABBV",
 ]
 
 YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
 
-# Economic calendar – TradingEconomics (optional)
+# TradingEconomics key for econ calendar (optional)
 TE_KEY = os.getenv("TRADINGECONOMICS_KEY") or os.getenv("TRADING_ECONOMICS_KEY")
 
-# Fallback static quotes if Yahoo rate-limits *and* cache is empty
+# Fallback quotes if Yahoo is dead AND we have no cache
 STATIC_FALLBACK_QUOTES: List[Dict[str, Any]] = [
     {"symbol": "AAPL", "shortName": "Apple Inc.", "price": 270.0, "change": -1.2, "changePercent": -0.44},
     {"symbol": "MSFT", "shortName": "Microsoft", "price": 410.0, "change": 2.1, "changePercent": 0.52},
     {"symbol": "NVDA", "shortName": "NVIDIA", "price": 190.0, "change": 1.0, "changePercent": 0.53},
 ]
 
+# Simple in-memory cache for quotes
 _quote_cache: Dict[str, Any] = {
     "data": None,
     "timestamp": 0.0,
     "symbols_key": "",
 }
 
-
 # --------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------
 
+
 def yahoo_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
     """
-    Fetch quotes from Yahoo Finance.
-    - Caches responses for 60 seconds.
-    - If Yahoo returns 429 or any error, falls back to cache or STATIC_FALLBACK_QUOTES.
-    - NEVER raises; always returns a list.
+    Fetch quotes from Yahoo Finance with:
+      - 60s cache
+      - safe handling of 429 / errors
+      - fallback to previous cache or STATIC_FALLBACK_QUOTES
+    This function never raises – always returns a list.
     """
     global _quote_cache
 
@@ -83,13 +86,13 @@ def yahoo_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
                     "symbols_key": symbols_key,
                 }
                 return data
-        # Any non-200: fall through to fallback logic
+        # Any non-200 falls through
     except HTTPError:
         pass
     except Exception:
         pass
 
-    # Fallback: cached data or static sample
+    # Fallback to cache or static
     if _quote_cache["data"] is not None:
         return _quote_cache["data"]
     return STATIC_FALLBACK_QUOTES
@@ -146,7 +149,7 @@ def yahoo_chart_percent_changes(symbol: str) -> Dict[str, Any]:
             "1Y": pct_ago(len(closes) - 1),
         }
 
-        # YTD
+        # YTD from first bar of this year
         try:
             year = dt.datetime.utcfromtimestamp(timestamps[-1]).year
             first_idx = next(
@@ -167,7 +170,7 @@ def yahoo_chart_percent_changes(symbol: str) -> Dict[str, Any]:
         description = (
             f"{long_name} trades on {exchange}. "
             "The snapshot shows approximate percentage returns based on "
-            "adjusted daily closes over the past year for each horizon."
+            "adjusted daily closes over multiple time horizons."
         )
 
         return {"changes": changes, "description": description}
@@ -177,23 +180,53 @@ def yahoo_chart_percent_changes(symbol: str) -> Dict[str, Any]:
 
 def yahoo_rss_news(symbol: str) -> List[Dict[str, Any]]:
     """
-    Fetch headlines via Yahoo Finance RSS using feedparser.
+    Fetch finance headlines via Yahoo RSS using only xml.etree.
+    Returns list of {title, link, source, published}.
     """
     url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
     try:
-        feed = feedparser.parse(url)
+        resp = requests.get(url, timeout=6)
+        resp.raise_for_status()
+        text = resp.text
+
+        root = ET.fromstring(text)
+
+        # Try to find channel/items in a robust way
+        channel = root.find("channel")
+        if channel is not None:
+            items_xml = channel.findall("item")
+        else:
+            items_xml = root.findall(".//item")
+
         items: List[Dict[str, Any]] = []
-        for entry in feed.entries[:30]:
+
+        for item in items_xml[:30]:
+            title_el = item.find("title")
+            link_el = item.find("link")
+            pub_el = item.find("pubDate")
+            source_el = item.find("source")
+
+            title = title_el.text.strip() if title_el is not None and title_el.text else ""
+            link = link_el.text.strip() if link_el is not None and link_el.text else ""
+            pub = pub_el.text.strip() if pub_el is not None and pub_el.text else ""
+            source = (
+                source_el.text.strip()
+                if source_el is not None and source_el.text
+                else "Yahoo Finance"
+            )
+
+            if not title and not link:
+                continue
+
             items.append(
                 {
-                    "title": entry.get("title", ""),
-                    "link": entry.get("link", ""),
-                    "source": entry.get("source", {}).get("title", "Yahoo Finance")
-                    if isinstance(entry.get("source"), dict)
-                    else "Yahoo Finance",
-                    "published": entry.get("published", ""),
+                    "title": title,
+                    "link": link,
+                    "source": source,
+                    "published": pub,
                 }
             )
+
         return items
     except Exception:
         return []
@@ -201,14 +234,17 @@ def yahoo_rss_news(symbol: str) -> List[Dict[str, Any]]:
 
 def trading_econ_calendar() -> List[Dict[str, Any]]:
     """
-    Get today's US economic calendar from TradingEconomics.
-    If no key or any error, returns an empty list (no crash).
+    Fetch today's US economic calendar from TradingEconomics.
+    If no key or error: returns [] (front-end shows 'No events').
     """
     if not TE_KEY:
         return []
 
     today = dt.datetime.utcnow().strftime("%Y-%m-%d")
-    url = f"https://api.tradingeconomics.com/calendar?country=united states&start={today}&end={today}&c={TE_KEY}"
+    url = (
+        f"https://api.tradingeconomics.com/calendar?"
+        f"country=united states&start={today}&end={today}&c={TE_KEY}"
+    )
     try:
         r = requests.get(url, timeout=8)
         if r.status_code != 200:
