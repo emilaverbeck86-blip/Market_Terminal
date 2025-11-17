@@ -1,261 +1,505 @@
+// ---------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------
+
 let currentSymbol = "AAPL";
+let currentTheme = "dark";
 let tvWidget = null;
 
-async function fetchJSON(url) {
+// Simple macro data (illustrative only)
+const MACRO_DATA = {
+  inflation: {
+    US: 3.4,
+    Eurozone: 2.8,
+    UK: 3.1,
+    Japan: 2.2,
+    China: 0.8,
+    Canada: 2.6,
+    Australia: 3.0,
+    Brazil: 4.5,
+    India: 4.2,
+  },
+  rates: {
+    US: 5.5,
+    Eurozone: 4.5,
+    UK: 5.25,
+    Japan: 0.1,
+    China: 3.45,
+    Canada: 5.0,
+    Australia: 4.35,
+    Brazil: 10.75,
+    India: 6.5,
+  },
+  gdp: {
+    US: 2.1,
+    Eurozone: 0.9,
+    UK: 0.8,
+    Japan: 1.0,
+    China: 4.8,
+    Canada: 1.6,
+    Australia: 1.9,
+    Brazil: 2.3,
+    India: 6.2,
+  },
+  unemployment: {
+    US: 3.9,
+    Eurozone: 6.5,
+    UK: 4.3,
+    Japan: 2.6,
+    China: 5.0,
+    Canada: 5.5,
+    Australia: 3.9,
+    Brazil: 7.8,
+    India: 7.1,
+  },
+};
+
+// ---------------------------------------------------------------------
+// TradingView chart
+// ---------------------------------------------------------------------
+
+function createChart() {
+  if (!window.TradingView) return;
+
+  const container = document.getElementById("chart-container");
+  if (!container) return;
+
+  container.innerHTML = ""; // clear old widget if any
+
+  // Map some index shortcuts back to TradingView symbols
+  const tvSymbol = currentSymbol;
+
+  tvWidget = new TradingView.widget({
+    container_id: "chart-container",
+    symbol: tvSymbol,
+    autosize: true,
+    interval: "60",
+    timezone: "Etc/UTC",
+    theme: currentTheme === "dark" ? "dark" : "light",
+    style: "1",
+    locale: "en",
+    toolbar_bg: "rgba(0,0,0,0)",
+    hide_top_toolbar: false,
+    hide_legend: false,
+    withdateranges: true,
+  });
+
+  const chartTitle = document.getElementById("chart-title");
+  if (chartTitle) chartTitle.textContent = `Chart – ${currentSymbol}`;
+}
+
+// ---------------------------------------------------------------------
+// API helpers
+// ---------------------------------------------------------------------
+
+async function safeJsonFetch(url) {
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
     return await res.json();
-  } catch {
+  } catch (err) {
+    console.error("Request failed", url, err);
     return null;
   }
 }
 
-/* TradingView chart --------------------------------------------------- */
-
-function initTradingViewChart(symbol) {
-  currentSymbol = symbol;
-  document.getElementById("chart-symbol-label").textContent = symbol;
-  document.getElementById("news-symbol-label").textContent = symbol;
-  document.getElementById("insights-symbol-label").textContent = symbol;
-
-  const theme = document.body.classList.contains("theme-light")
-    ? "light"
-    : "dark";
-
-  // clear old chart container
-  const container = document.getElementById("tv_chart_container");
-  container.innerHTML = "";
-  tvWidget = new TradingView.widget({
-    symbol: symbol,
-    interval: "60",
-    container_id: "tv_chart_container",
-    autosize: true,
-    timezone: "Etc/UTC",
-    theme: theme,
-    style: "1",
-    locale: "en",
-    enable_publishing: false,
-    hide_side_toolbar: false,
-    allow_symbol_change: true,
-    studies: [],
-    withdateranges: true,
-    details: false,
-    hotlist: false,
-  });
-
-  loadNews(symbol);
-  loadInsights(symbol);
-}
-
-/* Ticker bar ---------------------------------------------------------- */
+// ---------------------------------------------------------------------
+// Tickers bar
+// ---------------------------------------------------------------------
 
 async function loadTickers() {
-  const data = await fetchJSON("/api/tickers");
-  if (!data || !data.tickers) return;
+  const data = await safeJsonFetch("/api/tickers");
+  const strip = document.getElementById("ticker-strip");
+  if (!strip) return;
 
-  const items = [...data.tickers, ...data.tickers]; // duplicate for smooth loop
-  const inner = document.getElementById("ticker-inner");
-  inner.innerHTML = "";
+  if (!data || !Array.isArray(data.tickers) || data.tickers.length === 0) {
+    strip.innerHTML = '<span class="placeholder">Ticker data unavailable</span>';
+    return;
+  }
 
-  items.forEach((t) => {
+  strip.innerHTML = "";
+
+  data.tickers.forEach((t) => {
     const item = document.createElement("div");
     item.className = "ticker-item";
     item.dataset.symbol = t.symbol;
 
-    const sym = document.createElement("span");
-    sym.className = "ticker-symbol";
-    sym.textContent = t.symbol;
+    const symbol = document.createElement("span");
+    symbol.className = "ticker-symbol";
+    symbol.textContent = t.symbol;
 
     const price = document.createElement("span");
     price.className = "ticker-price";
-    price.textContent = t.price.toFixed(2);
+    price.textContent =
+      typeof t.price === "number" ? t.price.toFixed(2) : "–";
 
     const change = document.createElement("span");
-    change.className = "ticker-change";
-    change.textContent = (t.change > 0 ? "+" : "") + t.change.toFixed(2) + "%";
-    if (t.change > 0) change.classList.add("positive");
-    if (t.change < 0) change.classList.add("negative");
+    const pct = t.changePercent;
+    let cls = "";
+    if (typeof pct === "number") {
+      if (pct > 0) cls = "ticker-change-pos";
+      else if (pct < 0) cls = "ticker-change-neg";
+      change.textContent = `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
+    } else {
+      change.textContent = "–";
+    }
+    change.className = cls || "";
 
-    item.appendChild(sym);
+    item.appendChild(symbol);
     item.appendChild(price);
     item.appendChild(change);
 
     item.addEventListener("click", () => {
-      initTradingViewChart(t.symbol);
+      selectSymbol(t.symbol);
     });
 
-    inner.appendChild(item);
+    strip.appendChild(item);
   });
 }
 
-/* News --------------------------------------------------------------- */
+// ---------------------------------------------------------------------
+// News
+// ---------------------------------------------------------------------
 
-async function loadNews(symbol) {
-  const data = await fetchJSON(`/api/news?symbol=${encodeURIComponent(symbol)}`);
+async function loadNews() {
   const list = document.getElementById("news-list");
-  list.innerHTML = "";
+  const title = document.getElementById("news-title");
+  if (!list) return;
 
-  if (!data || !data.articles || !data.articles.length) {
-    list.textContent = "No headlines.";
+  if (title) title.textContent = `News – ${currentSymbol}`;
+
+  const data = await safeJsonFetch(`/api/news?symbol=${currentSymbol}`);
+  if (!data || !Array.isArray(data.items)) {
+    list.innerHTML = '<div class="placeholder">No headlines.</div>';
     return;
   }
 
-  data.articles.forEach((a) => {
+  if (data.items.length === 0) {
+    list.innerHTML = '<div class="placeholder">No headlines.</div>';
+    return;
+  }
+
+  list.innerHTML = "";
+  data.items.forEach((item) => {
     const row = document.createElement("div");
     row.className = "news-item";
+    row.addEventListener("click", () => {
+      window.open(item.link, "_blank", "noopener");
+    });
 
-    const title = document.createElement("a");
-    title.href = a.link;
-    title.target = "_blank";
-    title.rel = "noopener";
-    title.textContent = a.title;
-    title.className = "news-title news-link";
+    const t = document.createElement("div");
+    t.className = "news-title";
+    t.textContent = item.title;
 
     const meta = document.createElement("div");
     meta.className = "news-meta";
-    meta.textContent = `${a.source} · ${a.time}`;
+    meta.textContent = `${item.source || ""}${
+      item.published ? " • " + item.published : ""
+    }`;
 
-    row.appendChild(title);
+    row.appendChild(t);
     row.appendChild(meta);
     list.appendChild(row);
   });
 }
 
-/* Insights ------------------------------------------------------------ */
+// ---------------------------------------------------------------------
+// Insights
+// ---------------------------------------------------------------------
 
-async function loadInsights(symbol) {
-  const data = await fetchJSON(`/api/insights?symbol=${encodeURIComponent(symbol)}`);
-  if (!data) return;
+async function loadInsights() {
+  const data = await safeJsonFetch(`/api/insights?symbol=${currentSymbol}`);
+  const title = document.getElementById("insights-title");
+  if (title) title.textContent = `Market Insights: ${currentSymbol}`;
 
-  const snap = data.snapshot || {};
-  const map = {
-    "1W": "insight-1w",
-    "1M": "insight-1m",
-    "3M": "insight-3m",
-    "6M": "insight-6m",
-    "YTD": "insight-ytd",
-    "1Y": "insight-1y",
+  const fields = {
+    "1W": document.getElementById("insight-1w"),
+    "1M": document.getElementById("insight-1m"),
+    "3M": document.getElementById("insight-3m"),
+    "6M": document.getElementById("insight-6m"),
+    YTD: document.getElementById("insight-ytd"),
+    "1Y": document.getElementById("insight-1y"),
   };
 
-  Object.entries(map).forEach(([key, id]) => {
-    const el = document.getElementById(id);
-    el.classList.remove("positive", "negative");
-    const v = snap[key];
-    if (v === null || v === undefined) {
+  const desc = document.getElementById("insights-description");
+
+  if (!data || !data.changes) {
+    Object.values(fields).forEach((el) => el && (el.textContent = "–"));
+    if (desc) desc.textContent = "No performance snapshot available.";
+    return;
+  }
+
+  Object.entries(fields).forEach(([key, el]) => {
+    if (!el) return;
+    const v = data.changes[key];
+    if (typeof v === "number") {
+      el.textContent = `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
+      el.style.color = v > 0 ? "var(--accent-green)" : v < 0 ? "var(--accent-red)" : "";
+    } else {
       el.textContent = "–";
-      return;
+      el.style.color = "";
     }
-    el.textContent = (v > 0 ? "+" : "") + v.toFixed(2) + "%";
-    if (v > 0) el.classList.add("positive");
-    if (v < 0) el.classList.add("negative");
   });
 
-  const prof = document.getElementById("insights-profile");
-  prof.textContent = data.profile || "";
+  if (desc && data.description) {
+    desc.textContent = data.description;
+  }
 }
 
-/* Movers -------------------------------------------------------------- */
+// ---------------------------------------------------------------------
+// Movers
+// ---------------------------------------------------------------------
 
 async function loadMovers() {
-  const data = await fetchJSON("/api/movers");
+  const data = await safeJsonFetch("/api/movers");
+  const gainersList = document.getElementById("gainers-list");
+  const losersList = document.getElementById("losers-list");
+  if (!gainersList || !losersList) return;
+
+  gainersList.innerHTML = "";
+  losersList.innerHTML = "";
+
+  if (!data) {
+    gainersList.innerHTML =
+      '<li class="placeholder">No data</li>';
+    losersList.innerHTML =
+      '<li class="placeholder">No data</li>';
+    return;
+  }
+
+  const renderSide = (items, container, positive) => {
+    if (!items || items.length === 0) {
+      container.innerHTML =
+        '<li class="placeholder">No data</li>';
+      return;
+    }
+    items.forEach((m) => {
+      const li = document.createElement("li");
+      li.className = "mover-row";
+      const left = document.createElement("span");
+      left.textContent = m.symbol;
+      const right = document.createElement("span");
+      const pct = m.changePercent;
+      if (typeof pct === "number") {
+        right.textContent = `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
+        right.style.color =
+          pct > 0 ? "var(--accent-green)" : pct < 0 ? "var(--accent-red)" : "";
+      } else {
+        right.textContent = "–";
+      }
+      li.appendChild(left);
+      li.appendChild(right);
+      container.appendChild(li);
+    });
+  };
+
+  renderSide(data.gainers, gainersList, true);
+  renderSide(data.losers, losersList, false);
+}
+
+// ---------------------------------------------------------------------
+// Macro maps – pure front-end visualisation
+// ---------------------------------------------------------------------
+
+function renderMacroMap(metric) {
+  const container = document.getElementById("macro-map");
+  if (!container) return;
+  const data = MACRO_DATA[metric];
   if (!data) return;
 
-  const gainersRoot = document.getElementById("gainers-list");
-  const losersRoot = document.getElementById("losers-list");
-  gainersRoot.innerHTML = "";
-  losersRoot.innerHTML = "";
+  // compute simple quartiles for coloring
+  const values = Object.values(data);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const step = (max - min) / 4 || 1;
 
-  (data.gainers || []).forEach((m) => {
-    const row = document.createElement("div");
-    row.className = "mover-row";
+  function level(v) {
+    const d = v - min;
+    if (d <= step) return 1;
+    if (d <= 2 * step) return 2;
+    if (d <= 3 * step) return 3;
+    return 4;
+  }
 
-    const left = document.createElement("span");
-    left.className = "mover-symbol";
-    left.textContent = m.symbol;
+  container.innerHTML = "";
 
-    const right = document.createElement("span");
-    right.className = "mover-change positive";
-    right.textContent = "+" + m.change.toFixed(2) + "%";
-    if (m.change < 0) {
-      right.classList.remove("positive");
-      right.classList.add("negative");
-      right.textContent = m.change.toFixed(2) + "%";
-    }
+  Object.entries(data).forEach(([country, value]) => {
+    const div = document.createElement("div");
+    div.className = `macro-country macro-level-${level(value)}`;
 
-    row.appendChild(left);
-    row.appendChild(right);
-    row.addEventListener("click", () => initTradingViewChart(m.symbol));
-    gainersRoot.appendChild(row);
-  });
+    const name = document.createElement("div");
+    name.className = "macro-country-name";
+    name.textContent = country;
 
-  (data.losers || []).forEach((m) => {
-    const row = document.createElement("div");
-    row.className = "mover-row";
+    const val = document.createElement("div");
+    val.className = "macro-country-value";
 
-    const left = document.createElement("span");
-    left.className = "mover-symbol";
-    left.textContent = m.symbol;
+    let unit = "";
+    if (metric === "inflation") unit = "% YoY";
+    else if (metric === "rates") unit = "% policy rate";
+    else if (metric === "gdp") unit = "% YoY";
+    else if (metric === "unemployment") unit = "%";
 
-    const right = document.createElement("span");
-    right.className = "mover-change negative";
-    right.textContent = m.change.toFixed(2) + "%";
-    if (m.change > 0) {
-      right.classList.remove("negative");
-      right.classList.add("positive");
-      right.textContent = "+" + m.change.toFixed(2) + "%";
-    }
+    val.textContent = `${value.toFixed(1)} ${unit}`;
 
-    row.appendChild(left);
-    row.appendChild(right);
-    row.addEventListener("click", () => initTradingViewChart(m.symbol));
-    losersRoot.appendChild(row);
+    div.appendChild(name);
+    div.appendChild(val);
+    container.appendChild(div);
   });
 }
 
-/* Theme & menu -------------------------------------------------------- */
-
-function setupThemeToggle() {
-  const btn = document.getElementById("theme-toggle");
-  btn.addEventListener("click", () => {
-    const light = document.body.classList.toggle("theme-light");
-    // rebuild chart with new theme
-    initTradingViewChart(currentSymbol);
-    // rebuild calendar theme by reloading page (simplest) – skipped to avoid flicker
-  });
-}
-
-function setupMenu() {
-  const btn = document.getElementById("menu-button");
-  const dd = document.getElementById("menu-dropdown");
-  btn.addEventListener("click", () => {
-    dd.classList.toggle("hidden");
-  });
-  document.addEventListener("click", (e) => {
-    if (!dd.contains(e.target) && !btn.contains(e.target)) {
-      dd.classList.add("hidden");
-    }
-  });
-
-  document.querySelectorAll(".menu-shortcut").forEach((el) => {
-    el.addEventListener("click", () => {
-      const sym = el.dataset.symbol;
-      if (sym) initTradingViewChart(sym);
-      dd.classList.add("hidden");
+function setupMacroTabs() {
+  const tabs = document.querySelectorAll(".macro-tab");
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      tabs.forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+      const metric = tab.dataset.metric || "inflation";
+      renderMacroMap(metric);
     });
   });
 }
 
-/* Init ---------------------------------------------------------------- */
+// ---------------------------------------------------------------------
+// Symbol selection & theme
+// ---------------------------------------------------------------------
+
+function selectSymbol(symbol) {
+  currentSymbol = symbol;
+  createChart();
+  loadNews();
+  loadInsights();
+}
+
+function setupMenuShortcuts() {
+  const shortcuts = document.querySelectorAll(".menu-item.shortcut");
+  shortcuts.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sym = btn.dataset.symbol;
+      if (sym) {
+        // For index shortcuts we keep the TV symbol,
+        // but use generic AAPL-like symbol for news/insights if needed.
+        currentSymbol = sym;
+        createChart();
+        loadNews();
+        loadInsights();
+      }
+      document
+        .getElementById("menu-dropdown")
+        ?.classList.add("hidden");
+    });
+  });
+
+  // Tile visibility
+  const tileCheckboxes = document.querySelectorAll(
+    ".menu-checkbox input[type='checkbox']"
+  );
+  tileCheckboxes.forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const id = cb.dataset.tileId;
+      if (!id) return;
+      const tile = document.getElementById(id);
+      if (!tile) return;
+      tile.style.display = cb.checked ? "" : "none";
+    });
+  });
+}
+
+function setupMenuToggle() {
+  const btn = document.getElementById("menu-button");
+  const dd = document.getElementById("menu-dropdown");
+  if (!btn || !dd) return;
+
+  btn.addEventListener("click", () => {
+    dd.classList.toggle("hidden");
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!dd.classList.contains("hidden")) {
+      if (!dd.contains(e.target) && !btn.contains(e.target)) {
+        dd.classList.add("hidden");
+      }
+    }
+  });
+}
+
+function setupThemeToggle() {
+  const btn = document.getElementById("theme-toggle");
+  if (!btn) return;
+
+  btn.addEventListener("click", () => {
+    const body = document.body;
+    if (body.classList.contains("theme-dark")) {
+      body.classList.remove("theme-dark");
+      body.classList.add("theme-light");
+      currentTheme = "light";
+    } else {
+      body.classList.remove("theme-light");
+      body.classList.add("theme-dark");
+      currentTheme = "dark";
+    }
+    createChart();
+  });
+}
+
+// ---------------------------------------------------------------------
+// Column resizers (horizontal)
+// ---------------------------------------------------------------------
+
+function setupColResizers() {
+  const resizers = document.querySelectorAll(".col-resizer");
+  resizers.forEach((resizer) => {
+    const rowEl = resizer.parentElement;
+    if (!rowEl) return;
+
+    let dragging = false;
+
+    resizer.addEventListener("mousedown", (e) => {
+      dragging = true;
+      document.body.style.userSelect = "none";
+      e.preventDefault();
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const rect = rowEl.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const total = rect.width;
+      const leftFrac = Math.min(Math.max(x / total, 0.2), 0.8);
+      rowEl.style.gridTemplateColumns = `minmax(0, ${leftFrac}fr) 6px minmax(0, ${
+        1 - leftFrac
+      }fr)`;
+    });
+
+    window.addEventListener("mouseup", () => {
+      dragging = false;
+      document.body.style.userSelect = "";
+    });
+  });
+}
+
+// ---------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", () => {
-  setupThemeToggle();
-  setupMenu();
-  initTradingViewChart(currentSymbol);
-  loadTickers();
-  loadMovers();
+  // Default theme
+  document.body.classList.add("theme-dark");
 
-  // refresh tickers & movers every 5 minutes to avoid hitting Yahoo too often
-  setInterval(loadTickers, 5 * 60 * 1000);
-  setInterval(loadMovers, 5 * 60 * 1000);
+  setupThemeToggle();
+  setupMenuToggle();
+  setupMenuShortcuts();
+  setupMacroTabs();
+  setupColResizers();
+
+  createChart();
+  loadTickers();
+  loadNews();
+  loadInsights();
+  loadMovers();
+  renderMacroMap("inflation");
+
+  // Poll tickers + movers occasionally
+  setInterval(loadTickers, 60000); // 1 min
+  setInterval(loadMovers, 120000); // 2 min
 });
