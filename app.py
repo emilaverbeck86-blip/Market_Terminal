@@ -1,6 +1,4 @@
 import time
-import logging
-from pathlib import Path
 from typing import List, Dict, Any
 
 import requests
@@ -8,23 +6,17 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from requests import HTTPError
-import xml.etree.ElementTree as ET
-
-BASE_DIR = Path(__file__).resolve().parent
+from requests.exceptions import HTTPError
+import feedparser
 
 app = FastAPI()
 
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
-logging.basicConfig(level=logging.INFO)
-
-# ---------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------
-YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
-YAHOO_RSS_URL = "https://feeds.finance.yahoo.com/rss/2.0/headline"
+# --------------------------------------------------------------------
+# Configuration
+# --------------------------------------------------------------------
 
 WATCHLIST = [
     "AAPL", "MSFT", "NVDA", "META", "GOOGL",
@@ -34,207 +26,233 @@ WATCHLIST = [
     "MA", "XOM", "CVX", "UNH", "LLY", "ABBV"
 ]
 
-# simple in-memory caches to reduce Yahoo calls and avoid 429
-_quotes_cache: Dict[str, Any] = {"data": [], "ts": 0.0}
-_insights_cache: Dict[str, Any] = {}
-_news_cache: Dict[str, Any] = {}
-MOVERS_COUNT = 5
-QUOTES_TTL = 60  # seconds
-NEWS_TTL = 300
-INSIGHTS_TTL = 600
+YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
+YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
+
+# Simple in-memory cache so we can fall back when Yahoo rate-limits us
+_quote_cache: Dict[str, Any] = {
+    "data": None,
+    "timestamp": 0.0,
+    "symbols_key": "",
+}
 
 
-# ---------------------------------------------------------------------
+# --------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------
-def fetch_yahoo_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
-    params = {"symbols": ",".join(symbols)}
-    r = requests.get(YAHOO_QUOTE_URL, params=params, timeout=5)
-    r.raise_for_status()
-    data = r.json().get("quoteResponse", {}).get("result", [])
-    quotes: List[Dict[str, Any]] = []
-    for item in data:
-        symbol = item.get("symbol")
-        price = item.get("regularMarketPrice")
-        change = item.get("regularMarketChangePercent")
-        if symbol is None or price is None or change is None:
-            continue
-        quotes.append(
-            {
-                "symbol": symbol,
-                "price": round(float(price), 2),
-                "change": round(float(change), 2),
-            }
-        )
-    return quotes
+# --------------------------------------------------------------------
 
 
-def get_quotes_cached() -> List[Dict[str, Any]]:
-    now = time.time()
-    if _quotes_cache["data"] and now - _quotes_cache["ts"] < QUOTES_TTL:
-        return _quotes_cache["data"]
+def yahoo_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
+    """
+    Fetch quotes from Yahoo Finance with basic caching and 429 handling.
+    If Yahoo responds with 429 or any network error, we return the last
+    cached result (if available) instead of raising.
+    """
+    global _quote_cache
 
+    symbols_key = ",".join(symbols)
+
+    # Try to avoid hammering the endpoint: reuse cache for 30 seconds
+    if (
+        _quote_cache["data"] is not None
+        and _quote_cache["symbols_key"] == symbols_key
+        and time.time() - _quote_cache["timestamp"] < 30
+    ):
+        return _quote_cache["data"]
+
+    params = {"symbols": symbols_key}
     try:
-        quotes = fetch_yahoo_quotes(WATCHLIST)
-        if quotes:
-            _quotes_cache["data"] = quotes
-            _quotes_cache["ts"] = now
-    except HTTPError as e:
-        logging.warning("Yahoo quotes HTTPError: %s", e)
-    except Exception:
-        logging.exception("Yahoo quotes error")
-
-    return _quotes_cache["data"] or []
-
-
-def fetch_yahoo_rss(symbol: str) -> List[Dict[str, str]]:
-    params = {"s": symbol, "region": "US", "lang": "en-US"}
-    r = requests.get(YAHOO_RSS_URL, params=params, timeout=5)
-    r.raise_for_status()
-    root = ET.fromstring(r.content)
-    items = []
-    for item in root.findall(".//item"):
-        title_el = item.find("title")
-        link_el = item.find("link")
-        date_el = item.find("pubDate")
-        source_el = item.find("{*}source")
-        items.append(
-            {
-                "title": (title_el.text or "").strip(),
-                "link": (link_el.text or "").strip(),
-                "time": (date_el.text or "").strip(),
-                "source": (source_el.text or "Yahoo Finance").strip(),
-            }
-        )
-    return items[:30]
-
-
-def get_news_cached(symbol: str) -> List[Dict[str, str]]:
-    now = time.time()
-    cache = _news_cache.get(symbol)
-    if cache and now - cache["ts"] < NEWS_TTL:
-        return cache["data"]
-
-    articles: List[Dict[str, str]] = []
-    try:
-        articles = fetch_yahoo_rss(symbol)
-        if not articles:
-            # fallback: broad market headlines
-            articles = fetch_yahoo_rss("^GSPC")
-    except HTTPError as e:
-        logging.warning("Yahoo RSS HTTPError for %s: %s", symbol, e)
-    except Exception:
-        logging.exception("Yahoo RSS error")
-
-    _news_cache[symbol] = {"data": articles, "ts": now}
-    return articles
-
-
-def compute_insights(symbol: str) -> Dict[str, Any]:
-    now = time.time()
-    cache = _insights_cache.get(symbol)
-    if cache and now - cache["ts"] < INSIGHTS_TTL:
-        return cache["data"]
-
-    # use Yahoo spark endpoint to get close prices at different ranges
-    url = "https://query1.finance.yahoo.com/v8/finance/spark"
-    params = {
-        "symbols": symbol,
-        "range": "1y",
-        "interval": "1d",
-        "includeTimestamps": "true",
-    }
-    snapshot = {"1W": None, "1M": None, "3M": None, "6M": None, "YTD": None, "1Y": None}
-    profile = ""
-
-    try:
-        r = requests.get(url, params=params, timeout=5)
+        r = requests.get(YAHOO_QUOTE_URL, params=params, timeout=5)
         r.raise_for_status()
-        result = r.json()["spark"]["result"][0]
-        closes = result.get("close") or []
-        if not closes:
-            raise ValueError("no closes")
-
-        last_price = float(closes[-1])
-
-        def pct_from_days(days: int) -> float | None:
-            if len(closes) <= days:
-                return None
-            then = float(closes[-days - 1])
-            if then == 0:
-                return None
-            return round((last_price - then) / then * 100.0, 2)
-
-        snapshot["1W"] = pct_from_days(5)
-        snapshot["1M"] = pct_from_days(21)
-        snapshot["3M"] = pct_from_days(63)
-        snapshot["6M"] = pct_from_days(126)
-        snapshot["YTD"] = pct_from_days(252)  # rough, just to have a value
-        snapshot["1Y"] = pct_from_days(len(closes) - 1)
-
-    except Exception as e:
-        logging.warning("insights error for %s: %s", symbol, e)
-
-    # try to grab short company summary from quote endpoint
-    try:
-        r2 = requests.get(YAHOO_QUOTE_URL, params={"symbols": symbol}, timeout=5)
-        r2.raise_for_status()
-        info = r2.json().get("quoteResponse", {}).get("result", [])
-        if info:
-            longname = info[0].get("longName") or symbol
-            sector = info[0].get("sector") or ""
-            industry = info[0].get("industry") or ""
-            profile = f"{longname} operates in the {sector} sector, focusing on {industry}. "
-            profile += (
-                "The company is widely followed by investors and is part of many market indices. "
-                "Its stock is influenced by earnings results, macro trends and sector-specific news."
-            )
+        data = r.json().get("quoteResponse", {}).get("result", [])
+        _quote_cache = {
+            "data": data,
+            "timestamp": time.time(),
+            "symbols_key": symbols_key,
+        }
+        return data
+    except HTTPError as e:
+        # On 429, use cache if we have one
+        if e.response is not None and e.response.status_code == 429:
+            if _quote_cache["data"] is not None:
+                return _quote_cache["data"]
+        # Any other HTTP error – fall back to cache if possible
+        if _quote_cache["data"] is not None:
+            return _quote_cache["data"]
+        return []
     except Exception:
-        logging.exception("profile fetch error")
-
-    data = {"symbol": symbol, "snapshot": snapshot, "profile": profile}
-    _insights_cache[symbol] = {"data": data, "ts": time.time()}
-    return data
+        if _quote_cache["data"] is not None:
+            return _quote_cache["data"]
+        return []
 
 
-# ---------------------------------------------------------------------
+def simplify_quote(q: Dict[str, Any]) -> Dict[str, Any]:
+    price = q.get("regularMarketPrice")
+    change = q.get("regularMarketChange")
+    change_pct = q.get("regularMarketChangePercent")
+    return {
+        "symbol": q.get("symbol"),
+        "shortName": q.get("shortName") or q.get("symbol"),
+        "price": round(price, 2) if isinstance(price, (int, float)) else None,
+        "change": round(change, 2) if isinstance(change, (int, float)) else None,
+        "changePercent": round(change_pct, 2) if isinstance(change_pct, (int, float)) else None,
+    }
+
+
+def yahoo_chart_percent_changes(symbol: str) -> Dict[str, Any]:
+    """
+    Very lightweight performance snapshot using Yahoo chart API.
+    We compute percentage changes over approx. 1W/1M/3M/6M/YTD/1Y
+    from daily adjusted close prices.
+    """
+    params = {"range": "1y", "interval": "1d"}
+    try:
+        r = requests.get(f"{YAHOO_CHART_URL}/{symbol}", params=params, timeout=6)
+        r.raise_for_status()
+        data = r.json().get("chart", {}).get("result", [])
+        if not data:
+            return {}
+
+        result = data[0]
+        closes = result["indicators"]["adjclose"][0]["adjclose"]
+        timestamps = result["timestamp"]
+
+        if not closes or len(closes) < 2:
+            return {}
+
+        last = closes[-1]
+
+        def pct_ago(days_back: int) -> float | None:
+            if len(closes) <= days_back:
+                return None
+            base = closes[-1 - days_back]
+            if base in (0, None):
+                return None
+            return round((last - base) / base * 100.0, 2)
+
+        # Approximate trading days
+        changes = {
+            "1W": pct_ago(5),
+            "1M": pct_ago(21),
+            "3M": pct_ago(63),
+            "6M": pct_ago(126),
+            "YTD": None,
+            "1Y": pct_ago(len(closes) - 1),
+        }
+
+        # YTD: find first bar of the year
+        try:
+            import datetime as _dt
+
+            year = _dt.datetime.utcfromtimestamp(timestamps[-1]).year
+            first_idx = next(
+                i
+                for i, ts in enumerate(timestamps)
+                if _dt.datetime.utcfromtimestamp(ts).year == year
+            )
+            base = closes[first_idx]
+            if base not in (0, None):
+                changes["YTD"] = round((last - base) / base * 100.0, 2)
+        except Exception:
+            pass
+
+        meta = result.get("meta", {})
+        long_name = meta.get("longName", symbol)
+        exchange = meta.get("exchangeName", "Unknown exchange")
+
+        description = (
+            f"{long_name} trades on {exchange}. "
+            "The performance snapshot shows approximate percentage returns based on "
+            "adjusted daily closes over the past year for several time horizons. "
+            "Values are for informational purposes only."
+        )
+
+        return {"changes": changes, "description": description}
+    except Exception:
+        return {}
+
+
+def yahoo_rss_news(symbol: str) -> List[Dict[str, Any]]:
+    """
+    Fetch finance headlines for a given symbol via Yahoo Finance RSS.
+    No API key required.
+    """
+    url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
+    try:
+        feed = feedparser.parse(url)
+        items: List[Dict[str, Any]] = []
+        for entry in feed.entries[:25]:
+            source = "Yahoo Finance"
+            if hasattr(entry, "source") and getattr(entry, "source", None):
+                # feedparser sometimes exposes .source.title
+                try:
+                    source = entry.source.title  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+            items.append(
+                {
+                    "title": entry.title,
+                    "link": entry.link,
+                    "source": source,
+                    "published": getattr(entry, "published", ""),
+                }
+            )
+        return items
+    except Exception:
+        return []
+
+
+# --------------------------------------------------------------------
 # Routes
-# ---------------------------------------------------------------------
+# --------------------------------------------------------------------
+
+
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request) -> HTMLResponse:
+async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
-@app.get("/heatmap", response_class=HTMLResponse)
-async def heatmap(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("heatmap.html", {"request": request})
-
-
-@app.get("/api/tickers")
+@app.get("/api/tickers", response_class=JSONResponse)
 async def api_tickers():
-    quotes = get_quotes_cached()
-    return JSONResponse({"tickers": quotes})
+    try:
+        quotes = yahoo_quotes(WATCHLIST)
+        simplified = [simplify_quote(q) for q in quotes]
+        return {"tickers": simplified}
+    except Exception as e:
+        # Never hard-fail – just return empty so UI can show placeholder
+        return {"tickers": [], "error": str(e)}
 
 
-@app.get("/api/movers")
+@app.get("/api/movers", response_class=JSONResponse)
 async def api_movers():
-    quotes = get_quotes_cached()
-    if not quotes:
-        return JSONResponse({"gainers": [], "losers": []})
-
-    sorted_by_change = sorted(quotes, key=lambda q: q["change"])
-    losers = sorted_by_change[:MOVERS_COUNT]
-    gainers = list(reversed(sorted_by_change[-MOVERS_COUNT:]))
-    return JSONResponse({"gainers": gainers, "losers": losers})
-
-
-@app.get("/api/news")
-async def api_news(symbol: str = "AAPL"):
-    articles = get_news_cached(symbol)
-    return JSONResponse({"symbol": symbol, "articles": articles})
+    try:
+        quotes = [simplify_quote(q) for q in yahoo_quotes(WATCHLIST)]
+        # Filter out any without changePercent
+        valid = [q for q in quotes if isinstance(q.get("changePercent"), (int, float))]
+        gainers = sorted(valid, key=lambda x: x["changePercent"], reverse=True)[:5]
+        losers = sorted(valid, key=lambda x: x["changePercent"])[:5]
+        return {"gainers": gainers, "losers": losers}
+    except Exception as e:
+        return {"gainers": [], "losers": [], "error": str(e)}
 
 
-@app.get("/api/insights")
-async def api_insights(symbol: str = "AAPL"):
-    data = compute_insights(symbol)
-    return JSONResponse(data)
+@app.get("/api/news", response_class=JSONResponse)
+async def api_news(symbol: str):
+    items = yahoo_rss_news(symbol.upper())
+    return {"symbol": symbol.upper(), "items": items}
+
+
+@app.get("/api/insights", response_class=JSONResponse)
+async def api_insights(symbol: str):
+    data = yahoo_chart_percent_changes(symbol.upper())
+    if not data:
+        return {
+            "symbol": symbol.upper(),
+            "changes": {},
+            "description": "No performance snapshot available.",
+        }
+    return {
+        "symbol": symbol.upper(),
+        "changes": data["changes"],
+        "description": data["description"],
+    }
