@@ -1,503 +1,467 @@
-// ---------- Endpoints ----------
-const TICKER_ENDPOINT = "/api/tickers";
-const MOVERS_ENDPOINT = "/api/movers";
-const NEWS_ENDPOINT = "/api/news";
-const INSIGHTS_ENDPOINT = "/api/insights";
+(() => {
+  const API_BASE = "";
 
-// ---------- DOM ----------
-const tickerScroll = document.getElementById("tickerScroll");
-const chartTitleEl = document.getElementById("chartTitle");
-const newsSymbolEl = document.getElementById("newsSymbol");
-const insightsSymbolEl = document.getElementById("insightsSymbol");
-const newsList = document.getElementById("newsList");
-const gainersBody = document.getElementById("gainersBody");
-const losersBody = document.getElementById("losersBody");
-const companyProfileEl = document.getElementById("companyProfile");
+  let currentSymbol = "AAPL";
+  let currentTheme = "dark";
+  let tvWidget = null;
 
-const perfEls = {
-  "1W": document.getElementById("perf1W"),
-  "1M": document.getElementById("perf1M"),
-  "3M": document.getElementById("perf3M"),
-  "6M": document.getElementById("perf6M"),
-  YTD: document.getElementById("perfYTD"),
-  "1Y": document.getElementById("perf1Y"),
-};
+  document.addEventListener("DOMContentLoaded", () => {
+    const body = document.body;
 
-const fundamentalsBtn = document.getElementById("fundamentalsBtn");
-const menuToggle = document.getElementById("menuToggle");
-const menuPanel = document.getElementById("menuPanel");
-const themeSwitch = document.getElementById("themeSwitch");
-const heatmapShortcut = document.getElementById("heatmapShortcut");
-
-const row1 = document.getElementById("row1");
-const row2 = document.getElementById("row2");
-const row3 = document.getElementById("row3");
-
-const rowResizer1 = document.getElementById("rowResizer1");
-const rowResizer2 = document.getElementById("rowResizer2");
-const colResizerRow1 = document.getElementById("colResizerRow1");
-
-const tileChart = document.getElementById("tile-chart");
-const tileNews = document.getElementById("tile-news");
-
-// ---------- State ----------
-let currentSymbol = "AAPL";
-let tickerNodes = new Map();
-let tickerDataCache = [];
-let theme = "dark";
-let tvWidget = null;
-
-// ---------- Utils ----------
-const fmtPrice = (v) =>
-  typeof v === "number" && isFinite(v) ? v.toFixed(2) : "—";
-
-const fmtPct = (v) => {
-  if (v == null || !isFinite(v)) return "—";
-  const sign = v > 0 ? "+" : v < 0 ? "−" : "";
-  return `${sign}${Math.abs(v).toFixed(2)}%`;
-};
-
-const applyPctClass = (el, v) => {
-  el.classList.remove("pos", "neg", "neu");
-  if (v == null || !isFinite(v)) {
-    el.classList.add("neu");
-  } else if (v > 0) {
-    el.classList.add("pos");
-  } else if (v < 0) {
-    el.classList.add("neg");
-  } else {
-    el.classList.add("neu");
-  }
-};
-
-const setTheme = (mode) => {
-  theme = mode;
-  const root = document.documentElement;
-  const body = document.body;
-  root.setAttribute("data-theme", mode);
-  body.classList.remove("theme-dark", "theme-light");
-  body.classList.add(mode === "dark" ? "theme-dark" : "theme-light");
-  themeSwitch.checked = mode === "light";
-  localStorage.setItem("mt_theme", mode);
-
-  if (currentSymbol) {
-    mountTradingView(currentSymbol);
-  }
-};
-
-const initTheme = () => {
-  const stored = localStorage.getItem("mt_theme");
-  if (stored === "light" || stored === "dark") {
-    setTheme(stored);
-  } else {
-    setTheme("dark");
-  }
-};
-
-// ---------- TradingView Chart ----------
-function mountTradingView(symbol) {
-  chartTitleEl.textContent = symbol;
-  currentSymbol = symbol;
-
-  const container = document.getElementById("tv_container");
-  container.innerHTML = "";
-  if (typeof TradingView === "undefined") {
-    const msg = document.createElement("div");
-    msg.className = "muted";
-    msg.textContent = "TradingView failed to load.";
-    container.appendChild(msg);
-    return;
-  }
-
-  const tvTheme = theme === "dark" ? "dark" : "light";
-
-  tvWidget = new TradingView.widget({
-    width: "100%",
-    height: "100%",
-    symbol: symbol,
-    interval: "60",
-    timezone: "Etc/UTC",
-    theme: tvTheme,
-    style: "1",
-    locale: "en",
-    toolbar_bg: "#000000",
-    enable_publishing: false,
-    allow_symbol_change: false,
-    hide_top_toolbar: false,
-    hide_legend: false,
-    container_id: "tv_container",
-  });
-}
-
-// ---------- Ticker bar ----------
-function buildTickerRow(items) {
-  tickerScroll.innerHTML = "";
-  tickerNodes.clear();
-  tickerDataCache = items.slice();
-
-  const repeated = [...items, ...items];
-  repeated.forEach((tk) => {
-    const item = document.createElement("div");
-    item.className = "ticker-item";
-    item.dataset.sym = tk.symbol;
-
-    const sym = document.createElement("span");
-    sym.className = "sym";
-    sym.textContent = tk.symbol;
-
-    const price = document.createElement("span");
-    price.className = "price";
-    price.textContent = fmtPrice(tk.price);
-
-    const chg = document.createElement("span");
-    chg.className = "chg";
-    applyPctClass(chg, tk.change_pct);
-    chg.textContent = fmtPct(tk.change_pct);
-
-    item.append(sym, price, chg);
-    item.addEventListener("click", () => onSymbolSelect(tk.symbol));
-    tickerScroll.appendChild(item);
-
-    tickerNodes.set(tk.symbol, { item, price, chg, last: tk.price });
-  });
-}
-
-function liveUpdateTickers(items) {
-  tickerDataCache = items.slice();
-  items.forEach((tk) => {
-    const node = tickerNodes.get(tk.symbol);
-    if (!node) return;
-    const newPriceText = fmtPrice(tk.price);
-    if (node.price.textContent !== newPriceText) {
-      const up = (tk.price || 0) > (node.last || 0);
-      node.item.classList.remove("flash-up", "flash-down");
-      void node.item.offsetWidth;
-      node.item.classList.add(up ? "flash-up" : "flash-down");
-      setTimeout(
-        () => node.item.classList.remove("flash-up", "flash-down"),
-        500
-      );
-      node.price.textContent = newPriceText;
-      node.last = tk.price;
+    // ----- theme -----
+    const savedTheme = localStorage.getItem("mt-theme");
+    if (savedTheme === "light") {
+      body.classList.remove("theme-dark");
+      body.classList.add("theme-light");
+      currentTheme = "light";
     }
-    applyPctClass(node.chg, tk.change_pct);
-    node.chg.textContent = fmtPct(tk.change_pct);
-  });
-}
 
-async function loadTickers() {
-  try {
-    const r = await fetch(TICKER_ENDPOINT);
-    if (!r.ok) return;
-    const data = await r.json();
-    if (!tickerScroll.childElementCount) {
-      buildTickerRow(data);
-      if (data.length && !currentSymbol) {
-        onSymbolSelect(data[0].symbol);
+    const themeToggle = document.getElementById("theme-toggle");
+    if (themeToggle) {
+      themeToggle.checked = currentTheme === "light";
+      themeToggle.addEventListener("change", () => {
+        if (themeToggle.checked) {
+          body.classList.remove("theme-dark");
+          body.classList.add("theme-light");
+          currentTheme = "light";
+        } else {
+          body.classList.remove("theme-light");
+          body.classList.add("theme-dark");
+          currentTheme = "dark";
+        }
+        localStorage.setItem("mt-theme", currentTheme);
+        renderChart(currentSymbol); // re-create chart with theme
+      });
+    }
+
+    // ----- menu -----
+    const menuToggle = document.getElementById("menu-toggle");
+    const menuPanel = document.getElementById("menu-panel");
+
+    if (menuToggle && menuPanel) {
+      menuToggle.addEventListener("click", () => {
+        menuPanel.classList.toggle("open");
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!menuPanel.contains(e.target) && !menuToggle.contains(e.target)) {
+          menuPanel.classList.remove("open");
+        }
+      });
+    }
+
+    // tile show / hide via menu
+    document.querySelectorAll(".tile-checkbox").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const id = cb.getAttribute("data-tile");
+        const tile = document.getElementById(`tile-${id}`);
+        if (!tile) return;
+        tile.style.display = cb.checked ? "flex" : "none";
+      });
+    });
+
+    // close button on tile
+    document.querySelectorAll(".tile-close").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const tileKey = btn.getAttribute("data-tile");
+        const tile = document.getElementById(`tile-${tileKey}`);
+        const cb = document.querySelector(
+          `.tile-checkbox[data-tile="${tileKey}"]`
+        );
+        if (tile) tile.style.display = "none";
+        if (cb) cb.checked = false;
+      });
+    });
+
+    // shortcuts (S&P / NASDAQ)
+    document.querySelectorAll(".shortcut-btn[data-symbol]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const sym = btn.getAttribute("data-symbol");
+        if (sym) {
+          setSymbol(sym);
+          if (menuPanel) menuPanel.classList.remove("open");
+        }
+      });
+    });
+
+    // heatmap link
+    const heatmapLink = document.getElementById("heatmap-link");
+    if (heatmapLink) {
+      heatmapLink.addEventListener("click", () => {
+        window.location.href = "/heatmap";
+      });
+    }
+
+    // ticker bar hover pause
+    const tickerBar = document.getElementById("ticker-bar");
+    if (tickerBar) {
+      tickerBar.addEventListener("mouseenter", () => {
+        tickerBar.classList.add("paused");
+      });
+      tickerBar.addEventListener("mouseleave", () => {
+        tickerBar.classList.remove("paused");
+      });
+    }
+
+    // row & column resizers
+    initRowResizers();
+    initColResizers();
+
+    // initial loads
+    renderChart(currentSymbol);
+    loadTickers();
+    loadNews(currentSymbol);
+    loadInsights(currentSymbol);
+    loadMovers();
+
+    // refresh tickers/movers every 2 minutes (gentle)
+    setInterval(() => {
+      loadTickers();
+      loadMovers();
+    }, 120000);
+  });
+
+  // ---------- Utility ----------
+
+  async function fetchJSON(path) {
+    const res = await fetch(API_BASE + path);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  function formatPrice(val) {
+    if (val == null) return "—";
+    return Number(val).toFixed(2);
+  }
+
+  function formatChangePct(val) {
+    if (val == null) return "—";
+    const num = Number(val);
+    const sign = num > 0 ? "+" : "";
+    return `${sign}${num.toFixed(2)}%`;
+  }
+
+  function setSymbol(symbol) {
+    currentSymbol = symbol;
+    const base = symbol.split(":").pop() || symbol;
+    const chartTitle = document.getElementById("chart-title");
+    if (chartTitle) chartTitle.textContent = `Chart – ${base}`;
+    const newsSym = document.getElementById("news-symbol");
+    if (newsSym) newsSym.textContent = base;
+    const insSym = document.getElementById("insights-symbol");
+    if (insSym) insSym.textContent = base;
+
+    renderChart(symbol);
+    loadNews(symbol);
+    loadInsights(symbol);
+  }
+
+  // ---------- TradingView chart ----------
+
+  function renderChart(symbol) {
+    const container = document.getElementById("tv-chart");
+    if (!container || typeof TradingView === "undefined") return;
+
+    container.innerHTML = ""; // clear previous instance
+
+    const theme = currentTheme === "light" ? "light" : "dark";
+
+    tvWidget = new TradingView.widget({
+      autosize: true,
+      symbol: symbol,
+      interval: "60",
+      timezone: "Etc/UTC",
+      theme: theme,
+      style: "1",
+      locale: "en",
+      toolbar_bg: "rgba(0, 0, 0, 0)",
+      enable_publishing: false,
+      allow_symbol_change: true,
+      container_id: "tv-chart",
+      hide_side_toolbar: false,
+      withdateranges: true,
+      details: false,
+      studies: [],
+    });
+  }
+
+  // ---------- Tickers + ticker bar ----------
+
+  async function loadTickers() {
+    try {
+      const data = await fetchJSON("/api/tickers");
+      const items = data.tickers || [];
+      const track = document.getElementById("ticker-track");
+      if (!track) return;
+
+      track.innerHTML = "";
+
+      const all = [...items, ...items]; // duplicate for smooth scroll
+
+      all.forEach((item) => {
+        const sym = item.symbol;
+        const price = formatPrice(item.price);
+        const changePct = item.change_pct;
+        const changeStr = formatChangePct(changePct);
+
+        const el = document.createElement("div");
+        el.className = "ticker-item";
+        el.dataset.symbol = sym;
+
+        const symSpan = document.createElement("span");
+        symSpan.className = "ticker-symbol";
+        symSpan.textContent = sym;
+
+        const priceSpan = document.createElement("span");
+        priceSpan.className = "ticker-price";
+        priceSpan.textContent = price;
+
+        const changeSpan = document.createElement("span");
+        changeSpan.className = "ticker-change";
+        if (changePct != null) {
+          if (changePct > 0) changeSpan.classList.add("positive");
+          if (changePct < 0) changeSpan.classList.add("negative");
+        }
+        changeSpan.textContent = changeStr;
+
+        el.appendChild(symSpan);
+        el.appendChild(priceSpan);
+        el.appendChild(changeSpan);
+
+        el.addEventListener("click", () => setSymbol(sym));
+
+        track.appendChild(el);
+      });
+    } catch (err) {
+      console.error("tickers error", err);
+    }
+  }
+
+  // ---------- News ----------
+
+  async function loadNews(symbol) {
+    try {
+      const data = await fetchJSON(`/api/news?symbol=${encodeURIComponent(symbol)}`);
+      const list = document.getElementById("news-list");
+      if (!list) return;
+
+      const items = data.news || [];
+      list.innerHTML = "";
+
+      if (!items.length) {
+        const div = document.createElement("div");
+        div.className = "placeholder";
+        div.textContent = "No headlines.";
+        list.appendChild(div);
+        return;
       }
-    } else {
-      liveUpdateTickers(data);
+
+      items.forEach((n) => {
+        const item = document.createElement("div");
+        item.className = "news-item";
+
+        const title = document.createElement("div");
+        title.className = "news-item-title";
+
+        const link = document.createElement("a");
+        link.href = n.link;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.textContent = n.title || "Untitled";
+
+        title.appendChild(link);
+
+        const meta = document.createElement("div");
+        meta.className = "news-item-meta";
+        meta.textContent = n.source || "";
+
+        item.appendChild(title);
+        item.appendChild(meta);
+        list.appendChild(item);
+      });
+    } catch (err) {
+      console.error("news error", err);
+      const list = document.getElementById("news-list");
+      if (list) {
+        list.innerHTML = "";
+        const div = document.createElement("div");
+        div.className = "placeholder";
+        div.textContent = "Failed to load news.";
+        list.appendChild(div);
+      }
     }
-  } catch (e) {
-    // ignore
   }
-}
 
-// ---------- News ----------
-function renderNewsList(symbol, articles) {
-  newsSymbolEl.textContent = symbol;
-  newsList.innerHTML = "";
-  if (!Array.isArray(articles) || !articles.length) {
-    newsList.innerHTML = '<div class="muted">No headlines.</div>';
-    return;
-  }
-  articles.forEach((n) => {
-    const item = document.createElement("div");
-    item.className = "news-item";
+  // ---------- Insights ----------
 
-    const title = document.createElement("a");
-    title.href = n.url || "#";
-    title.target = "_blank";
-    title.rel = "noopener noreferrer";
-    title.textContent = n.title || "(untitled)";
+  async function loadInsights(symbol) {
+    try {
+      const data = await fetchJSON(`/api/insights?symbol=${encodeURIComponent(symbol)}`);
+      const perf = data.performance || {};
+      const ranges = ["1W", "1M", "3M", "6M", "YTD", "1Y"];
+      let any = false;
 
-    const meta = document.createElement("div");
-    meta.className = "muted";
-    const src = n.source || "Source";
-    const ts = n.published_at || "";
-    meta.textContent = `${src}${ts ? " · " + ts : ""}`;
+      ranges.forEach((r) => {
+        const el = document.getElementById(`insight-${r}`);
+        if (!el) return;
+        const val = perf[r];
+        if (val == null) {
+          el.textContent = "—";
+          el.classList.remove("positive", "negative");
+        } else {
+          any = true;
+          el.textContent = `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
+          el.classList.remove("positive", "negative");
+          if (val > 0) el.classList.add("positive");
+          if (val < 0) el.classList.add("negative");
+        }
+      });
 
-    item.append(title, meta);
-    newsList.appendChild(item);
-  });
-}
-
-async function loadNews(symbol) {
-  newsList.innerHTML = '<div class="muted">Loading news…</div>';
-  try {
-    const r = await fetch(`${NEWS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`);
-    if (!r.ok) throw new Error("news error");
-    const data = await r.json();
-    renderNewsList(symbol, data);
-  } catch (e) {
-    newsList.innerHTML =
-      '<div class="muted">Failed to load news. Try again later.</div>';
-  }
-}
-
-// ---------- Insights ----------
-function renderInsights(symbol, data) {
-  insightsSymbolEl.textContent = symbol;
-  const perf = data.perf || {};
-  ["1W", "1M", "3M", "6M", "YTD", "1Y"].forEach((key) => {
-    const el = perfEls[key];
-    const val = perf[key];
-    if (!el) return;
-    el.textContent = fmtPct(val);
-    el.classList.remove("pos", "neg", "neu");
-    if (val == null || !isFinite(val)) {
-      el.classList.add("neu");
-    } else if (val > 0) {
-      el.classList.add("pos");
-    } else if (val < 0) {
-      el.classList.add("neg");
-    } else {
-      el.classList.add("neu");
+      const note = document.getElementById("insights-note");
+      if (note) {
+        note.textContent = any
+          ? "Performance snapshot based on Yahoo Finance historical data."
+          : "No performance snapshot.";
+      }
+    } catch (err) {
+      console.error("insights error", err);
     }
-  });
-
-  const profile = data.profile || "No performance snapshot.";
-  companyProfileEl.textContent = profile;
-}
-
-async function loadInsights(symbol) {
-  Object.values(perfEls).forEach((el) => (el.textContent = "—"));
-  companyProfileEl.textContent = "Loading insights…";
-  try {
-    const r = await fetch(
-      `${INSIGHTS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}`
-    );
-    if (!r.ok) throw new Error("insights error");
-    const data = await r.json();
-    renderInsights(symbol, data);
-  } catch (e) {
-    companyProfileEl.textContent = "Insights unavailable.";
   }
-}
 
-// ---------- Movers ----------
-function renderMovers(data) {
-  const gainers = data.gainers || [];
-  const losers = data.losers || [];
+  // ---------- Movers ----------
 
-  gainersBody.innerHTML = "";
-  losersBody.innerHTML = "";
+  async function loadMovers() {
+    try {
+      const data = await fetchJSON("/api/movers");
+      const gainers = data.gainers || [];
+      const losers = data.losers || [];
 
-  gainers.forEach((g) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="sym-cell">${g.symbol}</td>
-      <td class="num">${fmtPrice(g.price)}</td>
-      <td class="num ${g.change_pct > 0 ? "pos" : "neg"}">${fmtPct(
-      g.change_pct
-    )}</td>`;
-    tr.addEventListener("click", () => onSymbolSelect(g.symbol));
-    gainersBody.appendChild(tr);
-  });
+      const gList = document.getElementById("gainers-list");
+      const lList = document.getElementById("losers-list");
+      if (!gList || !lList) return;
 
-  losers.forEach((l) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="sym-cell">${l.symbol}</td>
-      <td class="num">${fmtPrice(l.price)}</td>
-      <td class="num ${l.change_pct > 0 ? "pos" : "neg"}">${fmtPct(
-      l.change_pct
-    )}</td>`;
-    tr.addEventListener("click", () => onSymbolSelect(l.symbol));
-    losersBody.appendChild(tr);
-  });
-}
+      gList.innerHTML = "";
+      lList.innerHTML = "";
 
-async function loadMovers() {
-  try {
-    const r = await fetch(MOVERS_ENDPOINT);
-    if (!r.ok) return;
-    const data = await r.json();
-    renderMovers(data);
-  } catch (e) {
-    // ignore
-  }
-}
+      if (!gainers.length && !losers.length) {
+        const li = document.createElement("li");
+        li.className = "placeholder";
+        li.textContent = "No data.";
+        gList.appendChild(li.cloneNode(true));
+        lList.appendChild(li);
+        return;
+      }
 
-// ---------- Selection ----------
-async function onSymbolSelect(symbol) {
-  currentSymbol = symbol;
-  mountTradingView(symbol);
-  await Promise.all([loadNews(symbol), loadInsights(symbol)]);
-}
+      gainers.forEach((g) => {
+        const li = document.createElement("li");
+        li.className = "movers-item";
+        const s = document.createElement("span");
+        s.className = "movers-symbol";
+        s.textContent = g.symbol;
+        const c = document.createElement("span");
+        c.className = "movers-change positive";
+        c.textContent = formatChangePct(g.change_pct);
+        li.appendChild(s);
+        li.appendChild(c);
+        gList.appendChild(li);
+      });
 
-// ---------- Menu / theme / tiles ----------
-function initMenu() {
-  menuToggle.addEventListener("click", () => {
-    menuPanel.classList.toggle("open");
-  });
-
-  document.addEventListener("click", (e) => {
-    if (!menuPanel.contains(e.target) && !menuToggle.contains(e.target)) {
-      menuPanel.classList.remove("open");
+      losers.forEach((g) => {
+        const li = document.createElement("li");
+        li.className = "movers-item";
+        const s = document.createElement("span");
+        s.className = "movers-symbol";
+        s.textContent = g.symbol;
+        const c = document.createElement("span");
+        c.className = "movers-change negative";
+        c.textContent = formatChangePct(g.change_pct);
+        li.appendChild(s);
+        li.appendChild(c);
+        lList.appendChild(li);
+      });
+    } catch (err) {
+      console.error("movers error", err);
     }
-  });
+  }
 
-  themeSwitch.addEventListener("change", () => {
-    setTheme(themeSwitch.checked ? "light" : "dark");
-  });
+  // ---------- Resizers ----------
 
-  document.querySelectorAll(".menu-shortcut[data-symbol]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const sym = btn.dataset.symbol;
-      if (sym) onSymbolSelect(sym);
-    });
-  });
+  function initRowResizers() {
+    const resizers = document.querySelectorAll(".row-resizer");
+    resizers.forEach((rz) => {
+      let dragging = false;
+      let startY = 0;
+      let prevRow, nextRow, prevH, nextH;
 
-  if (heatmapShortcut) {
-    heatmapShortcut.addEventListener("click", () => {
-      window.location.href = "/heatmap";
+      rz.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        const rowIndex = parseInt(rz.getAttribute("data-row"), 10);
+        const rows = document.querySelectorAll(".row");
+        prevRow = rows[rowIndex - 1];
+        nextRow = rows[rowIndex];
+        if (!prevRow || !nextRow) return;
+        dragging = true;
+        startY = e.clientY;
+        prevH = prevRow.offsetHeight;
+        nextH = nextRow.offsetHeight;
+        document.body.style.userSelect = "none";
+      });
+
+      window.addEventListener("mousemove", (e) => {
+        if (!dragging) return;
+        const dy = e.clientY - startY;
+        const newPrev = Math.max(120, prevH + dy);
+        const newNext = Math.max(140, nextH - dy);
+        prevRow.style.height = `${newPrev}px`;
+        nextRow.style.height = `${newNext}px`;
+      });
+
+      window.addEventListener("mouseup", () => {
+        dragging = false;
+        document.body.style.userSelect = "";
+      });
     });
   }
 
-  document.querySelectorAll("[data-tile-toggle]").forEach((check) => {
-    check.addEventListener("change", () => {
-      const id = check.getAttribute("data-tile-toggle");
-      const tile = document.querySelector(`[data-tile-id="${id}"]`);
-      if (!tile) return;
-      tile.style.display = check.checked ? "" : "none";
+  function initColResizers() {
+    const resizers = document.querySelectorAll(".col-resizer");
+    resizers.forEach((rz) => {
+      let dragging = false;
+      let startX = 0;
+      let leftTile, rightTile, totalWidth, leftStart;
+
+      rz.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        const row = rz.closest(".row");
+        if (!row) return;
+        const tiles = row.querySelectorAll(".tile");
+        if (tiles.length !== 2) return;
+        leftTile = tiles[0];
+        rightTile = tiles[1];
+        totalWidth = row.clientWidth - rz.offsetWidth;
+        leftStart = leftTile.clientWidth;
+        dragging = true;
+        startX = e.clientX;
+        document.body.style.userSelect = "none";
+      });
+
+      window.addEventListener("mousemove", (e) => {
+        if (!dragging) return;
+        const dx = e.clientX - startX;
+        let newLeft = leftStart + dx;
+        const min = 220;
+        const max = totalWidth - min;
+        newLeft = Math.max(min, Math.min(max, newLeft));
+        const leftPct = (newLeft / totalWidth) * 100;
+        const rightPct = 100 - leftPct;
+        leftTile.style.flex = `0 0 ${leftPct}%`;
+        rightTile.style.flex = `0 0 ${rightPct}%`;
+      });
+
+      window.addEventListener("mouseup", () => {
+        dragging = false;
+        document.body.style.userSelect = "";
+      });
     });
-  });
-
-  document.querySelectorAll("[data-close-tile]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.getAttribute("data-close-tile");
-      const tile = document.querySelector(`[data-tile-id="${id}"]`);
-      const check = document.querySelector(`input[data-tile-toggle="${id}"]`);
-      if (tile) tile.style.display = "none";
-      if (check) check.checked = false;
-    });
-  });
-
-  fundamentalsBtn.addEventListener("click", () => {
-    window.location.href = "/fundamentals";
-  });
-}
-
-// ---------- Resizing ----------
-function initRowResizing() {
-  let currentResizer = null;
-  let startY = 0;
-  let startHeightTop = 0;
-  let startHeightBottom = 0;
-
-  const onMouseMove = (e) => {
-    if (!currentResizer) return;
-    const dy = e.clientY - startY;
-
-    const topRow = currentResizer === rowResizer1 ? row1 : row2;
-    const bottomRow = currentResizer === rowResizer1 ? row2 : row3;
-
-    const newTop = Math.max(150, startHeightTop + dy);
-    const newBottom = Math.max(150, startHeightBottom - dy);
-
-    topRow.style.height = newTop + "px";
-    bottomRow.style.height = newBottom + "px";
-  };
-
-  const onMouseUp = () => {
-    currentResizer = null;
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", onMouseUp);
-  };
-
-  [rowResizer1, rowResizer2].forEach((resizer) => {
-    resizer.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      currentResizer = resizer;
-      startY = e.clientY;
-      const topRow = resizer === rowResizer1 ? row1 : row2;
-      const bottomRow = resizer === rowResizer1 ? row2 : row3;
-      startHeightTop = topRow.getBoundingClientRect().height;
-      startHeightBottom = bottomRow.getBoundingClientRect().height;
-
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    });
-  });
-}
-
-function initColResizingRow1() {
-  let isResizing = false;
-  let startX = 0;
-  let startWidthLeft = 0;
-  let startWidthRight = 0;
-
-  const onMove = (e) => {
-    if (!isResizing) return;
-    const dx = e.clientX - startX;
-    const total = startWidthLeft + startWidthRight;
-    let newLeft = startWidthLeft + dx;
-    newLeft = Math.max(200, Math.min(total - 200, newLeft));
-    const leftPct = (newLeft / total) * 100;
-    const rightPct = 100 - leftPct;
-
-    tileChart.style.flexBasis = leftPct + "%";
-    tileNews.style.flexBasis = rightPct + "%";
-  };
-
-  const onUp = () => {
-    isResizing = false;
-    document.removeEventListener("mousemove", onMove);
-    document.removeEventListener("mouseup", onUp);
-  };
-
-  colResizerRow1.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    const rectLeft = tileChart.getBoundingClientRect();
-    const rectRight = tileNews.getBoundingClientRect();
-    startX = e.clientX;
-    startWidthLeft = rectLeft.width;
-    startWidthRight = rectRight.width;
-    isResizing = true;
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  });
-}
-
-// ---------- Ticker scroll pause ----------
-function initTickerScrollPause() {
-  const bar = document.querySelector(".ticker-bar");
-  bar.addEventListener("mouseenter", () => {
-    bar.classList.add("paused");
-  });
-  bar.addEventListener("mouseleave", () => {
-    bar.classList.remove("paused");
-  });
-}
-
-// ---------- Boot ----------
-document.addEventListener("DOMContentLoaded", () => {
-  initTheme();
-  initMenu();
-  initRowResizing();
-  initColResizingRow1();
-  initTickerScrollPause();
-
-  row1.style.height = "420px";
-  row2.style.height = "260px";
-  row3.style.height = "260px";
-
-  mountTradingView(currentSymbol);
-  loadNews(currentSymbol);
-  loadInsights(currentSymbol);
-  loadTickers();
-  loadMovers();
-
-  // Longer intervals to avoid hammering Yahoo
-  setInterval(loadTickers, 60000); // 60s
-  setInterval(loadMovers, 120000); // 2 min
-});
+  }
+})();
