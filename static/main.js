@@ -1,520 +1,374 @@
-// ------------------------------------------------------------
-// Basic helpers
-// ------------------------------------------------------------
+let currentSymbol = "AAPL";
+let theme = "dark";
 
-const state = {
-  currentSymbol: "AAPL",
-  currentTvSymbol: "AAPL",
-  tvWidget: null,
-  theme: "dark",
-  tickerData: [],
-};
+// ------------------- Helpers -------------------
 
-function qs(sel) {
+function $(sel) {
   return document.querySelector(sel);
 }
 
-function qsa(sel) {
-  return Array.from(document.querySelectorAll(sel));
+function createEl(tag, className) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  return el;
 }
 
-// ------------------------------------------------------------
-// Theme handling
-// ------------------------------------------------------------
+// ------------------- Theme -------------------
 
-function applyTheme(theme) {
+function applyTheme(nextTheme) {
+  theme = nextTheme;
+  const body = document.body;
   const html = document.documentElement;
-  html.setAttribute("data-theme", theme);
-  state.theme = theme;
 
-  // TradingView theme
-  if (state.tvWidget) {
-    const tvTheme = theme === "dark" ? "dark" : "light";
-    state.tvWidget.remove();
-    initTradingView(state.currentTvSymbol, state.currentSymbol, tvTheme);
+  if (theme === "light") {
+    body.classList.remove("theme-dark");
+    body.classList.add("theme-light");
+    html.setAttribute("data-theme", "light");
+  } else {
+    body.classList.remove("theme-light");
+    body.classList.add("theme-dark");
+    html.setAttribute("data-theme", "dark");
   }
+
+  renderChart(currentSymbol);
 }
 
 function initThemeToggle() {
-  const toggle = qs("#theme-toggle");
-  if (!toggle) return;
-
-  toggle.checked = state.theme === "dark";
+  const toggle = $("#themeToggle");
+  toggle.checked = theme === "dark";
 
   toggle.addEventListener("change", () => {
-    const newTheme = toggle.checked ? "dark" : "light";
-    applyTheme(newTheme);
+    applyTheme(toggle.checked ? "dark" : "light");
   });
 }
 
-// ------------------------------------------------------------
-// Menu dropdown (including theme switch location)
-// ------------------------------------------------------------
+// ------------------- Menu -------------------
 
 function initMenu() {
-  const btn = qs("#menu-button");
-  const dropdown = qs("#menu-dropdown");
-  if (!btn || !dropdown) return;
+  const btn = $("#menuButton");
+  const dropdown = $("#menuDropdown");
 
   btn.addEventListener("click", () => {
-    dropdown.classList.toggle("hidden");
+    dropdown.classList.toggle("open");
   });
 
   document.addEventListener("click", (e) => {
-    if (!btn.contains(e.target) && !dropdown.contains(e.target)) {
-      dropdown.classList.add("hidden");
+    if (!dropdown.contains(e.target) && !btn.contains(e.target)) {
+      dropdown.classList.remove("open");
     }
   });
 
-  // Shortcuts (SPY / QQQ)
-  qsa(".menu-shortcut").forEach((el) => {
-    el.addEventListener("click", () => {
-      const tvSymbol = el.dataset.symbol;
-      const label = el.dataset.label;
-      state.currentSymbol = label;
-      setSymbol(tvSymbol, label);
-      dropdown.classList.add("hidden");
+  document.querySelectorAll(".shortcut").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sym = btn.getAttribute("data-symbol");
+      setSymbol(sym);
+      dropdown.classList.remove("open");
     });
   });
 
-  // Tile visibility
-  qsa(".menu-checkbox input[type=checkbox]").forEach((checkbox) => {
-    checkbox.addEventListener("change", () => {
-      const tileId = checkbox.dataset.tile;
-      const tile = document.getElementById(tileId);
-      if (!tile) return;
-      tile.style.display = checkbox.checked ? "flex" : "none";
-    });
+  const heatmapLink = $("#heatmapLink");
+  heatmapLink.addEventListener("click", () => {
+    window.location.href = "/heatmap";
+  });
+}
+
+// ------------------- TradingView Chart -------------------
+
+let tvWidget = null;
+
+function renderChart(symbol) {
+  const containerId = "tv-chart-container";
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  const themeName = theme === "light" ? "light" : "dark";
+
+  tvWidget = new TradingView.widget({
+    symbol: symbol,
+    interval: "60",
+    container_id: containerId,
+    autosize: true,
+    height: "100%",
+    width: "100%",
+    timezone: "Etc/UTC",
+    theme: themeName,
+    style: "1",
+    hide_side_toolbar: false,
+    hide_top_toolbar: false,
+    locale: "en",
+    enable_publishing: false,
+    allow_symbol_change: false,
   });
 
-  // Heatmap link
-  const heatmapLink = qs("#heatmap-link");
-  if (heatmapLink) {
-    heatmapLink.addEventListener("click", () => {
-      window.open(
-        "https://www.tradingview.com/heatmap/stock/?index=SPX&color=change&label=change",
-        "_blank"
-      );
-    });
+  $("#chart-title").textContent = `Chart – ${symbol}`;
+}
+
+// ------------------- API calls -------------------
+
+async function fetchJSON(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) {
+    return null;
   }
 }
-
-// ------------------------------------------------------------
-// TradingView chart
-// ------------------------------------------------------------
-
-function initTradingView(tvSymbol, label, theme = "dark") {
-  state.currentTvSymbol = tvSymbol;
-  const container = "tv-chart";
-
-  new TradingView.widget({
-    autosize: true,
-    symbol: tvSymbol,
-    interval: "60",
-    timezone: "Etc/UTC",
-    theme: theme,
-    style: "1",
-    locale: "en",
-    toolbar_bg: "#000000",
-    enable_publishing: false,
-    hide_top_toolbar: false,
-    hide_side_toolbar: false,
-    container_id: container,
-  });
-
-  qs("#chart-title").textContent = `Chart – ${label}`;
-}
-
-// simple wrapper to reset widget
-function setSymbol(tvSymbol, shortLabel) {
-  state.currentSymbol = shortLabel;
-  qs("#news-title").textContent = `News – ${shortLabel}`;
-  qs("#insights-title").textContent = `Market Insights: ${shortLabel}`;
-
-  // Re-create widget (TradingView doesn't expose symbol change easily)
-  const tvContainer = qs("#tv-chart");
-  tvContainer.innerHTML = "";
-  initTradingView(tvSymbol, shortLabel, state.theme === "dark" ? "dark" : "light");
-
-  loadNews(shortLabel);
-  loadInsights(shortLabel);
-}
-
-// ------------------------------------------------------------
-// Ticker bar + movers
-// ------------------------------------------------------------
 
 async function loadTickers() {
-  try {
-    const res = await fetch("/api/tickers");
-    const data = await res.json();
-    state.tickerData = data.tickers || [];
-    renderTickerBar();
-  } catch (err) {
-    console.error("tickers error", err);
-  }
+  const data = await fetchJSON("/api/tickers");
+  if (!data || !Array.isArray(data.tickers)) return;
+  renderTickerBar(data.tickers);
 }
 
-function renderTickerBar() {
-  const el = qs("#ticker-marquee");
-  if (!el) return;
-  el.innerHTML = "";
+async function loadNews() {
+  const data = await fetchJSON(`/api/news?symbol=${encodeURIComponent(currentSymbol)}`);
+  const list = $("#news-list");
+  list.innerHTML = "";
 
-  if (!state.tickerData.length) {
-    el.textContent = "No ticker data";
+  if (!data || !Array.isArray(data.items) || data.items.length === 0) {
+    list.textContent = "No headlines available.";
     return;
   }
 
-  state.tickerData.forEach((t) => {
-    const item = document.createElement("div");
-    item.className = "ticker-item";
-    item.dataset.symbol = t.symbol;
-
-    const sym = document.createElement("span");
-    sym.className = "ticker-symbol";
-    sym.textContent = t.symbol;
-
-    const price = document.createElement("span");
-    price.className = "ticker-price";
-    price.textContent =
-      typeof t.price === "number" ? t.price.toFixed(2) : "—";
-
-    const change = document.createElement("span");
-    const pct = t.changePercent;
-    if (typeof pct === "number") {
-      change.textContent = `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
-      change.className =
-        pct > 0 ? "ticker-change-positive" : "ticker-change-negative";
-    } else {
-      change.textContent = "—";
-    }
-
-    item.appendChild(sym);
-    item.appendChild(price);
-    item.appendChild(change);
-
-    item.addEventListener("click", () => {
-      // TradingView uses plain symbol for US stocks
-      state.currentSymbol = t.symbol;
-      setSymbol(t.symbol, t.symbol);
-    });
-
-    el.appendChild(item);
+  data.items.forEach((item) => {
+    const wrapper = createEl("div", "news-item");
+    const link = createEl("a", "news-item-title");
+    link.href = item.url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = item.title;
+    const meta = createEl("div", "news-item-meta");
+    meta.textContent = `${item.source} – ${item.published}`;
+    wrapper.appendChild(link);
+    wrapper.appendChild(meta);
+    list.appendChild(wrapper);
   });
+
+  $("#news-title").textContent = `News – ${currentSymbol}`;
+}
+
+async function loadInsights() {
+  const data = await fetchJSON(`/api/insights?symbol=${encodeURIComponent(currentSymbol)}`);
+  const grid = $("#insights-grid");
+  const desc = $("#insights-description");
+  grid.innerHTML = "";
+  desc.textContent = "";
+
+  if (!data || !Array.isArray(data.periods) || data.periods.length === 0) {
+    desc.textContent = "No performance snapshot available at this time.";
+    return;
+  }
+
+  data.periods.forEach((p) => {
+    const box = createEl("div", "insight-box");
+    const label = createEl("div", "insight-label");
+    label.textContent = p.label;
+    const val = createEl("div", "insight-value");
+    if (p.value > 0) {
+      val.classList.add("positive");
+    } else if (p.value < 0) {
+      val.classList.add("negative");
+    }
+    val.textContent = `${p.value.toFixed(2)}%`;
+    box.appendChild(val);
+    box.appendChild(label);
+    grid.appendChild(box);
+  });
+
+  desc.textContent =
+    "Performance snapshot based on Yahoo Finance historical daily data.";
+  $("#insights-title").textContent = `Market Insights: ${currentSymbol}`;
 }
 
 async function loadMovers() {
-  try {
-    const res = await fetch("/api/movers");
-    const data = await res.json();
-    renderMovers(data.gainers || [], data.losers || []);
-  } catch (err) {
-    console.error("movers error", err);
-  }
-}
+  const data = await fetchJSON("/api/movers");
+  const gainersEl = $("#gainers-list");
+  const losersEl = $("#losers-list");
+  gainersEl.innerHTML = "";
+  losersEl.innerHTML = "";
 
-function renderMovers(gainers, losers) {
-  const gList = qs("#gainers-list");
-  const lList = qs("#losers-list");
-  if (!gList || !lList) return;
-  gList.innerHTML = "";
-  lList.innerHTML = "";
-
-  if (!gainers.length && !losers.length) {
-    gList.innerHTML = '<li class="mover-item">No data</li>';
-    lList.innerHTML = '<li class="mover-item">No data</li>';
+  if (!data) {
+    gainersEl.innerHTML = "<li>No data</li>";
+    losersEl.innerHTML = "<li>No data</li>";
     return;
   }
 
-  gainers.forEach((m) => {
-    const li = document.createElement("li");
-    li.className = "mover-item";
-    li.innerHTML = `<span>${m.symbol}</span><span class="ticker-change-positive">${m.changePercent.toFixed(
+  (data.gainers || []).forEach((item) => {
+    const li = createEl("li", "mover-item");
+    li.innerHTML = `<span>${item.symbol}</span><span class="ticker-change positive">${item.change_pct.toFixed(
       2
     )}%</span>`;
-    gList.appendChild(li);
+    gainersEl.appendChild(li);
   });
 
-  losers.forEach((m) => {
-    const li = document.createElement("li");
-    li.className = "mover-item";
-    li.innerHTML = `<span>${m.symbol}</span><span class="ticker-change-negative">${m.changePercent.toFixed(
+  (data.losers || []).forEach((item) => {
+    const li = createEl("li", "mover-item");
+    li.innerHTML = `<span>${item.symbol}</span><span class="ticker-change negative">${item.change_pct.toFixed(
       2
     )}%</span>`;
-    lList.appendChild(li);
+    losersEl.appendChild(li);
   });
 }
 
-// ------------------------------------------------------------
-// News
-// ------------------------------------------------------------
+// ------------------- Ticker bar -------------------
 
-async function loadNews(symbol) {
-  const list = qs("#news-list");
-  if (!list) return;
-  list.innerHTML = '<div class="placeholder">Loading news…</div>';
+function renderTickerBar(tickers) {
+  const track = $("#ticker-track");
+  if (!track) return;
+  track.innerHTML = "";
 
-  try {
-    const res = await fetch(`/api/news?symbol=${encodeURIComponent(symbol)}`);
-    const data = await res.json();
-    const items = data.items || [];
+  const items = [...tickers, ...tickers]; // duplicate for smooth loop
 
-    if (!items.length) {
-      list.innerHTML =
-        '<div class="placeholder">No headlines available.</div>';
-      return;
-    }
+  items.forEach((t) => {
+    const item = createEl("div", "ticker-item");
+    const symbol = createEl("span", "ticker-symbol");
+    symbol.textContent = t.symbol;
+    const price = createEl("span", "ticker-price");
+    price.textContent = t.price.toFixed(2);
+    const change = createEl("span", "ticker-change");
+    change.textContent = `${t.change_pct.toFixed(2)}%`;
+    if (t.change_pct > 0) change.classList.add("positive");
+    if (t.change_pct < 0) change.classList.add("negative");
 
-    list.innerHTML = "";
-    items.forEach((item) => {
-      const el = document.createElement("div");
-      el.className = "news-item";
-      el.style.marginBottom = "6px";
-      el.innerHTML = `
-        <a href="${item.link}" target="_blank" class="news-title">${item.title}</a>
-        <div class="news-meta">${item.source || "Source"} • ${
-        item.published || ""
-      }</div>
-      `;
-      list.appendChild(el);
-    });
-  } catch (err) {
-    console.error("news error", err);
-    list.innerHTML =
-      '<div class="placeholder">Failed to load news.</div>';
-  }
+    item.appendChild(symbol);
+    item.appendChild(price);
+    item.appendChild(change);
+
+    item.addEventListener("click", () => setSymbol(t.symbol));
+
+    track.appendChild(item);
+  });
+
+  // pause on hover
+  const bar = $("#ticker-bar");
+  bar.addEventListener("mouseenter", () => {
+    track.style.animationPlayState = "paused";
+  });
+  bar.addEventListener("mouseleave", () => {
+    track.style.animationPlayState = "running";
+  });
 }
 
-// ------------------------------------------------------------
-// Insights
-// ------------------------------------------------------------
-
-async function loadInsights(symbol) {
-  const grid = qs("#insights-grid");
-  const desc = qs("#insights-description");
-  if (!grid || !desc) return;
-
-  grid.innerHTML = "";
-  desc.textContent = "Loading performance snapshot…";
-
-  try {
-    const res = await fetch(`/api/insights?symbol=${encodeURIComponent(symbol)}`);
-    const data = await res.json();
-    const changes = data.changes || {};
-
-    const horizons = ["1W", "1M", "3M", "6M", "YTD", "1Y"];
-    horizons.forEach((h) => {
-      const val = changes[h];
-      const box = document.createElement("div");
-      box.className = "insight-box";
-
-      const label = document.createElement("div");
-      label.className = "insight-label";
-      label.textContent = h;
-
-      const value = document.createElement("div");
-      value.className = "insight-value";
-      if (typeof val === "number") {
-        value.textContent = `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
-        value.style.color = val >= 0 ? "#21c67a" : "#ff4c4c";
-      } else {
-        value.textContent = "—";
-        value.style.color = "#a0a4ad";
-      }
-
-      box.appendChild(label);
-      box.appendChild(value);
-      grid.appendChild(box);
-    });
-
-    desc.textContent = data.description || "No performance snapshot.";
-  } catch (err) {
-    console.error("insights error", err);
-    desc.textContent = "Failed to load snapshot.";
-  }
-}
-
-// ------------------------------------------------------------
-// Economic calendar
-// ------------------------------------------------------------
-
-async function loadCalendar() {
-  const body = qs("#calendar-body");
-  if (!body) return;
-  body.innerHTML = '<div class="placeholder">Loading calendar…</div>';
-
-  try {
-    const res = await fetch("/api/calendar");
-    const data = await res.json();
-    const events = data.events || [];
-
-    if (!events.length) {
-      body.innerHTML =
-        '<div class="placeholder">No events available.</div>';
-      return;
-    }
-
-    const table = document.createElement("table");
-    table.innerHTML = `
-      <thead>
-        <tr>
-          <th>Time</th>
-          <th>Country</th>
-          <th>Event</th>
-          <th>Actual</th>
-          <th>Forecast</th>
-          <th>Previous</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    `;
-    const tbody = table.querySelector("tbody");
-
-    events.forEach((ev) => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${ev.time || ""}</td>
-        <td>${ev.country || ""}</td>
-        <td>${ev.event || ""}</td>
-        <td>${ev.actual || ""}</td>
-        <td>${ev.forecast || ""}</td>
-        <td>${ev.previous || ""}</td>
-      `;
-      tbody.appendChild(tr);
-    });
-
-    body.innerHTML = "";
-    body.appendChild(table);
-  } catch (err) {
-    console.error("calendar error", err);
-    body.innerHTML =
-      '<div class="placeholder">Failed to load calendar.</div>';
-  }
-}
-
-// ------------------------------------------------------------
-// Macro map (simple D3 choropleth with sample data)
-// ------------------------------------------------------------
+// ------------------- Macro map -------------------
 
 function initMacroMap() {
-  const container = qs("#macro-map");
-  if (!container || !window.d3) return;
+  const tooltip = $("#macro-tooltip");
+  const svg = $("#macro-map-svg");
+  if (!svg) return;
 
-  const width = container.clientWidth || 400;
-  const height = container.clientHeight || 220;
-
-  const svg = d3
-    .select(container)
-    .append("svg")
-    .attr("width", width)
-    .attr("height", height);
-
-  const projection = d3
-    .geoMercator()
-    .scale(width / 6.3)
-    .translate([width / 2, height / 1.4]);
-  const path = d3.geoPath().projection(projection);
-
-  // Sample inflation data (%)
-  const inflation = {
-    US: 3.4,
-    CA: 2.8,
-    GB: 4.1,
-    DE: 2.3,
-    FR: 2.6,
-    IT: 2.1,
-    ES: 3.0,
-    BR: 5.3,
-    IN: 4.5,
-    CN: 1.1,
-    JP: 2.0,
-    AU: 3.8,
+  const data = {
+    us: { name: "United States", inflation: "3.2%", gdp: "2.4%", rate: "5.50%" },
+    eu: { name: "Euro Area", inflation: "2.7%", gdp: "0.6%", rate: "4.00%" },
+    me: { name: "Middle East", inflation: "4.8%", gdp: "3.1%", rate: "4.25%" },
+    asia: { name: "Asia-Pacific", inflation: "2.1%", gdp: "4.5%", rate: "3.00%" },
+    latam: { name: "Latin America", inflation: "6.2%", gdp: "1.9%", rate: "7.50%" },
+    aus: { name: "Australia & NZ", inflation: "3.5%", gdp: "2.1%", rate: "4.35%" },
   };
 
-  const color = d3
-    .scaleThreshold()
-    .domain([1, 2, 4, 6, 8])
-    .range(["#14141a", "#214f7a", "#2a7ab9", "#f5b400", "#e86b3a", "#ff4c4c"]);
+  svg.querySelectorAll(".country").forEach((el) => {
+    const classes = Array.from(el.classList);
+    const key = classes.find((c) => data[c]);
+    if (!key) return;
+    const info = data[key];
 
-  const tooltip = d3
-    .select(container)
-    .append("div")
-    .style("position", "absolute")
-    .style("pointer-events", "none")
-    .style("background", "rgba(0,0,0,0.85)")
-    .style("color", "#fff")
-    .style("padding", "4px 6px")
-    .style("border-radius", "4px")
-    .style("font-size", "10px")
-    .style("opacity", 0);
+    el.addEventListener("mousemove", (e) => {
+      const bbox = svg.getBoundingClientRect();
+      tooltip.style.left = `${e.clientX - bbox.left}px`;
+      tooltip.style.top = `${e.clientY - bbox.top}px`;
+      tooltip.innerHTML = `<strong>${info.name}</strong><br/>Inflation: ${
+        info.inflation
+      }<br/>GDP: ${info.gdp}<br/>Policy rate: ${info.rate}`;
+      tooltip.style.opacity = "1";
+    });
 
-  d3.json("https://unpkg.com/world-atlas@2/countries-110m.json").then(
-    (world) => {
-      const countries = topojson.feature(world, world.objects.countries)
-        .features;
-
-      svg
-        .selectAll("path.country")
-        .data(countries)
-        .enter()
-        .append("path")
-        .attr("class", "country")
-        .attr("d", path)
-        .attr("fill", (d) => {
-          const iso3 = d.id; // numeric; we don't have mapping -> keep neutral
-          return "#14141a";
-        })
-        .attr("stroke", "#20202a")
-        .attr("stroke-width", 0.4)
-        .on("mousemove", (event, d) => {
-          const name = d.properties.name || "Country";
-          // we only have sample inflation for a few ISO2 codes; show "n/a" for others
-          const value = "n/a";
-          tooltip
-            .style("opacity", 1)
-            .html(`${name}<br/>Inflation: ${value}`)
-            .style("left", event.offsetX + 10 + "px")
-            .style("top", event.offsetY + 10 + "px");
-        })
-        .on("mouseout", () => {
-          tooltip.style("opacity", 0);
-        });
-
-      // Simple legend text
-      const legend = qs("#macro-legend");
-      if (legend) {
-        legend.textContent =
-          "Example macro map (inflation %). Hover over countries for info (data is illustrative).";
-      }
-    }
-  );
+    el.addEventListener("mouseleave", () => {
+      tooltip.style.opacity = "0";
+    });
+  });
 }
 
-// ------------------------------------------------------------
-// Init
-// ------------------------------------------------------------
+// ------------------- Economic calendar (static sample) -------------------
 
-document.addEventListener("DOMContentLoaded", () => {
-  initMenu();
+function loadCalendar() {
+  const container = $("#calendar-container");
+  container.innerHTML = "";
+
+  const table = createEl("table", "calendar-table");
+  const thead = createEl("thead");
+  thead.innerHTML =
+    "<tr><th>Time</th><th>Country</th><th>Event</th><th>Actual</th><th>Forecast</th><th>Previous</th></tr>";
+  table.appendChild(thead);
+
+  const tbody = createEl("tbody");
+
+  const sample = [
+    {
+      time: "08:30",
+      country: "US",
+      event: "Nonfarm Payrolls",
+      actual: "210K",
+      forecast: "185K",
+      previous: "165K",
+    },
+    {
+      time: "10:00",
+      country: "US",
+      event: "ISM Services PMI",
+      actual: "52.4",
+      forecast: "51.8",
+      previous: "50.9",
+    },
+    {
+      time: "14:00",
+      country: "EU",
+      event: "ECB Rate Decision",
+      actual: "4.00%",
+      forecast: "4.00%",
+      previous: "4.00%",
+    },
+  ];
+
+  sample.forEach((row) => {
+    const tr = createEl("tr");
+    tr.innerHTML = `<td>${row.time}</td><td>${row.country}</td><td>${row.event}</td><td>${row.actual}</td><td>${row.forecast}</td><td>${row.previous}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  table.appendChild(tbody);
+  container.appendChild(table);
+}
+
+// ------------------- Symbol switching -------------------
+
+function setSymbol(symbol) {
+  currentSymbol = symbol;
+  renderChart(symbol);
+  loadNews();
+  loadInsights();
+}
+
+// ------------------- Init -------------------
+
+async function init() {
   initThemeToggle();
-
-  // Default dark
-  applyTheme("dark");
-
-  // Chart: start with AAPL
-  initTradingView("AAPL", "AAPL", "dark");
-
-  // Data
-  loadTickers();
-  loadMovers();
-  loadNews("AAPL");
-  loadInsights("AAPL");
-  loadCalendar();
+  initMenu();
   initMacroMap();
+  loadCalendar();
 
-  // Refresh tickers + movers every 60s
-  setInterval(() => {
-    loadTickers();
-    loadMovers();
-  }, 60000);
-});
+  renderChart(currentSymbol);
+  loadNews();
+  loadInsights();
+  loadMovers();
+  loadTickers();
+
+  // refresh data every 60 seconds
+  setInterval(loadTickers, 60000);
+  setInterval(loadMovers, 60000);
+  setInterval(loadNews, 120000);
+  setInterval(loadInsights, 300000);
+}
+
+document.addEventListener("DOMContentLoaded", init);
