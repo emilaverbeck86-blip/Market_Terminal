@@ -1,30 +1,46 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Market Terminal – Heatmap</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="/static/style.css" rel="stylesheet">
+  <meta charset="UTF-8">
+  <title>Market Terminal – Heatmap</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js" async></script>
 </head>
 <body class="theme-dark">
-<header class="top-bar">
-    <div class="brand">MARKET TERMINAL</div>
-    <div class="ticker-marquee small-note">S&amp;P 500 Heatmap</div>
-    <div class="top-actions">
-        <a href="/" class="top-btn">Back to Terminal</a>
-    </div>
+<header class="mt-header">
+  <div class="mt-logo">MARKET TERMINAL</div>
+  <div class="mt-header-right">
+    <a href="/" class="mt-button mt-button-ghost">Back to Terminal</a>
+  </div>
 </header>
 
-<main class="heatmap-main">
-    <!-- TradingView heatmap embed -->
-    <div class="heatmap-container">
-        <iframe
-            src="https://s.tradingview.com/widgetembed/?frameElementId=tradingview_heatmap&symbol=SP%3AXSP&interval=D&hidetoptoolbar=1&symboledit=1&saveimage=0&toolbarbg=1f2430&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hidelegend=0&showpopupbutton=0&locale=en#%7B%22page-uri%22%3A%22heatmap%22%7D"
-            frameborder="0"
-            allowtransparency="true"
-            scrolling="no"
-        ></iframe>
+<main class="mt-main mt-main-full">
+  <section class="mt-tile mt-tile-full">
+    <div class="mt-tile-header">
+      <span>S&amp;P 500 Heatmap</span>
     </div>
+    <div class="mt-tile-body">
+      <div class="tradingview-widget-container" style="height:100%;width:100%">
+        <div id="tv-heatmap" style="height:100%;width:100%"></div>
+        <script>
+          new TradingView.widget({
+            "container_id": "tv-heatmap",
+            "width": "100%",
+            "height": "100%",
+            "colorTheme": "dark",
+            "dataSource": "S&P500",
+            "exchange": "US",
+            "locale": "en",
+            "showSymbolLogo": true,
+            "isDataSetEnabled": true,
+            "symbolSettings": [],
+            "plotType": "heatmap"
+          });
+        </script>
+      </div>
+    </div>
+  </section>
 </main>
 </body>
 </html>
