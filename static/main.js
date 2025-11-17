@@ -1,505 +1,520 @@
-// ---------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------
+// ------------------------------------------------------------
+// Basic helpers
+// ------------------------------------------------------------
 
-let currentSymbol = "AAPL";
-let currentTheme = "dark";
-let tvWidget = null;
-
-// Simple macro data (illustrative only)
-const MACRO_DATA = {
-  inflation: {
-    US: 3.4,
-    Eurozone: 2.8,
-    UK: 3.1,
-    Japan: 2.2,
-    China: 0.8,
-    Canada: 2.6,
-    Australia: 3.0,
-    Brazil: 4.5,
-    India: 4.2,
-  },
-  rates: {
-    US: 5.5,
-    Eurozone: 4.5,
-    UK: 5.25,
-    Japan: 0.1,
-    China: 3.45,
-    Canada: 5.0,
-    Australia: 4.35,
-    Brazil: 10.75,
-    India: 6.5,
-  },
-  gdp: {
-    US: 2.1,
-    Eurozone: 0.9,
-    UK: 0.8,
-    Japan: 1.0,
-    China: 4.8,
-    Canada: 1.6,
-    Australia: 1.9,
-    Brazil: 2.3,
-    India: 6.2,
-  },
-  unemployment: {
-    US: 3.9,
-    Eurozone: 6.5,
-    UK: 4.3,
-    Japan: 2.6,
-    China: 5.0,
-    Canada: 5.5,
-    Australia: 3.9,
-    Brazil: 7.8,
-    India: 7.1,
-  },
+const state = {
+  currentSymbol: "AAPL",
+  currentTvSymbol: "AAPL",
+  tvWidget: null,
+  theme: "dark",
+  tickerData: [],
 };
 
-// ---------------------------------------------------------------------
-// TradingView chart
-// ---------------------------------------------------------------------
-
-function createChart() {
-  if (!window.TradingView) return;
-
-  const container = document.getElementById("chart-container");
-  if (!container) return;
-
-  container.innerHTML = ""; // clear old widget if any
-
-  // Map some index shortcuts back to TradingView symbols
-  const tvSymbol = currentSymbol;
-
-  tvWidget = new TradingView.widget({
-    container_id: "chart-container",
-    symbol: tvSymbol,
-    autosize: true,
-    interval: "60",
-    timezone: "Etc/UTC",
-    theme: currentTheme === "dark" ? "dark" : "light",
-    style: "1",
-    locale: "en",
-    toolbar_bg: "rgba(0,0,0,0)",
-    hide_top_toolbar: false,
-    hide_legend: false,
-    withdateranges: true,
-  });
-
-  const chartTitle = document.getElementById("chart-title");
-  if (chartTitle) chartTitle.textContent = `Chart – ${currentSymbol}`;
+function qs(sel) {
+  return document.querySelector(sel);
 }
 
-// ---------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------
+function qsa(sel) {
+  return Array.from(document.querySelectorAll(sel));
+}
 
-async function safeJsonFetch(url) {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (err) {
-    console.error("Request failed", url, err);
-    return null;
+// ------------------------------------------------------------
+// Theme handling
+// ------------------------------------------------------------
+
+function applyTheme(theme) {
+  const html = document.documentElement;
+  html.setAttribute("data-theme", theme);
+  state.theme = theme;
+
+  // TradingView theme
+  if (state.tvWidget) {
+    const tvTheme = theme === "dark" ? "dark" : "light";
+    state.tvWidget.remove();
+    initTradingView(state.currentTvSymbol, state.currentSymbol, tvTheme);
   }
 }
 
-// ---------------------------------------------------------------------
-// Tickers bar
-// ---------------------------------------------------------------------
+function initThemeToggle() {
+  const toggle = qs("#theme-toggle");
+  if (!toggle) return;
 
-async function loadTickers() {
-  const data = await safeJsonFetch("/api/tickers");
-  const strip = document.getElementById("ticker-strip");
-  if (!strip) return;
+  toggle.checked = state.theme === "dark";
 
-  if (!data || !Array.isArray(data.tickers) || data.tickers.length === 0) {
-    strip.innerHTML = '<span class="placeholder">Ticker data unavailable</span>';
-    return;
-  }
-
-  strip.innerHTML = "";
-
-  data.tickers.forEach((t) => {
-    const item = document.createElement("div");
-    item.className = "ticker-item";
-    item.dataset.symbol = t.symbol;
-
-    const symbol = document.createElement("span");
-    symbol.className = "ticker-symbol";
-    symbol.textContent = t.symbol;
-
-    const price = document.createElement("span");
-    price.className = "ticker-price";
-    price.textContent =
-      typeof t.price === "number" ? t.price.toFixed(2) : "–";
-
-    const change = document.createElement("span");
-    const pct = t.changePercent;
-    let cls = "";
-    if (typeof pct === "number") {
-      if (pct > 0) cls = "ticker-change-pos";
-      else if (pct < 0) cls = "ticker-change-neg";
-      change.textContent = `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
-    } else {
-      change.textContent = "–";
-    }
-    change.className = cls || "";
-
-    item.appendChild(symbol);
-    item.appendChild(price);
-    item.appendChild(change);
-
-    item.addEventListener("click", () => {
-      selectSymbol(t.symbol);
-    });
-
-    strip.appendChild(item);
+  toggle.addEventListener("change", () => {
+    const newTheme = toggle.checked ? "dark" : "light";
+    applyTheme(newTheme);
   });
 }
 
-// ---------------------------------------------------------------------
-// News
-// ---------------------------------------------------------------------
+// ------------------------------------------------------------
+// Menu dropdown (including theme switch location)
+// ------------------------------------------------------------
 
-async function loadNews() {
-  const list = document.getElementById("news-list");
-  const title = document.getElementById("news-title");
-  if (!list) return;
+function initMenu() {
+  const btn = qs("#menu-button");
+  const dropdown = qs("#menu-dropdown");
+  if (!btn || !dropdown) return;
 
-  if (title) title.textContent = `News – ${currentSymbol}`;
-
-  const data = await safeJsonFetch(`/api/news?symbol=${currentSymbol}`);
-  if (!data || !Array.isArray(data.items)) {
-    list.innerHTML = '<div class="placeholder">No headlines.</div>';
-    return;
-  }
-
-  if (data.items.length === 0) {
-    list.innerHTML = '<div class="placeholder">No headlines.</div>';
-    return;
-  }
-
-  list.innerHTML = "";
-  data.items.forEach((item) => {
-    const row = document.createElement("div");
-    row.className = "news-item";
-    row.addEventListener("click", () => {
-      window.open(item.link, "_blank", "noopener");
-    });
-
-    const t = document.createElement("div");
-    t.className = "news-title";
-    t.textContent = item.title;
-
-    const meta = document.createElement("div");
-    meta.className = "news-meta";
-    meta.textContent = `${item.source || ""}${
-      item.published ? " • " + item.published : ""
-    }`;
-
-    row.appendChild(t);
-    row.appendChild(meta);
-    list.appendChild(row);
+  btn.addEventListener("click", () => {
+    dropdown.classList.toggle("hidden");
   });
-}
 
-// ---------------------------------------------------------------------
-// Insights
-// ---------------------------------------------------------------------
-
-async function loadInsights() {
-  const data = await safeJsonFetch(`/api/insights?symbol=${currentSymbol}`);
-  const title = document.getElementById("insights-title");
-  if (title) title.textContent = `Market Insights: ${currentSymbol}`;
-
-  const fields = {
-    "1W": document.getElementById("insight-1w"),
-    "1M": document.getElementById("insight-1m"),
-    "3M": document.getElementById("insight-3m"),
-    "6M": document.getElementById("insight-6m"),
-    YTD: document.getElementById("insight-ytd"),
-    "1Y": document.getElementById("insight-1y"),
-  };
-
-  const desc = document.getElementById("insights-description");
-
-  if (!data || !data.changes) {
-    Object.values(fields).forEach((el) => el && (el.textContent = "–"));
-    if (desc) desc.textContent = "No performance snapshot available.";
-    return;
-  }
-
-  Object.entries(fields).forEach(([key, el]) => {
-    if (!el) return;
-    const v = data.changes[key];
-    if (typeof v === "number") {
-      el.textContent = `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
-      el.style.color = v > 0 ? "var(--accent-green)" : v < 0 ? "var(--accent-red)" : "";
-    } else {
-      el.textContent = "–";
-      el.style.color = "";
+  document.addEventListener("click", (e) => {
+    if (!btn.contains(e.target) && !dropdown.contains(e.target)) {
+      dropdown.classList.add("hidden");
     }
   });
 
-  if (desc && data.description) {
-    desc.textContent = data.description;
-  }
-}
-
-// ---------------------------------------------------------------------
-// Movers
-// ---------------------------------------------------------------------
-
-async function loadMovers() {
-  const data = await safeJsonFetch("/api/movers");
-  const gainersList = document.getElementById("gainers-list");
-  const losersList = document.getElementById("losers-list");
-  if (!gainersList || !losersList) return;
-
-  gainersList.innerHTML = "";
-  losersList.innerHTML = "";
-
-  if (!data) {
-    gainersList.innerHTML =
-      '<li class="placeholder">No data</li>';
-    losersList.innerHTML =
-      '<li class="placeholder">No data</li>';
-    return;
-  }
-
-  const renderSide = (items, container, positive) => {
-    if (!items || items.length === 0) {
-      container.innerHTML =
-        '<li class="placeholder">No data</li>';
-      return;
-    }
-    items.forEach((m) => {
-      const li = document.createElement("li");
-      li.className = "mover-row";
-      const left = document.createElement("span");
-      left.textContent = m.symbol;
-      const right = document.createElement("span");
-      const pct = m.changePercent;
-      if (typeof pct === "number") {
-        right.textContent = `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
-        right.style.color =
-          pct > 0 ? "var(--accent-green)" : pct < 0 ? "var(--accent-red)" : "";
-      } else {
-        right.textContent = "–";
-      }
-      li.appendChild(left);
-      li.appendChild(right);
-      container.appendChild(li);
-    });
-  };
-
-  renderSide(data.gainers, gainersList, true);
-  renderSide(data.losers, losersList, false);
-}
-
-// ---------------------------------------------------------------------
-// Macro maps – pure front-end visualisation
-// ---------------------------------------------------------------------
-
-function renderMacroMap(metric) {
-  const container = document.getElementById("macro-map");
-  if (!container) return;
-  const data = MACRO_DATA[metric];
-  if (!data) return;
-
-  // compute simple quartiles for coloring
-  const values = Object.values(data);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const step = (max - min) / 4 || 1;
-
-  function level(v) {
-    const d = v - min;
-    if (d <= step) return 1;
-    if (d <= 2 * step) return 2;
-    if (d <= 3 * step) return 3;
-    return 4;
-  }
-
-  container.innerHTML = "";
-
-  Object.entries(data).forEach(([country, value]) => {
-    const div = document.createElement("div");
-    div.className = `macro-country macro-level-${level(value)}`;
-
-    const name = document.createElement("div");
-    name.className = "macro-country-name";
-    name.textContent = country;
-
-    const val = document.createElement("div");
-    val.className = "macro-country-value";
-
-    let unit = "";
-    if (metric === "inflation") unit = "% YoY";
-    else if (metric === "rates") unit = "% policy rate";
-    else if (metric === "gdp") unit = "% YoY";
-    else if (metric === "unemployment") unit = "%";
-
-    val.textContent = `${value.toFixed(1)} ${unit}`;
-
-    div.appendChild(name);
-    div.appendChild(val);
-    container.appendChild(div);
-  });
-}
-
-function setupMacroTabs() {
-  const tabs = document.querySelectorAll(".macro-tab");
-  tabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-      tabs.forEach((t) => t.classList.remove("active"));
-      tab.classList.add("active");
-      const metric = tab.dataset.metric || "inflation";
-      renderMacroMap(metric);
-    });
-  });
-}
-
-// ---------------------------------------------------------------------
-// Symbol selection & theme
-// ---------------------------------------------------------------------
-
-function selectSymbol(symbol) {
-  currentSymbol = symbol;
-  createChart();
-  loadNews();
-  loadInsights();
-}
-
-function setupMenuShortcuts() {
-  const shortcuts = document.querySelectorAll(".menu-item.shortcut");
-  shortcuts.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const sym = btn.dataset.symbol;
-      if (sym) {
-        // For index shortcuts we keep the TV symbol,
-        // but use generic AAPL-like symbol for news/insights if needed.
-        currentSymbol = sym;
-        createChart();
-        loadNews();
-        loadInsights();
-      }
-      document
-        .getElementById("menu-dropdown")
-        ?.classList.add("hidden");
+  // Shortcuts (SPY / QQQ)
+  qsa(".menu-shortcut").forEach((el) => {
+    el.addEventListener("click", () => {
+      const tvSymbol = el.dataset.symbol;
+      const label = el.dataset.label;
+      state.currentSymbol = label;
+      setSymbol(tvSymbol, label);
+      dropdown.classList.add("hidden");
     });
   });
 
   // Tile visibility
-  const tileCheckboxes = document.querySelectorAll(
-    ".menu-checkbox input[type='checkbox']"
-  );
-  tileCheckboxes.forEach((cb) => {
-    cb.addEventListener("change", () => {
-      const id = cb.dataset.tileId;
-      if (!id) return;
-      const tile = document.getElementById(id);
+  qsa(".menu-checkbox input[type=checkbox]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const tileId = checkbox.dataset.tile;
+      const tile = document.getElementById(tileId);
       if (!tile) return;
-      tile.style.display = cb.checked ? "" : "none";
+      tile.style.display = checkbox.checked ? "flex" : "none";
     });
+  });
+
+  // Heatmap link
+  const heatmapLink = qs("#heatmap-link");
+  if (heatmapLink) {
+    heatmapLink.addEventListener("click", () => {
+      window.open(
+        "https://www.tradingview.com/heatmap/stock/?index=SPX&color=change&label=change",
+        "_blank"
+      );
+    });
+  }
+}
+
+// ------------------------------------------------------------
+// TradingView chart
+// ------------------------------------------------------------
+
+function initTradingView(tvSymbol, label, theme = "dark") {
+  state.currentTvSymbol = tvSymbol;
+  const container = "tv-chart";
+
+  new TradingView.widget({
+    autosize: true,
+    symbol: tvSymbol,
+    interval: "60",
+    timezone: "Etc/UTC",
+    theme: theme,
+    style: "1",
+    locale: "en",
+    toolbar_bg: "#000000",
+    enable_publishing: false,
+    hide_top_toolbar: false,
+    hide_side_toolbar: false,
+    container_id: container,
+  });
+
+  qs("#chart-title").textContent = `Chart – ${label}`;
+}
+
+// simple wrapper to reset widget
+function setSymbol(tvSymbol, shortLabel) {
+  state.currentSymbol = shortLabel;
+  qs("#news-title").textContent = `News – ${shortLabel}`;
+  qs("#insights-title").textContent = `Market Insights: ${shortLabel}`;
+
+  // Re-create widget (TradingView doesn't expose symbol change easily)
+  const tvContainer = qs("#tv-chart");
+  tvContainer.innerHTML = "";
+  initTradingView(tvSymbol, shortLabel, state.theme === "dark" ? "dark" : "light");
+
+  loadNews(shortLabel);
+  loadInsights(shortLabel);
+}
+
+// ------------------------------------------------------------
+// Ticker bar + movers
+// ------------------------------------------------------------
+
+async function loadTickers() {
+  try {
+    const res = await fetch("/api/tickers");
+    const data = await res.json();
+    state.tickerData = data.tickers || [];
+    renderTickerBar();
+  } catch (err) {
+    console.error("tickers error", err);
+  }
+}
+
+function renderTickerBar() {
+  const el = qs("#ticker-marquee");
+  if (!el) return;
+  el.innerHTML = "";
+
+  if (!state.tickerData.length) {
+    el.textContent = "No ticker data";
+    return;
+  }
+
+  state.tickerData.forEach((t) => {
+    const item = document.createElement("div");
+    item.className = "ticker-item";
+    item.dataset.symbol = t.symbol;
+
+    const sym = document.createElement("span");
+    sym.className = "ticker-symbol";
+    sym.textContent = t.symbol;
+
+    const price = document.createElement("span");
+    price.className = "ticker-price";
+    price.textContent =
+      typeof t.price === "number" ? t.price.toFixed(2) : "—";
+
+    const change = document.createElement("span");
+    const pct = t.changePercent;
+    if (typeof pct === "number") {
+      change.textContent = `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
+      change.className =
+        pct > 0 ? "ticker-change-positive" : "ticker-change-negative";
+    } else {
+      change.textContent = "—";
+    }
+
+    item.appendChild(sym);
+    item.appendChild(price);
+    item.appendChild(change);
+
+    item.addEventListener("click", () => {
+      // TradingView uses plain symbol for US stocks
+      state.currentSymbol = t.symbol;
+      setSymbol(t.symbol, t.symbol);
+    });
+
+    el.appendChild(item);
   });
 }
 
-function setupMenuToggle() {
-  const btn = document.getElementById("menu-button");
-  const dd = document.getElementById("menu-dropdown");
-  if (!btn || !dd) return;
+async function loadMovers() {
+  try {
+    const res = await fetch("/api/movers");
+    const data = await res.json();
+    renderMovers(data.gainers || [], data.losers || []);
+  } catch (err) {
+    console.error("movers error", err);
+  }
+}
 
-  btn.addEventListener("click", () => {
-    dd.classList.toggle("hidden");
+function renderMovers(gainers, losers) {
+  const gList = qs("#gainers-list");
+  const lList = qs("#losers-list");
+  if (!gList || !lList) return;
+  gList.innerHTML = "";
+  lList.innerHTML = "";
+
+  if (!gainers.length && !losers.length) {
+    gList.innerHTML = '<li class="mover-item">No data</li>';
+    lList.innerHTML = '<li class="mover-item">No data</li>';
+    return;
+  }
+
+  gainers.forEach((m) => {
+    const li = document.createElement("li");
+    li.className = "mover-item";
+    li.innerHTML = `<span>${m.symbol}</span><span class="ticker-change-positive">${m.changePercent.toFixed(
+      2
+    )}%</span>`;
+    gList.appendChild(li);
   });
 
-  document.addEventListener("click", (e) => {
-    if (!dd.classList.contains("hidden")) {
-      if (!dd.contains(e.target) && !btn.contains(e.target)) {
-        dd.classList.add("hidden");
+  losers.forEach((m) => {
+    const li = document.createElement("li");
+    li.className = "mover-item";
+    li.innerHTML = `<span>${m.symbol}</span><span class="ticker-change-negative">${m.changePercent.toFixed(
+      2
+    )}%</span>`;
+    lList.appendChild(li);
+  });
+}
+
+// ------------------------------------------------------------
+// News
+// ------------------------------------------------------------
+
+async function loadNews(symbol) {
+  const list = qs("#news-list");
+  if (!list) return;
+  list.innerHTML = '<div class="placeholder">Loading news…</div>';
+
+  try {
+    const res = await fetch(`/api/news?symbol=${encodeURIComponent(symbol)}`);
+    const data = await res.json();
+    const items = data.items || [];
+
+    if (!items.length) {
+      list.innerHTML =
+        '<div class="placeholder">No headlines available.</div>';
+      return;
+    }
+
+    list.innerHTML = "";
+    items.forEach((item) => {
+      const el = document.createElement("div");
+      el.className = "news-item";
+      el.style.marginBottom = "6px";
+      el.innerHTML = `
+        <a href="${item.link}" target="_blank" class="news-title">${item.title}</a>
+        <div class="news-meta">${item.source || "Source"} • ${
+        item.published || ""
+      }</div>
+      `;
+      list.appendChild(el);
+    });
+  } catch (err) {
+    console.error("news error", err);
+    list.innerHTML =
+      '<div class="placeholder">Failed to load news.</div>';
+  }
+}
+
+// ------------------------------------------------------------
+// Insights
+// ------------------------------------------------------------
+
+async function loadInsights(symbol) {
+  const grid = qs("#insights-grid");
+  const desc = qs("#insights-description");
+  if (!grid || !desc) return;
+
+  grid.innerHTML = "";
+  desc.textContent = "Loading performance snapshot…";
+
+  try {
+    const res = await fetch(`/api/insights?symbol=${encodeURIComponent(symbol)}`);
+    const data = await res.json();
+    const changes = data.changes || {};
+
+    const horizons = ["1W", "1M", "3M", "6M", "YTD", "1Y"];
+    horizons.forEach((h) => {
+      const val = changes[h];
+      const box = document.createElement("div");
+      box.className = "insight-box";
+
+      const label = document.createElement("div");
+      label.className = "insight-label";
+      label.textContent = h;
+
+      const value = document.createElement("div");
+      value.className = "insight-value";
+      if (typeof val === "number") {
+        value.textContent = `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
+        value.style.color = val >= 0 ? "#21c67a" : "#ff4c4c";
+      } else {
+        value.textContent = "—";
+        value.style.color = "#a0a4ad";
+      }
+
+      box.appendChild(label);
+      box.appendChild(value);
+      grid.appendChild(box);
+    });
+
+    desc.textContent = data.description || "No performance snapshot.";
+  } catch (err) {
+    console.error("insights error", err);
+    desc.textContent = "Failed to load snapshot.";
+  }
+}
+
+// ------------------------------------------------------------
+// Economic calendar
+// ------------------------------------------------------------
+
+async function loadCalendar() {
+  const body = qs("#calendar-body");
+  if (!body) return;
+  body.innerHTML = '<div class="placeholder">Loading calendar…</div>';
+
+  try {
+    const res = await fetch("/api/calendar");
+    const data = await res.json();
+    const events = data.events || [];
+
+    if (!events.length) {
+      body.innerHTML =
+        '<div class="placeholder">No events available.</div>';
+      return;
+    }
+
+    const table = document.createElement("table");
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Country</th>
+          <th>Event</th>
+          <th>Actual</th>
+          <th>Forecast</th>
+          <th>Previous</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    `;
+    const tbody = table.querySelector("tbody");
+
+    events.forEach((ev) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${ev.time || ""}</td>
+        <td>${ev.country || ""}</td>
+        <td>${ev.event || ""}</td>
+        <td>${ev.actual || ""}</td>
+        <td>${ev.forecast || ""}</td>
+        <td>${ev.previous || ""}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    body.innerHTML = "";
+    body.appendChild(table);
+  } catch (err) {
+    console.error("calendar error", err);
+    body.innerHTML =
+      '<div class="placeholder">Failed to load calendar.</div>';
+  }
+}
+
+// ------------------------------------------------------------
+// Macro map (simple D3 choropleth with sample data)
+// ------------------------------------------------------------
+
+function initMacroMap() {
+  const container = qs("#macro-map");
+  if (!container || !window.d3) return;
+
+  const width = container.clientWidth || 400;
+  const height = container.clientHeight || 220;
+
+  const svg = d3
+    .select(container)
+    .append("svg")
+    .attr("width", width)
+    .attr("height", height);
+
+  const projection = d3
+    .geoMercator()
+    .scale(width / 6.3)
+    .translate([width / 2, height / 1.4]);
+  const path = d3.geoPath().projection(projection);
+
+  // Sample inflation data (%)
+  const inflation = {
+    US: 3.4,
+    CA: 2.8,
+    GB: 4.1,
+    DE: 2.3,
+    FR: 2.6,
+    IT: 2.1,
+    ES: 3.0,
+    BR: 5.3,
+    IN: 4.5,
+    CN: 1.1,
+    JP: 2.0,
+    AU: 3.8,
+  };
+
+  const color = d3
+    .scaleThreshold()
+    .domain([1, 2, 4, 6, 8])
+    .range(["#14141a", "#214f7a", "#2a7ab9", "#f5b400", "#e86b3a", "#ff4c4c"]);
+
+  const tooltip = d3
+    .select(container)
+    .append("div")
+    .style("position", "absolute")
+    .style("pointer-events", "none")
+    .style("background", "rgba(0,0,0,0.85)")
+    .style("color", "#fff")
+    .style("padding", "4px 6px")
+    .style("border-radius", "4px")
+    .style("font-size", "10px")
+    .style("opacity", 0);
+
+  d3.json("https://unpkg.com/world-atlas@2/countries-110m.json").then(
+    (world) => {
+      const countries = topojson.feature(world, world.objects.countries)
+        .features;
+
+      svg
+        .selectAll("path.country")
+        .data(countries)
+        .enter()
+        .append("path")
+        .attr("class", "country")
+        .attr("d", path)
+        .attr("fill", (d) => {
+          const iso3 = d.id; // numeric; we don't have mapping -> keep neutral
+          return "#14141a";
+        })
+        .attr("stroke", "#20202a")
+        .attr("stroke-width", 0.4)
+        .on("mousemove", (event, d) => {
+          const name = d.properties.name || "Country";
+          // we only have sample inflation for a few ISO2 codes; show "n/a" for others
+          const value = "n/a";
+          tooltip
+            .style("opacity", 1)
+            .html(`${name}<br/>Inflation: ${value}`)
+            .style("left", event.offsetX + 10 + "px")
+            .style("top", event.offsetY + 10 + "px");
+        })
+        .on("mouseout", () => {
+          tooltip.style("opacity", 0);
+        });
+
+      // Simple legend text
+      const legend = qs("#macro-legend");
+      if (legend) {
+        legend.textContent =
+          "Example macro map (inflation %). Hover over countries for info (data is illustrative).";
       }
     }
-  });
+  );
 }
 
-function setupThemeToggle() {
-  const btn = document.getElementById("theme-toggle");
-  if (!btn) return;
-
-  btn.addEventListener("click", () => {
-    const body = document.body;
-    if (body.classList.contains("theme-dark")) {
-      body.classList.remove("theme-dark");
-      body.classList.add("theme-light");
-      currentTheme = "light";
-    } else {
-      body.classList.remove("theme-light");
-      body.classList.add("theme-dark");
-      currentTheme = "dark";
-    }
-    createChart();
-  });
-}
-
-// ---------------------------------------------------------------------
-// Column resizers (horizontal)
-// ---------------------------------------------------------------------
-
-function setupColResizers() {
-  const resizers = document.querySelectorAll(".col-resizer");
-  resizers.forEach((resizer) => {
-    const rowEl = resizer.parentElement;
-    if (!rowEl) return;
-
-    let dragging = false;
-
-    resizer.addEventListener("mousedown", (e) => {
-      dragging = true;
-      document.body.style.userSelect = "none";
-      e.preventDefault();
-    });
-
-    window.addEventListener("mousemove", (e) => {
-      if (!dragging) return;
-      const rect = rowEl.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const total = rect.width;
-      const leftFrac = Math.min(Math.max(x / total, 0.2), 0.8);
-      rowEl.style.gridTemplateColumns = `minmax(0, ${leftFrac}fr) 6px minmax(0, ${
-        1 - leftFrac
-      }fr)`;
-    });
-
-    window.addEventListener("mouseup", () => {
-      dragging = false;
-      document.body.style.userSelect = "";
-    });
-  });
-}
-
-// ---------------------------------------------------------------------
+// ------------------------------------------------------------
 // Init
-// ---------------------------------------------------------------------
+// ------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Default theme
-  document.body.classList.add("theme-dark");
+  initMenu();
+  initThemeToggle();
 
-  setupThemeToggle();
-  setupMenuToggle();
-  setupMenuShortcuts();
-  setupMacroTabs();
-  setupColResizers();
+  // Default dark
+  applyTheme("dark");
 
-  createChart();
+  // Chart: start with AAPL
+  initTradingView("AAPL", "AAPL", "dark");
+
+  // Data
   loadTickers();
-  loadNews();
-  loadInsights();
   loadMovers();
-  renderMacroMap("inflation");
+  loadNews("AAPL");
+  loadInsights("AAPL");
+  loadCalendar();
+  initMacroMap();
 
-  // Poll tickers + movers occasionally
-  setInterval(loadTickers, 60000); // 1 min
-  setInterval(loadMovers, 120000); // 2 min
+  // Refresh tickers + movers every 60s
+  setInterval(() => {
+    loadTickers();
+    loadMovers();
+  }, 60000);
 });
