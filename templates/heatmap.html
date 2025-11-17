@@ -2,42 +2,68 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>S&amp;P 500 Heatmap – Market Terminal</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <title>S&amp;P 500 Heatmap</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: #000;
+    }
+    .wrapper {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: #000;
+      color: #f5f5f5;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        sans-serif;
+    }
+    header {
+      padding: 12px 18px;
+      border-bottom: 1px solid #222;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: #f3b329;
+    }
+    .content {
+      flex: 1;
+    }
+  </style>
 </head>
-<body class="theme-dark heatmap-page">
-  <header class="top-bar">
-    <div class="brand">MARKET TERMINAL</div>
-    <div class="top-actions">
-      <a href="/" class="menu-button">← Back to Terminal</a>
-    </div>
-  </header>
-
-  <main class="heatmap-layout">
-    <!-- TradingView stock heatmap widget -->
-    <div class="tradingview-widget-container heatmap-container">
+<body>
+<div class="wrapper">
+  <header>MARKET TERMINAL – S&amp;P 500 HEATMAP</header>
+  <div class="content">
+    <!-- TradingView heatmap widget -->
+    <div class="tradingview-widget-container" style="height:100%;width:100%">
       <div class="tradingview-widget-container__widget"></div>
+      <script
+        type="text/javascript"
+        src="https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js"
+        async
+      >
+      {
+        "width": "100%",
+        "height": "100%",
+        "dataSource": "S&P500",
+        "grouping": "sector",
+        "blockSize": "market_cap_basic",
+        "blockColor": "change",
+        "locale": "en",
+        "colorTheme": "dark",
+        "hasTopBar": true,
+        "isDataSetEnabled": true,
+        "isZoomEnabled": true,
+        "hasSymbolTooltip": true,
+        "widthMode": "100%",
+        "heightMode": "100%",
+        "market": "us"
+      }
+      </script>
     </div>
-  </main>
-
-  <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js" async>
-  {
-    "exchanges": [],
-    "dataSource": "S&P500",
-    "grouping": "sector",
-    "blockSize": "market_cap_basic",
-    "blockColor": "change",
-    "locale": "en",
-    "width": "100%",
-    "height": "100%",
-    "colorTheme": "dark",
-    "isDataUpdated": true,
-    "hasTopBar": true,
-    "isZoomEnabled": true,
-    "hasSymbolTooltip": true,
-    "isMonochrome": false,
-    "showSymbolLabels": true
-  }
-  </script>
+  </div>
+</div>
 </body>
 </html>
