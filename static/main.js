@@ -1,467 +1,261 @@
-(() => {
-  const API_BASE = "";
+let currentSymbol = "AAPL";
+let tvWidget = null;
 
-  let currentSymbol = "AAPL";
-  let currentTheme = "dark";
-  let tvWidget = null;
+async function fetchJSON(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
 
-  document.addEventListener("DOMContentLoaded", () => {
-    const body = document.body;
+/* TradingView chart --------------------------------------------------- */
 
-    // ----- theme -----
-    const savedTheme = localStorage.getItem("mt-theme");
-    if (savedTheme === "light") {
-      body.classList.remove("theme-dark");
-      body.classList.add("theme-light");
-      currentTheme = "light";
-    }
+function initTradingViewChart(symbol) {
+  currentSymbol = symbol;
+  document.getElementById("chart-symbol-label").textContent = symbol;
+  document.getElementById("news-symbol-label").textContent = symbol;
+  document.getElementById("insights-symbol-label").textContent = symbol;
 
-    const themeToggle = document.getElementById("theme-toggle");
-    if (themeToggle) {
-      themeToggle.checked = currentTheme === "light";
-      themeToggle.addEventListener("change", () => {
-        if (themeToggle.checked) {
-          body.classList.remove("theme-dark");
-          body.classList.add("theme-light");
-          currentTheme = "light";
-        } else {
-          body.classList.remove("theme-light");
-          body.classList.add("theme-dark");
-          currentTheme = "dark";
-        }
-        localStorage.setItem("mt-theme", currentTheme);
-        renderChart(currentSymbol); // re-create chart with theme
-      });
-    }
+  const theme = document.body.classList.contains("theme-light")
+    ? "light"
+    : "dark";
 
-    // ----- menu -----
-    const menuToggle = document.getElementById("menu-toggle");
-    const menuPanel = document.getElementById("menu-panel");
-
-    if (menuToggle && menuPanel) {
-      menuToggle.addEventListener("click", () => {
-        menuPanel.classList.toggle("open");
-      });
-
-      document.addEventListener("click", (e) => {
-        if (!menuPanel.contains(e.target) && !menuToggle.contains(e.target)) {
-          menuPanel.classList.remove("open");
-        }
-      });
-    }
-
-    // tile show / hide via menu
-    document.querySelectorAll(".tile-checkbox").forEach((cb) => {
-      cb.addEventListener("change", () => {
-        const id = cb.getAttribute("data-tile");
-        const tile = document.getElementById(`tile-${id}`);
-        if (!tile) return;
-        tile.style.display = cb.checked ? "flex" : "none";
-      });
-    });
-
-    // close button on tile
-    document.querySelectorAll(".tile-close").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const tileKey = btn.getAttribute("data-tile");
-        const tile = document.getElementById(`tile-${tileKey}`);
-        const cb = document.querySelector(
-          `.tile-checkbox[data-tile="${tileKey}"]`
-        );
-        if (tile) tile.style.display = "none";
-        if (cb) cb.checked = false;
-      });
-    });
-
-    // shortcuts (S&P / NASDAQ)
-    document.querySelectorAll(".shortcut-btn[data-symbol]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const sym = btn.getAttribute("data-symbol");
-        if (sym) {
-          setSymbol(sym);
-          if (menuPanel) menuPanel.classList.remove("open");
-        }
-      });
-    });
-
-    // heatmap link
-    const heatmapLink = document.getElementById("heatmap-link");
-    if (heatmapLink) {
-      heatmapLink.addEventListener("click", () => {
-        window.location.href = "/heatmap";
-      });
-    }
-
-    // ticker bar hover pause
-    const tickerBar = document.getElementById("ticker-bar");
-    if (tickerBar) {
-      tickerBar.addEventListener("mouseenter", () => {
-        tickerBar.classList.add("paused");
-      });
-      tickerBar.addEventListener("mouseleave", () => {
-        tickerBar.classList.remove("paused");
-      });
-    }
-
-    // row & column resizers
-    initRowResizers();
-    initColResizers();
-
-    // initial loads
-    renderChart(currentSymbol);
-    loadTickers();
-    loadNews(currentSymbol);
-    loadInsights(currentSymbol);
-    loadMovers();
-
-    // refresh tickers/movers every 2 minutes (gentle)
-    setInterval(() => {
-      loadTickers();
-      loadMovers();
-    }, 120000);
+  // clear old chart container
+  const container = document.getElementById("tv_chart_container");
+  container.innerHTML = "";
+  tvWidget = new TradingView.widget({
+    symbol: symbol,
+    interval: "60",
+    container_id: "tv_chart_container",
+    autosize: true,
+    timezone: "Etc/UTC",
+    theme: theme,
+    style: "1",
+    locale: "en",
+    enable_publishing: false,
+    hide_side_toolbar: false,
+    allow_symbol_change: true,
+    studies: [],
+    withdateranges: true,
+    details: false,
+    hotlist: false,
   });
 
-  // ---------- Utility ----------
+  loadNews(symbol);
+  loadInsights(symbol);
+}
 
-  async function fetchJSON(path) {
-    const res = await fetch(API_BASE + path);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  }
+/* Ticker bar ---------------------------------------------------------- */
 
-  function formatPrice(val) {
-    if (val == null) return "—";
-    return Number(val).toFixed(2);
-  }
+async function loadTickers() {
+  const data = await fetchJSON("/api/tickers");
+  if (!data || !data.tickers) return;
 
-  function formatChangePct(val) {
-    if (val == null) return "—";
-    const num = Number(val);
-    const sign = num > 0 ? "+" : "";
-    return `${sign}${num.toFixed(2)}%`;
-  }
+  const items = [...data.tickers, ...data.tickers]; // duplicate for smooth loop
+  const inner = document.getElementById("ticker-inner");
+  inner.innerHTML = "";
 
-  function setSymbol(symbol) {
-    currentSymbol = symbol;
-    const base = symbol.split(":").pop() || symbol;
-    const chartTitle = document.getElementById("chart-title");
-    if (chartTitle) chartTitle.textContent = `Chart – ${base}`;
-    const newsSym = document.getElementById("news-symbol");
-    if (newsSym) newsSym.textContent = base;
-    const insSym = document.getElementById("insights-symbol");
-    if (insSym) insSym.textContent = base;
+  items.forEach((t) => {
+    const item = document.createElement("div");
+    item.className = "ticker-item";
+    item.dataset.symbol = t.symbol;
 
-    renderChart(symbol);
-    loadNews(symbol);
-    loadInsights(symbol);
-  }
+    const sym = document.createElement("span");
+    sym.className = "ticker-symbol";
+    sym.textContent = t.symbol;
 
-  // ---------- TradingView chart ----------
+    const price = document.createElement("span");
+    price.className = "ticker-price";
+    price.textContent = t.price.toFixed(2);
 
-  function renderChart(symbol) {
-    const container = document.getElementById("tv-chart");
-    if (!container || typeof TradingView === "undefined") return;
+    const change = document.createElement("span");
+    change.className = "ticker-change";
+    change.textContent = (t.change > 0 ? "+" : "") + t.change.toFixed(2) + "%";
+    if (t.change > 0) change.classList.add("positive");
+    if (t.change < 0) change.classList.add("negative");
 
-    container.innerHTML = ""; // clear previous instance
+    item.appendChild(sym);
+    item.appendChild(price);
+    item.appendChild(change);
 
-    const theme = currentTheme === "light" ? "light" : "dark";
-
-    tvWidget = new TradingView.widget({
-      autosize: true,
-      symbol: symbol,
-      interval: "60",
-      timezone: "Etc/UTC",
-      theme: theme,
-      style: "1",
-      locale: "en",
-      toolbar_bg: "rgba(0, 0, 0, 0)",
-      enable_publishing: false,
-      allow_symbol_change: true,
-      container_id: "tv-chart",
-      hide_side_toolbar: false,
-      withdateranges: true,
-      details: false,
-      studies: [],
+    item.addEventListener("click", () => {
+      initTradingViewChart(t.symbol);
     });
+
+    inner.appendChild(item);
+  });
+}
+
+/* News --------------------------------------------------------------- */
+
+async function loadNews(symbol) {
+  const data = await fetchJSON(`/api/news?symbol=${encodeURIComponent(symbol)}`);
+  const list = document.getElementById("news-list");
+  list.innerHTML = "";
+
+  if (!data || !data.articles || !data.articles.length) {
+    list.textContent = "No headlines.";
+    return;
   }
 
-  // ---------- Tickers + ticker bar ----------
+  data.articles.forEach((a) => {
+    const row = document.createElement("div");
+    row.className = "news-item";
 
-  async function loadTickers() {
-    try {
-      const data = await fetchJSON("/api/tickers");
-      const items = data.tickers || [];
-      const track = document.getElementById("ticker-track");
-      if (!track) return;
+    const title = document.createElement("a");
+    title.href = a.link;
+    title.target = "_blank";
+    title.rel = "noopener";
+    title.textContent = a.title;
+    title.className = "news-title news-link";
 
-      track.innerHTML = "";
+    const meta = document.createElement("div");
+    meta.className = "news-meta";
+    meta.textContent = `${a.source} · ${a.time}`;
 
-      const all = [...items, ...items]; // duplicate for smooth scroll
+    row.appendChild(title);
+    row.appendChild(meta);
+    list.appendChild(row);
+  });
+}
 
-      all.forEach((item) => {
-        const sym = item.symbol;
-        const price = formatPrice(item.price);
-        const changePct = item.change_pct;
-        const changeStr = formatChangePct(changePct);
+/* Insights ------------------------------------------------------------ */
 
-        const el = document.createElement("div");
-        el.className = "ticker-item";
-        el.dataset.symbol = sym;
+async function loadInsights(symbol) {
+  const data = await fetchJSON(`/api/insights?symbol=${encodeURIComponent(symbol)}`);
+  if (!data) return;
 
-        const symSpan = document.createElement("span");
-        symSpan.className = "ticker-symbol";
-        symSpan.textContent = sym;
+  const snap = data.snapshot || {};
+  const map = {
+    "1W": "insight-1w",
+    "1M": "insight-1m",
+    "3M": "insight-3m",
+    "6M": "insight-6m",
+    "YTD": "insight-ytd",
+    "1Y": "insight-1y",
+  };
 
-        const priceSpan = document.createElement("span");
-        priceSpan.className = "ticker-price";
-        priceSpan.textContent = price;
-
-        const changeSpan = document.createElement("span");
-        changeSpan.className = "ticker-change";
-        if (changePct != null) {
-          if (changePct > 0) changeSpan.classList.add("positive");
-          if (changePct < 0) changeSpan.classList.add("negative");
-        }
-        changeSpan.textContent = changeStr;
-
-        el.appendChild(symSpan);
-        el.appendChild(priceSpan);
-        el.appendChild(changeSpan);
-
-        el.addEventListener("click", () => setSymbol(sym));
-
-        track.appendChild(el);
-      });
-    } catch (err) {
-      console.error("tickers error", err);
+  Object.entries(map).forEach(([key, id]) => {
+    const el = document.getElementById(id);
+    el.classList.remove("positive", "negative");
+    const v = snap[key];
+    if (v === null || v === undefined) {
+      el.textContent = "–";
+      return;
     }
-  }
+    el.textContent = (v > 0 ? "+" : "") + v.toFixed(2) + "%";
+    if (v > 0) el.classList.add("positive");
+    if (v < 0) el.classList.add("negative");
+  });
 
-  // ---------- News ----------
+  const prof = document.getElementById("insights-profile");
+  prof.textContent = data.profile || "";
+}
 
-  async function loadNews(symbol) {
-    try {
-      const data = await fetchJSON(`/api/news?symbol=${encodeURIComponent(symbol)}`);
-      const list = document.getElementById("news-list");
-      if (!list) return;
+/* Movers -------------------------------------------------------------- */
 
-      const items = data.news || [];
-      list.innerHTML = "";
+async function loadMovers() {
+  const data = await fetchJSON("/api/movers");
+  if (!data) return;
 
-      if (!items.length) {
-        const div = document.createElement("div");
-        div.className = "placeholder";
-        div.textContent = "No headlines.";
-        list.appendChild(div);
-        return;
-      }
+  const gainersRoot = document.getElementById("gainers-list");
+  const losersRoot = document.getElementById("losers-list");
+  gainersRoot.innerHTML = "";
+  losersRoot.innerHTML = "";
 
-      items.forEach((n) => {
-        const item = document.createElement("div");
-        item.className = "news-item";
+  (data.gainers || []).forEach((m) => {
+    const row = document.createElement("div");
+    row.className = "mover-row";
 
-        const title = document.createElement("div");
-        title.className = "news-item-title";
+    const left = document.createElement("span");
+    left.className = "mover-symbol";
+    left.textContent = m.symbol;
 
-        const link = document.createElement("a");
-        link.href = n.link;
-        link.target = "_blank";
-        link.rel = "noreferrer";
-        link.textContent = n.title || "Untitled";
-
-        title.appendChild(link);
-
-        const meta = document.createElement("div");
-        meta.className = "news-item-meta";
-        meta.textContent = n.source || "";
-
-        item.appendChild(title);
-        item.appendChild(meta);
-        list.appendChild(item);
-      });
-    } catch (err) {
-      console.error("news error", err);
-      const list = document.getElementById("news-list");
-      if (list) {
-        list.innerHTML = "";
-        const div = document.createElement("div");
-        div.className = "placeholder";
-        div.textContent = "Failed to load news.";
-        list.appendChild(div);
-      }
+    const right = document.createElement("span");
+    right.className = "mover-change positive";
+    right.textContent = "+" + m.change.toFixed(2) + "%";
+    if (m.change < 0) {
+      right.classList.remove("positive");
+      right.classList.add("negative");
+      right.textContent = m.change.toFixed(2) + "%";
     }
-  }
 
-  // ---------- Insights ----------
+    row.appendChild(left);
+    row.appendChild(right);
+    row.addEventListener("click", () => initTradingViewChart(m.symbol));
+    gainersRoot.appendChild(row);
+  });
 
-  async function loadInsights(symbol) {
-    try {
-      const data = await fetchJSON(`/api/insights?symbol=${encodeURIComponent(symbol)}`);
-      const perf = data.performance || {};
-      const ranges = ["1W", "1M", "3M", "6M", "YTD", "1Y"];
-      let any = false;
+  (data.losers || []).forEach((m) => {
+    const row = document.createElement("div");
+    row.className = "mover-row";
 
-      ranges.forEach((r) => {
-        const el = document.getElementById(`insight-${r}`);
-        if (!el) return;
-        const val = perf[r];
-        if (val == null) {
-          el.textContent = "—";
-          el.classList.remove("positive", "negative");
-        } else {
-          any = true;
-          el.textContent = `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
-          el.classList.remove("positive", "negative");
-          if (val > 0) el.classList.add("positive");
-          if (val < 0) el.classList.add("negative");
-        }
-      });
+    const left = document.createElement("span");
+    left.className = "mover-symbol";
+    left.textContent = m.symbol;
 
-      const note = document.getElementById("insights-note");
-      if (note) {
-        note.textContent = any
-          ? "Performance snapshot based on Yahoo Finance historical data."
-          : "No performance snapshot.";
-      }
-    } catch (err) {
-      console.error("insights error", err);
+    const right = document.createElement("span");
+    right.className = "mover-change negative";
+    right.textContent = m.change.toFixed(2) + "%";
+    if (m.change > 0) {
+      right.classList.remove("negative");
+      right.classList.add("positive");
+      right.textContent = "+" + m.change.toFixed(2) + "%";
     }
-  }
 
-  // ---------- Movers ----------
+    row.appendChild(left);
+    row.appendChild(right);
+    row.addEventListener("click", () => initTradingViewChart(m.symbol));
+    losersRoot.appendChild(row);
+  });
+}
 
-  async function loadMovers() {
-    try {
-      const data = await fetchJSON("/api/movers");
-      const gainers = data.gainers || [];
-      const losers = data.losers || [];
+/* Theme & menu -------------------------------------------------------- */
 
-      const gList = document.getElementById("gainers-list");
-      const lList = document.getElementById("losers-list");
-      if (!gList || !lList) return;
+function setupThemeToggle() {
+  const btn = document.getElementById("theme-toggle");
+  btn.addEventListener("click", () => {
+    const light = document.body.classList.toggle("theme-light");
+    // rebuild chart with new theme
+    initTradingViewChart(currentSymbol);
+    // rebuild calendar theme by reloading page (simplest) – skipped to avoid flicker
+  });
+}
 
-      gList.innerHTML = "";
-      lList.innerHTML = "";
-
-      if (!gainers.length && !losers.length) {
-        const li = document.createElement("li");
-        li.className = "placeholder";
-        li.textContent = "No data.";
-        gList.appendChild(li.cloneNode(true));
-        lList.appendChild(li);
-        return;
-      }
-
-      gainers.forEach((g) => {
-        const li = document.createElement("li");
-        li.className = "movers-item";
-        const s = document.createElement("span");
-        s.className = "movers-symbol";
-        s.textContent = g.symbol;
-        const c = document.createElement("span");
-        c.className = "movers-change positive";
-        c.textContent = formatChangePct(g.change_pct);
-        li.appendChild(s);
-        li.appendChild(c);
-        gList.appendChild(li);
-      });
-
-      losers.forEach((g) => {
-        const li = document.createElement("li");
-        li.className = "movers-item";
-        const s = document.createElement("span");
-        s.className = "movers-symbol";
-        s.textContent = g.symbol;
-        const c = document.createElement("span");
-        c.className = "movers-change negative";
-        c.textContent = formatChangePct(g.change_pct);
-        li.appendChild(s);
-        li.appendChild(c);
-        lList.appendChild(li);
-      });
-    } catch (err) {
-      console.error("movers error", err);
+function setupMenu() {
+  const btn = document.getElementById("menu-button");
+  const dd = document.getElementById("menu-dropdown");
+  btn.addEventListener("click", () => {
+    dd.classList.toggle("hidden");
+  });
+  document.addEventListener("click", (e) => {
+    if (!dd.contains(e.target) && !btn.contains(e.target)) {
+      dd.classList.add("hidden");
     }
-  }
+  });
 
-  // ---------- Resizers ----------
-
-  function initRowResizers() {
-    const resizers = document.querySelectorAll(".row-resizer");
-    resizers.forEach((rz) => {
-      let dragging = false;
-      let startY = 0;
-      let prevRow, nextRow, prevH, nextH;
-
-      rz.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        const rowIndex = parseInt(rz.getAttribute("data-row"), 10);
-        const rows = document.querySelectorAll(".row");
-        prevRow = rows[rowIndex - 1];
-        nextRow = rows[rowIndex];
-        if (!prevRow || !nextRow) return;
-        dragging = true;
-        startY = e.clientY;
-        prevH = prevRow.offsetHeight;
-        nextH = nextRow.offsetHeight;
-        document.body.style.userSelect = "none";
-      });
-
-      window.addEventListener("mousemove", (e) => {
-        if (!dragging) return;
-        const dy = e.clientY - startY;
-        const newPrev = Math.max(120, prevH + dy);
-        const newNext = Math.max(140, nextH - dy);
-        prevRow.style.height = `${newPrev}px`;
-        nextRow.style.height = `${newNext}px`;
-      });
-
-      window.addEventListener("mouseup", () => {
-        dragging = false;
-        document.body.style.userSelect = "";
-      });
+  document.querySelectorAll(".menu-shortcut").forEach((el) => {
+    el.addEventListener("click", () => {
+      const sym = el.dataset.symbol;
+      if (sym) initTradingViewChart(sym);
+      dd.classList.add("hidden");
     });
-  }
+  });
+}
 
-  function initColResizers() {
-    const resizers = document.querySelectorAll(".col-resizer");
-    resizers.forEach((rz) => {
-      let dragging = false;
-      let startX = 0;
-      let leftTile, rightTile, totalWidth, leftStart;
+/* Init ---------------------------------------------------------------- */
 
-      rz.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        const row = rz.closest(".row");
-        if (!row) return;
-        const tiles = row.querySelectorAll(".tile");
-        if (tiles.length !== 2) return;
-        leftTile = tiles[0];
-        rightTile = tiles[1];
-        totalWidth = row.clientWidth - rz.offsetWidth;
-        leftStart = leftTile.clientWidth;
-        dragging = true;
-        startX = e.clientX;
-        document.body.style.userSelect = "none";
-      });
+document.addEventListener("DOMContentLoaded", () => {
+  setupThemeToggle();
+  setupMenu();
+  initTradingViewChart(currentSymbol);
+  loadTickers();
+  loadMovers();
 
-      window.addEventListener("mousemove", (e) => {
-        if (!dragging) return;
-        const dx = e.clientX - startX;
-        let newLeft = leftStart + dx;
-        const min = 220;
-        const max = totalWidth - min;
-        newLeft = Math.max(min, Math.min(max, newLeft));
-        const leftPct = (newLeft / totalWidth) * 100;
-        const rightPct = 100 - leftPct;
-        leftTile.style.flex = `0 0 ${leftPct}%`;
-        rightTile.style.flex = `0 0 ${rightPct}%`;
-      });
-
-      window.addEventListener("mouseup", () => {
-        dragging = false;
-        document.body.style.userSelect = "";
-      });
-    });
-  }
-})();
+  // refresh tickers & movers every 5 minutes to avoid hitting Yahoo too often
+  setInterval(loadTickers, 5 * 60 * 1000);
+  setInterval(loadMovers, 5 * 60 * 1000);
+});
