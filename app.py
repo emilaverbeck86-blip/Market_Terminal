@@ -1,227 +1,276 @@
-import os
-from datetime import datetime, timezone
-from typing import List, Dict, Any
-
-import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import requests
+import time
+from typing import List, Dict, Any
 
 app = FastAPI()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
-static_dir = os.path.join(BASE_DIR, "static")
-if not os.path.exists(static_dir):
-    os.makedirs(static_dir)
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
-# ---------- Config ----------
-
-WATCHLIST = [
-    "AAPL", "MSFT", "NVDA", "META", "GOOGL", "TSLA",
-    "AVGO", "AMD", "NFLX", "ADBE", "INTC", "CSCO",
-    "QCOM", "TXN", "CRM", "JPM", "BAC", "WFC", "GS",
-    "V", "MA", "XOM", "CVX", "UNH", "LLY", "ABBV"
+WATCHLIST: List[str] = [
+    "AAPL", "MSFT", "NVDA", "META", "GOOGL", "TSLA", "AVGO", "AMD", "NFLX", "ADBE",
+    "INTC", "CSCO", "QCOM", "TXN", "CRM", "JPM", "BAC", "WFC", "GS", "V",
+    "MA", "XOM", "CVX", "UNH", "LLY", "ABBV",
 ]
 
 YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
-YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-YAHOO_PROFILE_URL = (
-    "https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}"
-    "?modules=assetProfile"
-)
-YAHOO_NEWS_URL = "https://query2.finance.yahoo.com/v1/finance/search"
+YAHOO_SEARCH_URL = "https://query2.finance.yahoo.com/v1/finance/search"
+YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/"
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0 Safari/537.36"
+    )
+}
+
+LAST_QUOTES: Dict[str, Dict[str, Any]] = {}
+LAST_QUOTES_TS: float = 0.0
+QUOTE_TTL = 60.0  # seconds
 
 
-# ---------- Utility helpers ----------
+# ---------- Helpers ----------
+
+
+def stooq_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    Fallback quote data from stooq.com (no API key, very generous limits).
+    We only use close + open to compute an approximate daily % change.
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    for sym in symbols:
+        code = sym.lower() + ".us"
+        url = f"https://stooq.com/q/l/?s={code}&f=sd2t2ohlcv&h&e=json"
+        try:
+            r = requests.get(url, timeout=5)
+            r.raise_for_status()
+            data = r.json()
+            items = data.get("symbols") or []
+            if not items:
+                continue
+            item = items[0]
+            close = float(item.get("close") or 0)
+            open_ = float(item.get("open") or 0) or close
+            change_pct = ((close - open_) / open_ * 100.0) if open_ else 0.0
+            out[sym] = {
+                "symbol": sym,
+                "price": close,
+                "change_pct": change_pct,
+            }
+        except Exception:
+            continue
+    return out
+
 
 def yahoo_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
-    """Fetch latest quotes from Yahoo. Never raise – on error returns {}."""
-    if not symbols:
-        return {}
+    """
+    Primary quote source: Yahoo Finance.
+    If Yahoo rate-limits (HTTP 429) or fails, fall back to Stooq.
+    Results are cached in memory for QUOTE_TTL seconds so we don't spam
+    either source.
+    """
+    global LAST_QUOTES, LAST_QUOTES_TS
+
+    now = time.time()
+    if LAST_QUOTES and now - LAST_QUOTES_TS < QUOTE_TTL:
+        return LAST_QUOTES
+
+    params = {"symbols": ",".join(symbols)}
+    quotes: Dict[str, Dict[str, Any]] = {}
+
+    # 1) Try Yahoo
     try:
-        params = {"symbols": ",".join(symbols)}
-        r = requests.get(YAHOO_QUOTE_URL, params=params, timeout=8)
-        # Yahoo sometimes returns 429; just bail out gracefully.
-        if r.status_code != 200:
-            return {}
-        data = r.json().get("quoteResponse", {}).get("result", [])
-    except requests.RequestException:
-        return {}
-
-    out: Dict[str, Dict[str, Any]] = {}
-    for q in data:
-        sym = q.get("symbol")
-        if not sym:
-            continue
-        price = q.get("regularMarketPrice")
-        change = q.get("regularMarketChangePercent")
-        out[sym] = {
-            "symbol": sym,
-            "price": float(price) if price is not None else None,
-            "change_pct": float(change) if change is not None else None,
-        }
-    return out
-
-
-def yahoo_perf_and_profile(symbol: str) -> Dict[str, Any]:
-    out = {"symbol": symbol, "perf": {}, "profile": ""}
-
-    # Performance
-    try:
-        chart_params = {"range": "1y", "interval": "1d"}
-        cr = requests.get(
-            YAHOO_CHART_URL.format(symbol=symbol),
-            params=chart_params,
-            timeout=10,
+        r = requests.get(
+            YAHOO_QUOTE_URL, params=params, headers=HEADERS, timeout=8
         )
-        if cr.status_code != 200:
-            raise ValueError("chart error")
-        cdata = cr.json()["chart"]["result"][0]
-        closes = cdata["indicators"]["quote"][0]["close"]
-        timestamps = cdata["timestamp"]
-        if not closes or not timestamps:
-            raise ValueError("No chart data")
-
-        series = [
-            (datetime.fromtimestamp(t, tz=timezone.utc), c)
-            for t, c in zip(timestamps, closes)
-            if c is not None
-        ]
-        if not series:
-            raise ValueError("Empty series")
-
-        series.sort(key=lambda x: x[0])
-        end_price = series[-1][1]
-        end_date = series[-1][0].date()
-
-        def pct_change(days: int) -> float | None:
-            target_ord = end_date.toordinal() - days
-            candidates = [p for (d, p) in series if d.date().toordinal() <= target_ord]
-            if not candidates:
-                return None
-            start = candidates[-1]
-            return (end_price - start) / start * 100.0 if start else None
-
-        out["perf"] = {
-            "1W": pct_change(7),
-            "1M": pct_change(30),
-            "3M": pct_change(90),
-            "6M": pct_change(180),
-            "YTD": pct_change(end_date.timetuple().tm_yday - 1),
-            "1Y": pct_change(365),
-        }
-    except Exception:
-        pass
-
-    # Profile
-    try:
-        pr = requests.get(YAHOO_PROFILE_URL.format(symbol=symbol), timeout=8)
-        if pr.status_code != 200:
-            raise ValueError("profile error")
-        result = pr.json()["quoteSummary"]["result"]
-        if result:
-            summary = result[0]["assetProfile"].get("longBusinessSummary", "")
-            if summary:
-                parts = summary.split(". ")
-                out["profile"] = ". ".join(parts[:6]).strip()
-    except Exception:
-        pass
-
-    return out
-
-
-def yahoo_symbol_news(symbol: str, limit: int = 30) -> List[Dict[str, Any]]:
-    try:
-        params = {"q": symbol, "newsCount": limit}
-        r = requests.get(YAHOO_NEWS_URL, params=params, timeout=8)
-        if r.status_code != 200:
-            return []
+        r.raise_for_status()
         data = r.json()
-        items = data.get("news", [])
-    except requests.RequestException:
+        result = data.get("quoteResponse", {}).get("result", [])
+        for item in result:
+            sym = item.get("symbol")
+            if not sym:
+                continue
+            price = item.get("regularMarketPrice")
+            change_pct = item.get("regularMarketChangePercent")
+            if price is None:
+                continue
+            quotes[sym] = {
+                "symbol": sym,
+                "price": float(price),
+                "change_pct": float(change_pct) if change_pct is not None else 0.0,
+            }
+
+        if quotes:
+            LAST_QUOTES = quotes
+            LAST_QUOTES_TS = now
+            return quotes
+    except Exception:
+        # fall through to stooq
+        pass
+
+    # 2) Fallback: Stooq
+    try:
+        quotes = stooq_quotes(symbols)
+        if quotes:
+            LAST_QUOTES = quotes
+            LAST_QUOTES_TS = now
+            return quotes
+    except Exception:
+        pass
+
+    # 3) Final fallback: last cached snapshot (might be empty)
+    return LAST_QUOTES
+
+
+def yahoo_news(symbol: str) -> List[Dict[str, Any]]:
+    """
+    Symbol-related headlines from Yahoo search API.
+    If it fails we just return [] and the frontend shows 'No headlines'.
+    """
+    params = {"q": symbol, "quotesCount": 0, "newsCount": 20}
+    try:
+        r = requests.get(
+            YAHOO_SEARCH_URL, params=params, headers=HEADERS, timeout=8
+        )
+        r.raise_for_status()
+        data = r.json()
+        out: List[Dict[str, Any]] = []
+        for item in data.get("news", []):
+            title = item.get("title")
+            link = item.get("link")
+            if not title or not link:
+                continue
+            publisher = item.get("publisher")
+            provider = item.get("provider")
+            time_published = (
+                item.get("providerPublishTime") or item.get("pubDate") or ""
+            )
+            if isinstance(provider, dict):
+                provider_name = provider.get("displayName") or publisher or ""
+            else:
+                provider_name = publisher or ""
+            out.append(
+                {
+                    "title": title,
+                    "link": link,
+                    "source": provider_name,
+                    "time": time_published,
+                }
+            )
+        return out
+    except Exception:
         return []
 
-    out: List[Dict[str, Any]] = []
-    for n in items:
-        title = n.get("title")
-        link = n.get("link")
-        publisher = n.get("publisher")
-        ts = n.get("providerPublishTime")
-        if not title or not link:
+
+def yahoo_insights(symbol: str) -> Dict[str, Any]:
+    """
+    Very simple performance snapshot using Yahoo's chart API.
+    If anything fails we just skip that range.
+    """
+    ranges = {
+        "1W": "5d",
+        "1M": "1mo",
+        "3M": "3mo",
+        "6M": "6mo",
+        "YTD": "ytd",
+        "1Y": "1y",
+    }
+    snapshot: Dict[str, Any] = {}
+    for label, rng in ranges.items():
+        url = f"{YAHOO_CHART_URL}{symbol}"
+        params = {"range": rng, "interval": "1d"}
+        try:
+            r = requests.get(url, params=params, headers=HEADERS, timeout=8)
+            r.raise_for_status()
+            data = r.json()
+            result = data.get("chart", {}).get("result")
+            if not result:
+                continue
+            result = result[0]
+            closes = (
+                result.get("indicators", {})
+                .get("quote", [{}])[0]
+                .get("close", [])
+            )
+            if not closes or len(closes) < 2:
+                continue
+            start = closes[0]
+            end = closes[-1]
+            if not start or not end:
+                continue
+            change_pct = (end - start) / start * 100.0
+            snapshot[label] = round(change_pct, 2)
+        except Exception:
             continue
-        when = ""
-        if ts:
-            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-            when = dt.strftime("%Y-%m-%d %H:%M UTC")
-        out.append(
-            {
-                "title": title,
-                "url": link,
-                "source": publisher or "",
-                "published_at": when,
-            }
-        )
-    return out
+    return snapshot
 
 
 # ---------- Pages ----------
 
+
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
-
-
-@app.get("/fundamentals", response_class=HTMLResponse)
-async def fundamentals_page(request: Request):
-    return templates.TemplateResponse("fundamentals.html", {"request": request})
+async def index(request: Request):
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "watchlist": WATCHLIST},
+    )
 
 
 @app.get("/heatmap", response_class=HTMLResponse)
-async def heatmap_page(request: Request):
+async def heatmap(request: Request):
     return templates.TemplateResponse("heatmap.html", {"request": request})
 
 
-# ---------- APIs ----------
+# ---------- API ----------
+
 
 @app.get("/api/tickers")
 async def api_tickers():
-    quotes = yahoo_quotes(WATCHLIST)
-    data = []
-    for sym in WATCHLIST:
-        q = quotes.get(sym, {"symbol": sym, "price": None, "change_pct": None})
-        data.append(q)
-    return JSONResponse(data)
-
-
-@app.get("/api/insights")
-async def api_insights(symbol: str):
-    info = yahoo_perf_and_profile(symbol)
-    return JSONResponse(info)
-
-
-@app.get("/api/news")
-async def api_news(symbol: str):
-    return JSONResponse(yahoo_symbol_news(symbol))
+    try:
+        quotes = yahoo_quotes(WATCHLIST)
+        data = []
+        for sym in WATCHLIST:
+            q = quotes.get(sym)
+            if q:
+                data.append(q)
+            else:
+                data.append({"symbol": sym, "price": None, "change_pct": None})
+        return {"tickers": data}
+    except Exception:
+        # never 500 here – just return empty so UI still works
+        return JSONResponse({"tickers": []}, status_code=200)
 
 
 @app.get("/api/movers")
 async def api_movers():
-    quotes = yahoo_quotes(WATCHLIST)
-    items = list(quotes.values())
-    items = [q for q in items if q.get("change_pct") is not None]
-    if not items:
-        return JSONResponse({"gainers": [], "losers": []})
+    try:
+        quotes = yahoo_quotes(WATCHLIST)
+        vals = [q for q in quotes.values() if q.get("change_pct") is not None]
+        if not vals:
+            return {"gainers": [], "losers": []}
+        sorted_vals = sorted(vals, key=lambda x: x["change_pct"])
+        losers = sorted_vals[:5]
+        gainers = list(reversed(sorted_vals[-5:]))
+        return {"gainers": gainers, "losers": losers}
+    except Exception:
+        return {"gainers": [], "losers": []}
 
-    items.sort(key=lambda x: x["change_pct"])
-    losers = items[:5]
-    gainers = items[-5:][::-1]
-    return JSONResponse({"gainers": gainers, "losers": losers})
+
+@app.get("/api/news")
+async def api_news(symbol: str):
+    items = yahoo_news(symbol)
+    return {"news": items}
 
 
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+@app.get("/api/insights")
+async def api_insights(symbol: str):
+    try:
+        snap = yahoo_insights(symbol)
+    except Exception:
+        snap = {}
+    return {"performance": snap}
