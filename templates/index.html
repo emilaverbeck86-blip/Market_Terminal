@@ -1,209 +1,161 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Market Terminal</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link
-      rel="stylesheet"
-      href="{{ url_for('static', path='style.css') }}"
-    />
-    <!-- TradingView widget script -->
-    <script
-      type="text/javascript"
-      src="https://s3.tradingview.com/tv.js"
-    ></script>
-  </head>
-  <body class="theme-dark">
-    <div id="app">
-      <!-- HEADER -->
-      <header class="mt-header">
-        <div class="mt-logo">MARKET TERMINAL</div>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <title>Market Terminal</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <!-- TradingView widget loader -->
+  <script src="https://s3.tradingview.com/tv.js"></script>
+  <!-- D3 for macro maps -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- Top bar -->
+    <header class="top-bar">
+      <div class="top-left">
+        <span class="logo-text">MARKET TERMINAL</span>
+      </div>
 
-        <div class="mt-ticker-bar">
-          <div id="ticker-strip" class="ticker-strip"></div>
-        </div>
+      <div class="ticker-bar">
+        <div id="ticker-marquee" class="ticker-marquee"></div>
+      </div>
 
-        <div class="mt-header-right">
-          <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme">
-            <span class="icon-sun">☀️</span>
-            <span class="toggle-knob"></span>
-            <span class="icon-moon">🌙</span>
-          </button>
-
-          <div class="mt-menu">
-            <button id="menu-button" class="menu-button">Menu ▾</button>
-            <div id="menu-dropdown" class="menu-dropdown hidden">
-              <div class="menu-section-title">Shortcuts</div>
-              <button class="menu-item shortcut" data-symbol="SP:SPX">
-                S&amp;P 500 (SPX)
-              </button>
-              <button class="menu-item shortcut" data-symbol="NASDAQ:NDX">
-                NASDAQ 100 (NDX)
-              </button>
-
-              <div class="menu-section-title">Tiles</div>
-              <label class="menu-checkbox">
-                <input
-                  type="checkbox"
-                  data-tile-id="macro-tile"
-                  checked
-                />
-                Macro Maps
-              </label>
-              <label class="menu-checkbox">
-                <input
-                  type="checkbox"
-                  data-tile-id="calendar-tile"
-                  checked
-                />
-                Economic Calendar
-              </label>
-              <label class="menu-checkbox">
-                <input
-                  type="checkbox"
-                  data-tile-id="movers-tile"
-                  checked
-                />
-                Top Movers
-              </label>
-
-              <div class="menu-section-title">Tools</div>
-              <a
-                class="menu-item link"
-                href="https://www.tradingview.com/heatmap/stock/usa/s&p_500/"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open S&amp;P 500 Heatmap
-              </a>
+      <div class="top-right">
+        <button id="menu-button" class="menu-button">Menu ▾</button>
+        <div id="menu-dropdown" class="menu-dropdown hidden">
+          <div class="menu-section">
+            <div class="menu-label">
+              <span>Theme</span>
+              <div class="theme-toggle">
+                <!-- Sun left, moon right -->
+                <span class="theme-icon">☀️</span>
+                <label class="switch">
+                  <input type="checkbox" id="theme-toggle" />
+                  <span class="slider"></span>
+                </label>
+                <span class="theme-icon">🌙</span>
+              </div>
             </div>
+          </div>
+
+          <div class="menu-section">
+            <div class="menu-label">Shortcuts</div>
+            <button class="menu-shortcut" data-symbol="AMEX:SPY" data-label="SPY">
+              S&amp;P 500 (SPY)
+            </button>
+            <button class="menu-shortcut" data-symbol="NASDAQ:QQQ" data-label="QQQ">
+              NASDAQ 100 (QQQ)
+            </button>
+          </div>
+
+          <div class="menu-section">
+            <div class="menu-label">Tiles</div>
+            <label class="menu-checkbox">
+              <input type="checkbox" data-tile="news-tile" checked /> News
+            </label>
+            <label class="menu-checkbox">
+              <input type="checkbox" data-tile="insights-tile" checked /> Market Insights
+            </label>
+            <label class="menu-checkbox">
+              <input type="checkbox" data-tile="macro-tile" checked /> Macro Maps
+            </label>
+            <label class="menu-checkbox">
+              <input type="checkbox" data-tile="calendar-tile" checked /> Economic Calendar
+            </label>
+            <label class="menu-checkbox">
+              <input type="checkbox" data-tile="movers-tile" checked /> Top Movers
+            </label>
+          </div>
+
+          <div class="menu-section">
+            <div class="menu-label">Tools</div>
+            <button id="heatmap-link" class="menu-link">
+              Open S&amp;P 500 Heatmap
+            </button>
           </div>
         </div>
-      </header>
+      </div>
+    </header>
 
-      <!-- MAIN DASHBOARD -->
-      <main id="dashboard">
-        <!-- ROW 1: Chart + News -->
-        <section class="row row-1">
-          <div class="tile chart-tile" id="chart-tile">
-            <div class="tile-header">
-              <span id="chart-title">Chart – AAPL</span>
-            </div>
-            <div id="chart-container" class="chart-container"></div>
+    <!-- Main layout -->
+    <main class="layout">
+      <!-- Row 1: Chart + News -->
+      <section class="row row-large" id="row-1">
+        <div class="tile chart-tile" id="chart-tile">
+          <div class="tile-header">
+            <span id="chart-title">Chart – AAPL</span>
           </div>
+          <div id="tv-chart" class="tv-chart"></div>
+        </div>
 
-          <div class="col-resizer" data-row="1"></div>
-
-          <div class="tile news-tile" id="news-tile">
-            <div class="tile-header">
-              <span id="news-title">News – AAPL</span>
-            </div>
-            <div id="news-list" class="tile-body scrollable">
-              <div class="placeholder">Loading news…</div>
-            </div>
+        <div class="tile news-tile" id="news-tile">
+          <div class="tile-header">
+            <span id="news-title">News – AAPL</span>
           </div>
-        </section>
+          <div class="tile-body scrollable" id="news-list">
+            <div class="placeholder">Loading news…</div>
+          </div>
+        </div>
+      </section>
 
-        <!-- ROW 2: Insights + Macro -->
-        <section class="row row-2">
-          <div class="tile insights-tile" id="insights-tile">
-            <div class="tile-header">
-              <span id="insights-title">Market Insights: AAPL</span>
+      <!-- Row 2: Market Insights + Macro Maps -->
+      <section class="row row-medium" id="row-2">
+        <div class="tile" id="insights-tile">
+          <div class="tile-header">
+            <span id="insights-title">Market Insights: AAPL</span>
+          </div>
+          <div class="tile-body">
+            <div class="insights-grid" id="insights-grid">
+              <!-- performance boxes populated by JS -->
             </div>
-            <div class="insights-grid">
-              <div class="insights-card">
-                <div class="label">1W</div>
-                <div id="insight-1w" class="value">–</div>
-              </div>
-              <div class="insights-card">
-                <div class="label">1M</div>
-                <div id="insight-1m" class="value">–</div>
-              </div>
-              <div class="insights-card">
-                <div class="label">3M</div>
-                <div id="insight-3m" class="value">–</div>
-              </div>
-              <div class="insights-card">
-                <div class="label">6M</div>
-                <div id="insight-6m" class="value">–</div>
-              </div>
-              <div class="insights-card">
-                <div class="label">YTD</div>
-                <div id="insight-ytd" class="value">–</div>
-              </div>
-              <div class="insights-card">
-                <div class="label">1Y</div>
-                <div id="insight-1y" class="value">–</div>
-              </div>
-            </div>
-            <p id="insights-description" class="insights-description">
-              Loading performance snapshot…
+            <p class="insights-description" id="insights-description">
+              No performance snapshot yet.
             </p>
           </div>
+        </div>
 
-          <div class="col-resizer" data-row="2"></div>
-
-          <div class="tile macro-tile" id="macro-tile">
-            <div class="tile-header">
-              <span>Macro Maps</span>
-              <div class="macro-tabs">
-                <button data-metric="inflation" class="macro-tab active">
-                  Inflation
-                </button>
-                <button data-metric="rates" class="macro-tab">
-                  Interest Rate
-                </button>
-                <button data-metric="gdp" class="macro-tab">
-                  GDP Growth
-                </button>
-                <button data-metric="unemployment" class="macro-tab">
-                  Unemployment
-                </button>
-              </div>
-            </div>
-            <div id="macro-map" class="tile-body macro-map"></div>
+        <div class="tile" id="macro-tile">
+          <div class="tile-header">
+            <span>Macro Maps</span>
           </div>
-        </section>
+          <div class="tile-body">
+            <div id="macro-map" class="macro-map"></div>
+            <div id="macro-legend" class="macro-legend"></div>
+          </div>
+        </div>
+      </section>
 
-        <!-- ROW 3: Calendar + Movers -->
-        <section class="row row-3">
-          <div class="tile calendar-tile" id="calendar-tile">
-            <div class="tile-header">
-              <span>Economic Calendar (US)</span>
+      <!-- Row 3: Economic Calendar + Movers -->
+      <section class="row row-medium" id="row-3">
+        <div class="tile" id="calendar-tile">
+          <div class="tile-header">
+            <span>Economic Calendar (US)</span>
+          </div>
+          <div class="tile-body scrollable" id="calendar-body">
+            <div class="placeholder">Loading calendar…</div>
+          </div>
+        </div>
+
+        <div class="tile" id="movers-tile">
+          <div class="tile-header">
+            <span>Top Movers (Watchlist)</span>
+          </div>
+          <div class="tile-body movers-body">
+            <div class="movers-column">
+              <h4>Top Gainers</h4>
+              <ul id="gainers-list"></ul>
             </div>
-            <div id="calendar-body" class="tile-body scrollable">
-              <!-- External widget via iframe for now -->
-              <iframe
-                title="Economic calendar"
-                src="https://www.myfxbook.com/forex-economic-calendar"
-                loading="lazy"
-                class="calendar-iframe"
-              ></iframe>
+            <div class="movers-column">
+              <h4>Top Losers</h4>
+              <ul id="losers-list"></ul>
             </div>
           </div>
+        </div>
+      </section>
+    </main>
+  </div>
 
-          <div class="col-resizer" data-row="3"></div>
-
-          <div class="tile movers-tile" id="movers-tile">
-            <div class="tile-header">
-              <span>Top Movers (Watchlist)</span>
-            </div>
-            <div id="movers-body" class="tile-body movers-body">
-              <div class="movers-column">
-                <h4>Top Gainers</h4>
-                <ul id="gainers-list"></ul>
-              </div>
-              <div class="movers-column">
-                <h4>Top Losers</h4>
-                <ul id="losers-list"></ul>
-              </div>
-            </div>
-          </div>
-        </section>
-      </main>
-    </div>
-
-    <script src="{{ url_for('static', path='main.js') }}"></script>
-  </body>
+  <script src="/static/main.js"></script>
+</body>
 </html>
