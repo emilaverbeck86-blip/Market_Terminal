@@ -1,5 +1,5 @@
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any
 
 import requests
@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import yfinance as yf
 
 app = FastAPI()
 
@@ -97,6 +98,40 @@ def yahoo_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
             }
         )
     return quotes
+
+
+def yfinance_news(symbol: str, max_items: int = 20) -> List[Dict[str, Any]]:
+    """Fetch the latest headlines from yfinance's live feed."""
+    try:
+        ticker = yf.Ticker(symbol)
+        raw_items = ticker.news or []
+    except Exception:
+        return []
+
+    items: List[Dict[str, Any]] = []
+    for entry in raw_items[:max_items]:
+        title = (entry.get("title") or "").strip()
+        url = entry.get("link") or entry.get("url") or ""
+        if not title or not url:
+            continue
+        publisher = (entry.get("publisher") or entry.get("provider") or "").strip()
+        published = ""
+        ts = entry.get("providerPublishTime") or entry.get("publishedAt")
+        if ts:
+            try:
+                dt = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+                published = dt.strftime("%b %d, %Y %H:%M UTC")
+            except Exception:
+                published = ""
+        items.append(
+            {
+                "title": title,
+                "url": url,
+                "source": publisher or "yfinance",
+                "published_at": published,
+            }
+        )
+    return items
 
 
 def yahoo_news(symbol: str, max_items: int = 15) -> List[Dict[str, Any]]:
@@ -291,10 +326,13 @@ async def api_tickers():
 
 @app.get("/api/news")
 async def api_news(symbol: str):
-    items = yahoo_news(symbol.upper())
+    sym = symbol.upper()
+    items = yfinance_news(sym)
     if not items:
-        items = fallback_news(symbol)
-    return {"symbol": symbol.upper(), "items": items}
+        items = yahoo_news(sym)
+    if not items:
+        items = fallback_news(sym)
+    return {"symbol": sym, "items": items}
 
 
 @app.get("/api/insights")

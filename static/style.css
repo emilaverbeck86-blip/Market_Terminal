@@ -97,6 +97,10 @@ body.theme-light .mt-header {
   animation: ticker-scroll 25s linear infinite;
 }
 
+.mt-ticker-bar:hover .mt-ticker-strip {
+  animation-play-state: paused;
+}
+
 .mt-ticker-item {
   font-size: 12px;
   color: var(--text-secondary-dark);
@@ -525,7 +529,27 @@ body.theme-light .mt-movers-title {
 .mt-mover-row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   margin-bottom: 3px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, outline-color 0.15s ease;
+  outline: none;
+}
+
+.mt-mover-row:hover,
+.mt-mover-row:focus-visible {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+body.theme-light .mt-mover-row:hover,
+body.theme-light .mt-mover-row:focus-visible {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.mt-mover-row:focus-visible {
+  outline: 1px solid var(--accent-yellow);
 }
 
 .mt-mover-change.pos {
@@ -673,6 +697,14 @@ body.theme-light .mt-modal-header {
 .mt-modal-body #heatmap-widget-container {
   width: 100%;
   height: 100%;
+}
+
+.mt-heatmap-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
 }
 
 body.mt-modal-open {

@@ -2,6 +2,8 @@ let currentSymbol = "AAPL";
 let lastTheme = "dark";
 let macroChart = null;
 let worldMapReady = false;
+const HEATMAP_EMBED_URL =
+  "https://www.tradingview.com/heatmap/?type=stock&color=change&size=market_cap_basic&dataSource=SPX500&group=sector&blockColor=change";
 
 const COUNTRY_NAMES = {
   US: "United States",
@@ -142,6 +144,11 @@ function updateChartTheme() {
 // Ticker bar
 // --------------------------------------------------------------
 
+function openSymbol(symbol) {
+  loadChart(symbol);
+  refreshAllForSymbol(symbol);
+}
+
 async function refreshTickerBar() {
   try {
     const data = await getJSON("/api/tickers");
@@ -166,8 +173,7 @@ async function refreshTickerBar() {
           `<span>${price}</span> ` +
           `<span class="mt-ticker-change ${changeClass}">${formatPct(change)}</span>`;
         el.addEventListener("click", () => {
-          loadChart(t.symbol);
-          refreshAllForSymbol(t.symbol);
+          openSymbol(t.symbol);
         });
         strip.appendChild(el);
       });
@@ -397,29 +403,30 @@ async function refreshMovers() {
     gainersDiv.innerHTML = "";
     losersDiv.innerHTML = "";
 
-    (data.gainers || []).forEach((g) => {
+    const renderMover = (target, mover) => {
       const row = document.createElement("div");
       row.className = "mt-mover-row";
-      const ch = Number(g.change_pct);
+      row.setAttribute("role", "button");
+      row.tabIndex = 0;
+      const changeValue = Number(mover.change_pct);
       row.innerHTML =
-        `<span>${g.symbol}</span>` +
-        `<span class="mt-mover-change ${ch >= 0 ? "pos" : "neg"}">${formatPct(
-          ch
+        `<span>${mover.symbol}</span>` +
+        `<span class="mt-mover-change ${changeValue >= 0 ? "pos" : "neg"}">${formatPct(
+          changeValue
         )}</span>`;
-      gainersDiv.appendChild(row);
-    });
+      const activate = () => openSymbol(mover.symbol);
+      row.addEventListener("click", activate);
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          activate();
+        }
+      });
+      target.appendChild(row);
+    };
 
-    (data.losers || []).forEach((g) => {
-      const row = document.createElement("div");
-      row.className = "mt-mover-row";
-      const ch = Number(g.change_pct);
-      row.innerHTML =
-        `<span>${g.symbol}</span>` +
-        `<span class="mt-mover-change ${ch >= 0 ? "pos" : "neg"}">${formatPct(
-          ch
-        )}</span>`;
-      losersDiv.appendChild(row);
-    });
+    (data.gainers || []).forEach((g) => renderMover(gainersDiv, g));
+    (data.losers || []).forEach((g) => renderMover(losersDiv, g));
   } catch (e) {
     console.error("movers error", e);
   }
@@ -466,8 +473,7 @@ function setupMenu() {
   document.querySelectorAll(".mt-menu-item").forEach((item) => {
     item.addEventListener("click", () => {
       const sym = item.getAttribute("data-shortcut-symbol");
-      loadChart(sym);
-      refreshAllForSymbol(sym);
+      openSymbol(sym);
       dd.classList.remove("open");
     });
   });
@@ -475,26 +481,15 @@ function setupMenu() {
 
 function loadHeatmapWidget() {
   const container = document.getElementById("heatmap-widget");
-  if (!container || !window.TradingView) return;
+  if (!container) return;
   container.innerHTML = "";
-  const theme = lastTheme === "light" ? "light" : "dark";
-  new TradingView.widget({
-    container_id: "heatmap-widget",
-    width: "100%",
-    height: "100%",
-    dataSource: "S&P500",
-    exchange: "US",
-    blockSize: "market_cap_basic",
-    blockColor: "change",
-    colorTheme: theme,
-    locale: "en",
-    hasTopBar: false,
-    showSymbolLogo: true,
-    isDataSetEnabled: true,
-    isSymbolTooltipEnabled: true,
-    symbolSettings: [],
-    plotType: "heatmap",
-  });
+  const iframe = document.createElement("iframe");
+  iframe.src = HEATMAP_EMBED_URL;
+  iframe.title = "TradingView Stock Heatmap";
+  iframe.className = "mt-heatmap-iframe";
+  iframe.setAttribute("frameborder", "0");
+  iframe.setAttribute("loading", "lazy");
+  container.appendChild(iframe);
 }
 
 function setupHeatmapModal() {
@@ -642,6 +637,7 @@ function startColResize(event, row, config) {
 
 function refreshAllForSymbol(symbol) {
   const sym = symbol.toUpperCase();
+  currentSymbol = sym;
   document.getElementById("chart-symbol").textContent = sym;
   document.getElementById("news-symbol").textContent = sym;
   document.getElementById("insights-symbol").textContent = sym;
@@ -675,6 +671,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   refreshTickerBar();
   setInterval(refreshTickerBar, 20000);
   setInterval(refreshMovers, 90000);
+  setInterval(() => refreshNews(currentSymbol), 60000);
 
   await initMacroChart();
 });
