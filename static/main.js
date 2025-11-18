@@ -31,9 +31,10 @@ const MACRO_METRIC_LABELS = {
 };
 
 const ROW_MIN_HEIGHT = 180;
-const ROW_STORAGE_PREFIX = "mt-row-";
-const COL_STORAGE_PREFIX = "mt-cols-";
-let heatmapModalOpen = false;
+const ROW_MAX_HEIGHT = 520;
+
+const COL_MIN_WIDTH = 220;
+const COL_MAX_WIDTH = 800;
 
 // --------------------------------------------------------------
 // Utilities
@@ -48,59 +49,144 @@ async function getJSON(url) {
 function formatPct(p) {
   if (p === null || p === undefined || isNaN(p)) return "–";
   const v = Number(p);
-  const sign = v > 0 ? "+" : "";
-  return sign + v.toFixed(2) + "%";
+  const abs = Math.abs(v);
+  if (abs >= 100) return `${v.toFixed(0)}%`;
+  return `${v.toFixed(2)}%`;
 }
 
-function safeStorageSet(key, value) {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch (err) {
-    // ignore storage errors
+function clamp(v, min, max) {
+  return Math.min(max, Math.max(min, v));
+}
+
+// --------------------------------------------------------------
+// Theme handling
+// --------------------------------------------------------------
+
+function applyTheme(theme) {
+  const body = document.body;
+  if (theme === "light") {
+    body.classList.remove("theme-dark");
+    body.classList.add("theme-light");
+  } else {
+    body.classList.remove("theme-light");
+    body.classList.add("theme-dark");
   }
+  lastTheme = theme;
 }
 
-function safeStorageGet(key) {
-  try {
-    return window.localStorage.getItem(key);
-  } catch (err) {
-    return null;
-  }
-}
-
-function saveRowHeight(varName, value) {
-  safeStorageSet(`${ROW_STORAGE_PREFIX}${varName}`, value);
-}
-
-function applySavedRowHeights() {
-  document.querySelectorAll(".mt-row[data-height-var]").forEach((row) => {
-    const varName = row.getAttribute("data-height-var");
-    const stored = varName
-      ? safeStorageGet(`${ROW_STORAGE_PREFIX}${varName}`)
-      : null;
-    if (varName && stored) {
-      document.documentElement.style.setProperty(varName, stored);
+function initThemeToggle() {
+  const toggle = document.getElementById("theme-toggle");
+  if (!toggle) return;
+  toggle.addEventListener("click", () => {
+    const next = lastTheme === "dark" ? "light" : "dark";
+    applyTheme(next);
+    if (macroChart) {
+      macroChart.resize();
     }
   });
 }
 
-function saveColWidths(key, value) {
-  safeStorageSet(`${COL_STORAGE_PREFIX}${key}`, value);
+// --------------------------------------------------------------
+// Layout / resizers
+// --------------------------------------------------------------
+
+function setRowHeight(rowId, value) {
+  const clamped = clamp(value, ROW_MIN_HEIGHT, ROW_MAX_HEIGHT);
+  document.documentElement.style.setProperty(`--${rowId}-height`, clamped + "px");
 }
 
-function applySavedColWidths() {
-  document.querySelectorAll(".mt-row[data-col-key]").forEach((row) => {
-    const key = row.getAttribute("data-col-key");
-    const leftVar = row.getAttribute("data-col-left");
-    const rightVar = row.getAttribute("data-col-right");
-    if (!key || !leftVar || !rightVar) return;
-    const stored = safeStorageGet(`${COL_STORAGE_PREFIX}${key}`);
-    if (!stored) return;
-    const [left, right] = stored.split(",");
-    if (left && right) {
-      row.style.setProperty(leftVar, left.trim());
-      row.style.setProperty(rightVar, right.trim());
-    }
+function setColWidth(rowId, colVar, value) {
+  const clamped = clamp(value, COL_MIN_WIDTH, COL_MAX_WIDTH);
+  document.documentElement.style.setProperty(
+    `--${rowId}-${colVar}`,
+    clamped + "px"
+  );
+}
+
+function setupRowResizers() {
+  document.querySelectorAll("[data-row-resizer]").forEach((resizer) => {
+    const rowId = resizer.getAttribute("data-row-resizer");
+    const rowEl = document.querySelector(`.mt-row[data-row="${rowId.slice(-1)}"]`);
+    if (!rowEl) return;
+
+    let startY = 0;
+    let startHeight = 0;
+
+    const onDown = (event) => {
+      event.preventDefault();
+      startY = event.touches ? event.touches[0].clientY : event.clientY;
+      const style = getComputedStyle(document.documentElement);
+      const h = parseFloat(style.getPropertyValue(`--${rowId}-height`)) || 260;
+      startHeight = h;
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("touchmove", onMove, { passive: false });
+      window.addEventListener("mouseup", onUp);
+      window.addEventListener("touchend", onUp);
+    };
+
+    const onMove = (event) => {
+      const y = event.touches ? event.touches[0].clientY : event.clientY;
+      const delta = y - startY;
+      setRowHeight(rowId, startHeight + delta);
+      if (macroChart) macroChart.resize();
+    };
+
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchend", onUp);
+    };
+
+    resizer.addEventListener("mousedown", onDown);
+    resizer.addEventListener("touchstart", onDown, { passive: false });
+  });
+}
+
+function setupColResizers() {
+  document.querySelectorAll("[data-col-resizer]").forEach((resizer) => {
+    const id = resizer.getAttribute("data-col-resizer");
+    const row = resizer.closest(".mt-row");
+    if (!row) return;
+    const leftVar = `--${id}-col1`;
+    const rightVar = `--${id}-col2`;
+
+    let startX = 0;
+    let startLeftWidth = 0;
+
+    const onDown = (event) => {
+      event.preventDefault();
+      startX = event.touches ? event.touches[0].clientX : event.clientX;
+      const style = getComputedStyle(document.documentElement);
+      startLeftWidth =
+        parseFloat(style.getPropertyValue(leftVar)) ||
+        row.querySelector(".mt-col")?.offsetWidth ||
+        400;
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("touchmove", onMove, { passive: false });
+      window.addEventListener("mouseup", onUp);
+      window.addEventListener("touchend", onUp);
+    };
+
+    const onMove = (event) => {
+      const x = event.touches ? event.touches[0].clientX : event.clientX;
+      const delta = x - startX;
+      const newLeft = clamp(startLeftWidth + delta, COL_MIN_WIDTH, COL_MAX_WIDTH);
+      const newRight = row.clientWidth - newLeft - 8;
+      document.documentElement.style.setProperty(leftVar, newLeft + "px");
+      document.documentElement.style.setProperty(rightVar, newRight + "px");
+      if (macroChart) macroChart.resize();
+    };
+
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchend", onUp);
+    };
+
+    resizer.addEventListener("mousedown", onDown);
+    resizer.addEventListener("touchstart", onDown, { passive: false });
   });
 }
 
@@ -115,20 +201,9 @@ function renderChartPlaceholder(message) {
   chartFallbackActive = true;
 }
 
-function clearChartPlaceholder() {
-  if (!chartFallbackActive) return;
-  const container = document.getElementById("tv-chart");
-  if (container) {
-    container.innerHTML = "";
-  }
-  chartFallbackActive = false;
-}
-
 function loadChart(symbol) {
   currentSymbol = symbol.toUpperCase();
   document.getElementById("chart-symbol").textContent = currentSymbol;
-  document.getElementById("news-symbol").textContent = currentSymbol;
-  document.getElementById("insights-symbol").textContent = currentSymbol;
 
   const containerId = "tv-chart";
   const theme = lastTheme === "dark" ? "dark" : "light";
@@ -143,46 +218,33 @@ function loadChart(symbol) {
     chartRetryTimer = setTimeout(() => {
       chartRetryTimer = null;
       loadChart(currentSymbol);
-    }, 1200);
+    }, 1500);
     return;
   }
 
-  try {
-    if (tvWidget) {
-      tvWidget.setSymbol(currentSymbol);
-      return;
-    }
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = "";
+  chartFallbackActive = false;
 
-    clearChartPlaceholder();
-    tvWidget = new TradingView.widget({
-      symbol: currentSymbol,
-      interval: "60",
-      container_id: containerId,
-      autosize: true,
-      hide_top_toolbar: false,
-      hide_legend: false,
-      theme,
-      locale: "en",
-    });
-  } catch (error) {
-    console.error("chart error", error);
-    tvWidget = null;
-    renderChartPlaceholder("Chart temporarily unavailable.");
-  }
+  tvWidget = new TradingView.widget({
+    autosize: true,
+    symbol: currentSymbol,
+    interval: "60",
+    container_id: containerId,
+    timezone: "Etc/UTC",
+    theme: theme,
+    style: "1",
+    locale: "en",
+    enable_publishing: false,
+    allow_symbol_change: false,
+    hide_side_toolbar: false,
+    hide_volume: false,
+    details: false,
+    hotlist: false,
+    calendar: false,
+  });
 }
-
-function updateChartTheme() {
-  if (!tvWidget) return;
-  const theme = lastTheme === "dark" ? "dark" : "light";
-  // easiest: recreate widget
-  tvWidget = null;
-  document.getElementById("tv-chart").innerHTML = "";
-  loadChart(currentSymbol);
-}
-
-// --------------------------------------------------------------
-// Ticker bar
-// --------------------------------------------------------------
 
 function openSymbol(symbol) {
   try {
@@ -192,6 +254,10 @@ function openSymbol(symbol) {
   }
   refreshAllForSymbol(symbol);
 }
+
+// --------------------------------------------------------------
+// Ticker bar
+// --------------------------------------------------------------
 
 async function refreshTickerBar() {
   try {
@@ -226,7 +292,7 @@ async function refreshTickerBar() {
     bar.appendChild(strip1);
     bar.appendChild(strip2);
   } catch (e) {
-    console.error("ticker error", e);
+    console.error("ticker bar error", e);
   }
 }
 
@@ -235,34 +301,33 @@ async function refreshTickerBar() {
 // --------------------------------------------------------------
 
 async function refreshNews(symbol) {
+  const newsBox = document.getElementById("news-list");
+  if (!newsBox) return;
+  newsBox.innerHTML = "";
   try {
     const data = await getJSON(`/api/news?symbol=${encodeURIComponent(symbol)}`);
-    const container = document.getElementById("news-container");
-    container.innerHTML = "";
     const items = data.items || [];
     if (!items.length) {
-      container.innerHTML =
-        '<div class="mt-placeholder">No headlines available.</div>';
+      newsBox.innerHTML = `<div class="mt-news-empty">No news available.</div>`;
       return;
     }
-    items.forEach((n) => {
-      const row = document.createElement("div");
-      row.className = "mt-news-item";
-      const a = document.createElement("a");
-      a.className = "mt-news-title";
-      a.href = n.url;
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.textContent = n.title;
-      const meta = document.createElement("div");
-      meta.className = "mt-news-meta";
-      meta.textContent = `${n.source || ""} ${n.published_at || ""}`;
-      row.appendChild(a);
-      row.appendChild(meta);
-      container.appendChild(row);
+
+    items.forEach((item) => {
+      const el = document.createElement("a");
+      el.href = item.url;
+      el.target = "_blank";
+      el.rel = "noopener noreferrer";
+      el.className = "mt-news-item";
+      const source = item.source || "News";
+      const published = item.published_at || "";
+      el.innerHTML =
+        `<div class="mt-news-title">${item.title}</div>` +
+        `<div class="mt-news-meta"><span>${source}</span><span>${published}</span></div>`;
+      newsBox.appendChild(el);
     });
   } catch (e) {
     console.error("news error", e);
+    newsBox.innerHTML = `<div class="mt-news-empty">Unable to load news.</div>`;
   }
 }
 
@@ -271,37 +336,112 @@ async function refreshNews(symbol) {
 // --------------------------------------------------------------
 
 async function refreshInsights(symbol) {
+  const root = document.querySelector(".mt-insights");
+  if (!root) return;
+
+  const profileEl = document.getElementById("insights-profile");
+  const tiles = root.querySelectorAll(".mt-insight-value");
+  tiles.forEach((tile) => {
+    tile.textContent = "–";
+    tile.classList.remove("pos", "neg");
+  });
+  profileEl.textContent = "Loading performance snapshot…";
+
   try {
     const data = await getJSON(`/api/insights?symbol=${encodeURIComponent(symbol)}`);
     const periods = data.periods || {};
-    document.querySelectorAll(".mt-insight-value").forEach((el) => {
-      const key = el.getAttribute("data-period");
-      const val = periods[key] ?? null;
-      el.textContent = formatPct(val);
-      el.classList.remove("pos", "neg");
-      if (val !== null && !isNaN(val)) {
-        if (Number(val) > 0) el.classList.add("pos");
-        if (Number(val) < 0) el.classList.add("neg");
+    Object.entries(periods).forEach(([period, val]) => {
+      const cell = root.querySelector(`.mt-insight-value[data-period="${period}"]`);
+      if (!cell) return;
+      if (val === null || val === undefined) {
+        cell.textContent = "–";
+        return;
       }
+      const num = Number(val);
+      cell.textContent = formatPct(num);
+      cell.classList.add(num >= 0 ? "pos" : "neg");
     });
-    const profile = data.profile || "";
-    document.getElementById("insights-profile").textContent = profile;
+
+    profileEl.textContent =
+      data.profile ||
+      "This snapshot combines recent price performance and a short descriptive profile to give you a quick fundamental impression inside the terminal.";
   } catch (e) {
     console.error("insights error", e);
+    profileEl.textContent = "No performance snapshot available at this time.";
+  }
+}
+
+// --------------------------------------------------------------
+// Calendar
+// --------------------------------------------------------------
+
+async function refreshCalendar() {
+  try {
+    const data = await getJSON("/api/calendar");
+    const tbody = document.getElementById("calendar-body");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+    (data.events || []).forEach((ev) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td>${ev.time}</td>` +
+        `<td>${ev.country}</td>` +
+        `<td>${ev.event}</td>` +
+        `<td>${ev.actual}</td>` +
+        `<td>${ev.forecast}</td>` +
+        `<td>${ev.previous}</td>`;
+      tbody.appendChild(tr);
+    });
+  } catch (e) {
+    console.error("calendar error", e);
+  }
+}
+
+// --------------------------------------------------------------
+// Movers
+// --------------------------------------------------------------
+
+async function refreshMovers() {
+  try {
+    const data = await getJSON("/api/movers");
+    const gainersDiv = document.getElementById("movers-gainers");
+    const losersDiv = document.getElementById("movers-losers");
+    if (!gainersDiv || !losersDiv) return;
+    gainersDiv.innerHTML = "";
+    losersDiv.innerHTML = "";
+
+    const renderMover = (target, mover) => {
+      const row = document.createElement("div");
+      row.className = "mt-mover-row";
+      row.setAttribute("role", "button");
+      row.tabIndex = 0;
+      const changeValue = Number(mover.change_pct);
+      row.innerHTML =
+        `<span>${mover.symbol}</span>` +
+        `<span class="mt-mover-change ${
+          changeValue >= 0 ? "pos" : "neg"
+        }">${formatPct(changeValue)}</span>`;
+      const activate = () => openSymbol(mover.symbol);
+      row.addEventListener("click", activate);
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          activate();
+        }
+      });
+      target.appendChild(row);
+    };
+
+    (data.gainers || []).forEach((g) => renderMover(gainersDiv, g));
+    (data.losers || []).forEach((g) => renderMover(losersDiv, g));
+  } catch (e) {
+    console.error("movers error", e);
   }
 }
 
 // --------------------------------------------------------------
 // Macro world map (ECharts)
 // --------------------------------------------------------------
-
-async function initMacroChart() {
-  const dom = document.getElementById("macro-map");
-  if (!dom) return;
-  macroChart = echarts.init(dom, null, { renderer: "canvas" });
-  await ensureWorldMap();
-  await loadMacroData("inflation");
-}
 
 async function ensureWorldMap() {
   if (worldMapReady || echarts.getMap("terminal-world")) {
@@ -338,7 +478,8 @@ async function loadMacroData(metric) {
     const seriesData = values.map((d) => {
       const rawValue =
         d.value === null || d.value === undefined ? null : Number(d.value);
-      const numericValue = rawValue !== null && !isNaN(rawValue) ? rawValue : null;
+      const numericValue =
+        rawValue !== null && !isNaN(rawValue) ? rawValue : null;
       return {
         name: COUNTRY_NAMES[d.code] || d.code,
         value: numericValue,
@@ -347,7 +488,9 @@ async function loadMacroData(metric) {
     });
 
     const numericValues = seriesData
-      .map((d) => (typeof d.value === "number" && !isNaN(d.value) ? d.value : null))
+      .map((d) =>
+        typeof d.value === "number" && !isNaN(d.value) ? d.value : null
+      )
       .filter((v) => v !== null);
     let minVal = numericValues.length ? Math.min(...numericValues) : 0;
     let maxVal = numericValues.length ? Math.max(...numericValues) : 10;
@@ -366,18 +509,30 @@ async function loadMacroData(metric) {
             params.value === undefined || params.value === null
               ? "N/A"
               : `${params.value}%`;
-          return `${params.name || params.data?.code || ""}${code}<br/>${label}: ${value}`;
+          return `${
+            params.name || params.data?.code || ""
+          }${code}<br/>${label}: ${value}`;
         },
       },
       visualMap: {
-        min: Math.floor(minVal),
-        max: Math.ceil(maxVal),
-        left: "left",
-        top: "bottom",
-        text: ["High", "Low"],
-        calculable: false,
+        type: "piecewise",
+        orient: "horizontal",
+        left: "center",
+        bottom: 8,
+        textStyle: {
+          color:
+            getComputedStyle(document.body).getPropertyValue(
+              "--text-secondary-dark"
+            ) || "#9ca3af",
+        },
+        pieces: [
+          { max: 2, label: "< 2%" },
+          { min: 2, max: 4, label: "2–4%" },
+          { min: 4, max: 6, label: "4–6%" },
+          { min: 6, label: "> 6%" },
+        ],
         inRange: {
-          color: ["#22c55e", "#eab308", "#ef4444"],
+          color: ["#fef9c3", "#fbbf24", "#ea580c", "#b91c1c"],
         },
       },
       series: [
@@ -390,11 +545,18 @@ async function loadMacroData(metric) {
         },
       ],
     };
-
     macroChart.setOption(option);
   } catch (e) {
     console.error("macro error", e);
   }
+}
+
+async function initMacroChart() {
+  const dom = document.getElementById("macro-map");
+  if (!dom) return;
+  macroChart = echarts.init(dom, null, { renderer: "canvas" });
+  await ensureWorldMap();
+  await loadMacroData("inflation");
 }
 
 function setupMacroTabs() {
@@ -408,295 +570,6 @@ function setupMacroTabs() {
       loadMacroData(metric);
     });
   });
-}
-
-// --------------------------------------------------------------
-// Calendar
-// --------------------------------------------------------------
-
-async function refreshCalendar() {
-  try {
-    const data = await getJSON("/api/calendar");
-    const tbody = document.querySelector("#calendar-table tbody");
-    tbody.innerHTML = "";
-    (data.events || []).forEach((e) => {
-      const tr = document.createElement("tr");
-      tr.innerHTML =
-        `<td>${e.time}</td>` +
-        `<td>${e.country}</td>` +
-        `<td>${e.event}</td>` +
-        `<td>${e.actual}</td>` +
-        `<td>${e.forecast}</td>` +
-        `<td>${e.previous}</td>`;
-      tbody.appendChild(tr);
-    });
-  } catch (e) {
-    console.error("calendar error", e);
-  }
-}
-
-// --------------------------------------------------------------
-// Movers
-// --------------------------------------------------------------
-
-async function refreshMovers() {
-  try {
-    const data = await getJSON("/api/movers");
-    const gainersDiv = document.getElementById("movers-gainers");
-    const losersDiv = document.getElementById("movers-losers");
-    gainersDiv.innerHTML = "";
-    losersDiv.innerHTML = "";
-
-    const renderMover = (target, mover) => {
-      const row = document.createElement("div");
-      row.className = "mt-mover-row";
-      row.setAttribute("role", "button");
-      row.tabIndex = 0;
-      const changeValue = Number(mover.change_pct);
-      row.innerHTML =
-        `<span>${mover.symbol}</span>` +
-        `<span class="mt-mover-change ${changeValue >= 0 ? "pos" : "neg"}">${formatPct(
-          changeValue
-        )}</span>`;
-      const activate = () => openSymbol(mover.symbol);
-      row.addEventListener("click", activate);
-      row.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          activate();
-        }
-      });
-      target.appendChild(row);
-    };
-
-    (data.gainers || []).forEach((g) => renderMover(gainersDiv, g));
-    (data.losers || []).forEach((g) => renderMover(losersDiv, g));
-  } catch (e) {
-    console.error("movers error", e);
-  }
-}
-
-// --------------------------------------------------------------
-// Theme & menu
-// --------------------------------------------------------------
-
-function applyTheme(theme) {
-  lastTheme = theme;
-  const body = document.body;
-  if (theme === "light") {
-    body.classList.add("theme-light");
-  } else {
-    body.classList.remove("theme-light");
-  }
-  updateChartTheme();
-  if (heatmapModalOpen) {
-    loadHeatmapWidget();
-  }
-}
-
-function setupThemeToggle() {
-  const toggle = document.getElementById("theme-toggle");
-  toggle.checked = false; // dark by default
-  toggle.addEventListener("change", () => {
-    applyTheme(toggle.checked ? "light" : "dark");
-  });
-}
-
-function setupMenu() {
-  const btn = document.getElementById("menu-toggle");
-  const dd = document.getElementById("menu-dropdown");
-  btn.addEventListener("click", () => {
-    dd.classList.toggle("open");
-  });
-  document.addEventListener("click", (e) => {
-    if (!dd.contains(e.target) && !btn.contains(e.target)) {
-      dd.classList.remove("open");
-    }
-  });
-
-  document.querySelectorAll(".mt-menu-item").forEach((item) => {
-    item.addEventListener("click", () => {
-      const sym = item.getAttribute("data-shortcut-symbol");
-      openSymbol(sym);
-      dd.classList.remove("open");
-    });
-  });
-}
-
-function getHeatmapConfig() {
-  return {
-    width: "100%",
-    height: "100%",
-    colorTheme: lastTheme === "light" ? "light" : "dark",
-    dataSource: "SPX500",
-    group: "sector",
-    blockColor: "change",
-    showSymbolLogo: true,
-    isDataSetEnabled: true,
-    locale: "en",
-    hasTopBar: false,
-    noDataMessage: "Heatmap data is unavailable right now",
-  };
-}
-
-function loadHeatmapWidget() {
-  const container = document.getElementById("heatmap-widget");
-  if (!container) return;
-  container.innerHTML = "";
-
-  const wrapper = document.createElement("div");
-  wrapper.className = "tradingview-widget-container mt-heatmap-embed";
-  const widget = document.createElement("div");
-  widget.className = "tradingview-widget-container__widget";
-  wrapper.appendChild(widget);
-
-  const script = document.createElement("script");
-  script.type = "text/javascript";
-  script.src = HEATMAP_SCRIPT_URL;
-  script.async = true;
-  script.textContent = JSON.stringify(getHeatmapConfig());
-  wrapper.appendChild(script);
-
-  container.appendChild(wrapper);
-}
-
-function setupHeatmapModal() {
-  const trigger = document.getElementById("heatmap-link");
-  const modal = document.getElementById("heatmap-modal");
-  if (!trigger || !modal) return;
-  const closeBtn = modal.querySelector(".mt-modal-close");
-
-  const close = () => {
-    heatmapModalOpen = false;
-    modal.classList.remove("open");
-    document.body.classList.remove("mt-modal-open");
-  };
-
-  const open = () => {
-    heatmapModalOpen = true;
-    modal.classList.add("open");
-    document.body.classList.add("mt-modal-open");
-    loadHeatmapWidget();
-  };
-
-  trigger.addEventListener("click", (event) => {
-    event.preventDefault();
-    open();
-  });
-
-  if (closeBtn) {
-    closeBtn.addEventListener("click", close);
-  }
-
-  modal.addEventListener("click", (event) => {
-    if (event.target === modal) {
-      close();
-    }
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && heatmapModalOpen) {
-      close();
-    }
-  });
-}
-
-// --------------------------------------------------------------
-// Layout resizing
-// --------------------------------------------------------------
-// --------------------------------------------------------------
-
-function setupRowResizers() {
-  document.querySelectorAll(".mt-row-resizer").forEach((handle) => {
-    handle.addEventListener("mousedown", (event) => startRowResize(event, handle));
-    handle.addEventListener(
-      "touchstart",
-      (event) => startRowResize(event, handle),
-      { passive: false }
-    );
-  });
-}
-
-function startRowResize(event, handle) {
-  if (event.cancelable) event.preventDefault();
-  const row = handle.previousElementSibling;
-  if (!row) return;
-  const varName = row.getAttribute("data-height-var");
-  if (!varName) return;
-  const startY = event.touches ? event.touches[0].clientY : event.clientY;
-  const startHeight = row.getBoundingClientRect().height;
-  document.body.classList.add("mt-resizing-row");
-
-  const onMove = (ev) => {
-    if (ev.cancelable) ev.preventDefault();
-    const clientY = ev.touches ? ev.touches[0].clientY : ev.clientY;
-    const delta = clientY - startY;
-    const newHeight = Math.max(ROW_MIN_HEIGHT, startHeight + delta);
-    document.documentElement.style.setProperty(varName, `${newHeight}px`);
-    saveRowHeight(varName, `${newHeight}px`);
-    window.dispatchEvent(new Event("resize"));
-  };
-
-  const onUp = () => {
-    document.body.classList.remove("mt-resizing-row");
-    window.removeEventListener("mousemove", onMove);
-    window.removeEventListener("touchmove", onMove);
-    window.removeEventListener("mouseup", onUp);
-    window.removeEventListener("touchend", onUp);
-  };
-
-  window.addEventListener("mousemove", onMove);
-  window.addEventListener("touchmove", onMove, { passive: false });
-  window.addEventListener("mouseup", onUp);
-  window.addEventListener("touchend", onUp);
-}
-
-function setupColResizers() {
-  document.querySelectorAll(".mt-col-resizer").forEach((handle) => {
-    const row = handle.closest(".mt-row");
-    if (!row) return;
-    const key = row.getAttribute("data-col-key");
-    const leftVar = row.getAttribute("data-col-left");
-    const rightVar = row.getAttribute("data-col-right");
-    if (!key || !leftVar || !rightVar) return;
-    const start = (event) =>
-      startColResize(event, row, { key, leftVar, rightVar });
-    handle.addEventListener("mousedown", start);
-    handle.addEventListener("touchstart", start, { passive: false });
-  });
-}
-
-function startColResize(event, row, config) {
-  if (event.cancelable) event.preventDefault();
-  document.body.classList.add("mt-resizing-col");
-
-  const onMove = (ev) => {
-    if (ev.cancelable) ev.preventDefault();
-    const rect = row.getBoundingClientRect();
-    if (!rect.width) return;
-    const clientX = ev.touches ? ev.touches[0].clientX : ev.clientX;
-    let ratio = (clientX - rect.left) / rect.width;
-    ratio = Math.min(0.75, Math.max(0.25, ratio));
-    const leftValue = Math.max(0.25, Math.round(ratio * 100) / 100);
-    const rightValue = Math.max(0.25, Math.round((1 - ratio) * 100) / 100);
-    row.style.setProperty(config.leftVar, `${leftValue}fr`);
-    row.style.setProperty(config.rightVar, `${rightValue}fr`);
-    saveColWidths(config.key, `${leftValue}fr,${rightValue}fr`);
-    window.dispatchEvent(new Event("resize"));
-  };
-
-  const onUp = () => {
-    document.body.classList.remove("mt-resizing-col");
-    window.removeEventListener("mousemove", onMove);
-    window.removeEventListener("touchmove", onMove);
-    window.removeEventListener("mouseup", onUp);
-    window.removeEventListener("touchend", onUp);
-  };
-
-  window.addEventListener("mousemove", onMove);
-  window.addEventListener("touchmove", onMove, { passive: false });
-  window.addEventListener("mouseup", onUp);
-  window.addEventListener("touchend", onUp);
 }
 
 // --------------------------------------------------------------
@@ -717,21 +590,12 @@ function refreshAllForSymbol(symbol) {
 // Init
 // --------------------------------------------------------------
 
-window.addEventListener("resize", () => {
-  if (macroChart) {
-    macroChart.resize();
-  }
-});
-
 window.addEventListener("DOMContentLoaded", async () => {
-  applySavedRowHeights();
-  applySavedColWidths();
-  setupMenu();
-  setupThemeToggle();
-  setupHeatmapModal();
-  setupMacroTabs();
+  applyTheme("dark");
+  initThemeToggle();
   setupRowResizers();
   setupColResizers();
+
   loadChart(currentSymbol);
   refreshAllForSymbol(currentSymbol);
   refreshCalendar();
@@ -741,5 +605,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   setInterval(refreshMovers, 90000);
   setInterval(() => refreshNews(currentSymbol), 60000);
 
+  setupMacroTabs();
   await initMacroChart();
 });
