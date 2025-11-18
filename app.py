@@ -149,8 +149,6 @@ def fallback_news(symbol: str) -> List[Dict[str, Any]]:
     return items
 
 
-<<<<<<< ours
-=======
 def fallback_insights(symbol: str) -> Dict[str, Any]:
     sym = symbol.upper()
     base = next((q for q in FALLBACK_QUOTES if q["symbol"] == sym), None)
@@ -172,7 +170,6 @@ def fallback_insights(symbol: str) -> Dict[str, Any]:
     return {"symbol": sym, "periods": periods, "profile": profile}
 
 
->>>>>>> theirs
 def simple_insights(symbol: str) -> Dict[str, Any]:
     """Return recent performance changes for the symbol."""
     url = YAHOO_CHART_URL.format(symbol=symbol)
