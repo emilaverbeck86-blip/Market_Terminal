@@ -5,7 +5,6 @@
   <title>Market Terminal – Heatmap</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="/static/style.css">
-  <script src="https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js" async></script>
 </head>
 <body class="theme-dark">
 <header class="mt-header">
@@ -21,22 +20,27 @@
       <span>S&amp;P 500 Heatmap</span>
     </div>
     <div class="mt-tile-body">
-      <div class="tradingview-widget-container" style="height:100%;width:100%">
-        <div id="tv-heatmap" style="height:100%;width:100%"></div>
-        <script>
-          new TradingView.widget({
-            "container_id": "tv-heatmap",
-            "width": "100%",
-            "height": "100%",
-            "colorTheme": "dark",
-            "dataSource": "S&P500",
-            "exchange": "US",
-            "locale": "en",
-            "showSymbolLogo": true,
-            "isDataSetEnabled": true,
-            "symbolSettings": [],
-            "plotType": "heatmap"
-          });
+      <div class="tradingview-widget-container mt-heatmap-embed">
+        <div class="tradingview-widget-container__widget"></div>
+        <script
+          type="text/javascript"
+          src="https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js"
+          async
+        >
+        {
+          "width": "100%",
+          "height": "100%",
+          "dataSource": "SPX500",
+          "group": "sector",
+          "blockColor": "change",
+          "colorTheme": "dark",
+          "locale": "en",
+          "symbolSettings": [],
+          "isDataSetEnabled": true,
+          "showSymbolLogo": true,
+          "hasTopBar": false,
+          "noDataMessage": "Heatmap data is unavailable at the moment"
+        }
         </script>
       </div>
     </div>

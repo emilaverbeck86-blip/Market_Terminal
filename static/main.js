@@ -2,8 +2,12 @@ let currentSymbol = "AAPL";
 let lastTheme = "dark";
 let macroChart = null;
 let worldMapReady = false;
-const HEATMAP_EMBED_URL =
-  "https://www.tradingview.com/heatmap/?type=stock&color=change&size=market_cap_basic&dataSource=SPX500&group=sector&blockColor=change";
+const HEATMAP_SCRIPT_URL =
+  "https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js";
+
+let tvWidget = null;
+let chartFallbackActive = false;
+let chartRetryTimer = null;
 
 const COUNTRY_NAMES = {
   US: "United States",
@@ -104,7 +108,21 @@ function applySavedColWidths() {
 // TradingView chart
 // --------------------------------------------------------------
 
-let tvWidget = null;
+function renderChartPlaceholder(message) {
+  const container = document.getElementById("tv-chart");
+  if (!container) return;
+  container.innerHTML = `<div class="mt-chart-placeholder">${message}</div>`;
+  chartFallbackActive = true;
+}
+
+function clearChartPlaceholder() {
+  if (!chartFallbackActive) return;
+  const container = document.getElementById("tv-chart");
+  if (container) {
+    container.innerHTML = "";
+  }
+  chartFallbackActive = false;
+}
 
 function loadChart(symbol) {
   currentSymbol = symbol.toUpperCase();
@@ -113,22 +131,44 @@ function loadChart(symbol) {
   document.getElementById("insights-symbol").textContent = currentSymbol;
 
   const containerId = "tv-chart";
+  const theme = lastTheme === "dark" ? "dark" : "light";
 
-  if (tvWidget) {
-    tvWidget.setSymbol(currentSymbol);
+  if (chartRetryTimer) {
+    clearTimeout(chartRetryTimer);
+    chartRetryTimer = null;
+  }
+
+  if (typeof TradingView === "undefined" || !TradingView.widget) {
+    renderChartPlaceholder("Loading interactive chart…");
+    chartRetryTimer = setTimeout(() => {
+      chartRetryTimer = null;
+      loadChart(currentSymbol);
+    }, 1200);
     return;
   }
 
-  tvWidget = new TradingView.widget({
-    symbol: currentSymbol,
-    interval: "60",
-    container_id: containerId,
-    autosize: true,
-    hide_top_toolbar: false,
-    hide_legend: false,
-    theme: lastTheme === "dark" ? "dark" : "light",
-    locale: "en",
-  });
+  try {
+    if (tvWidget) {
+      tvWidget.setSymbol(currentSymbol);
+      return;
+    }
+
+    clearChartPlaceholder();
+    tvWidget = new TradingView.widget({
+      symbol: currentSymbol,
+      interval: "60",
+      container_id: containerId,
+      autosize: true,
+      hide_top_toolbar: false,
+      hide_legend: false,
+      theme,
+      locale: "en",
+    });
+  } catch (error) {
+    console.error("chart error", error);
+    tvWidget = null;
+    renderChartPlaceholder("Chart temporarily unavailable.");
+  }
 }
 
 function updateChartTheme() {
@@ -145,7 +185,11 @@ function updateChartTheme() {
 // --------------------------------------------------------------
 
 function openSymbol(symbol) {
-  loadChart(symbol);
+  try {
+    loadChart(symbol);
+  } catch (error) {
+    console.error("open symbol error", error);
+  }
   refreshAllForSymbol(symbol);
 }
 
@@ -479,17 +523,41 @@ function setupMenu() {
   });
 }
 
+function getHeatmapConfig() {
+  return {
+    width: "100%",
+    height: "100%",
+    colorTheme: lastTheme === "light" ? "light" : "dark",
+    dataSource: "SPX500",
+    group: "sector",
+    blockColor: "change",
+    showSymbolLogo: true,
+    isDataSetEnabled: true,
+    locale: "en",
+    hasTopBar: false,
+    noDataMessage: "Heatmap data is unavailable right now",
+  };
+}
+
 function loadHeatmapWidget() {
   const container = document.getElementById("heatmap-widget");
   if (!container) return;
   container.innerHTML = "";
-  const iframe = document.createElement("iframe");
-  iframe.src = HEATMAP_EMBED_URL;
-  iframe.title = "TradingView Stock Heatmap";
-  iframe.className = "mt-heatmap-iframe";
-  iframe.setAttribute("frameborder", "0");
-  iframe.setAttribute("loading", "lazy");
-  container.appendChild(iframe);
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "tradingview-widget-container mt-heatmap-embed";
+  const widget = document.createElement("div");
+  widget.className = "tradingview-widget-container__widget";
+  wrapper.appendChild(widget);
+
+  const script = document.createElement("script");
+  script.type = "text/javascript";
+  script.src = HEATMAP_SCRIPT_URL;
+  script.async = true;
+  script.textContent = JSON.stringify(getHeatmapConfig());
+  wrapper.appendChild(script);
+
+  container.appendChild(wrapper);
 }
 
 function setupHeatmapModal() {
