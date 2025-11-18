@@ -26,12 +26,8 @@ const MACRO_METRIC_LABELS = {
 
 const ROW_MIN_HEIGHT = 180;
 const ROW_STORAGE_PREFIX = "mt-row-";
-<<<<<<< ours
-const COL_STORAGE_KEY = "mt-center-cols";
-=======
 const COL_STORAGE_PREFIX = "mt-cols-";
 let heatmapModalOpen = false;
->>>>>>> theirs
 
 // --------------------------------------------------------------
 // Utilities
@@ -82,21 +78,6 @@ function applySavedRowHeights() {
   });
 }
 
-<<<<<<< ours
-function saveCenterCols(value) {
-  safeStorageSet(COL_STORAGE_KEY, value);
-}
-
-function applySavedCenterCols() {
-  const row = document.querySelector(".mt-row-center");
-  const stored = safeStorageGet(COL_STORAGE_KEY);
-  if (!row || !stored) return;
-  const [left, right] = stored.split(",");
-  if (left && right) {
-    row.style.setProperty("--center-col1", left);
-    row.style.setProperty("--center-col2", right);
-  }
-=======
 function saveColWidths(key, value) {
   safeStorageSet(`${COL_STORAGE_PREFIX}${key}`, value);
 }
@@ -115,7 +96,6 @@ function applySavedColWidths() {
       row.style.setProperty(rightVar, right.trim());
     }
   });
->>>>>>> theirs
 }
 
 // --------------------------------------------------------------
@@ -278,16 +258,6 @@ async function ensureWorldMap() {
     worldMapReady = true;
     return;
   }
-<<<<<<< ours
-  try {
-    const res = await fetch("/static/world-simple.geo.json");
-    const geoJson = await res.json();
-    echarts.registerMap("terminal-world", geoJson);
-    worldMapReady = true;
-  } catch (err) {
-    console.error("world map error", err);
-  }
-=======
   const sources = [
     "https://fastly.jsdelivr.net/npm/echarts@5/map/json/world.json",
     "/static/world-simple.geo.json",
@@ -305,7 +275,6 @@ async function ensureWorldMap() {
     }
   }
   console.error("world map error: no sources available");
->>>>>>> theirs
 }
 
 async function loadMacroData(metric) {
@@ -571,101 +540,7 @@ function setupHeatmapModal() {
 
 // --------------------------------------------------------------
 // Layout resizing
-<<<<<<< ours
 // --------------------------------------------------------------
-
-function setupRowResizers() {
-  document.querySelectorAll(".mt-row-resizer").forEach((handle) => {
-    handle.addEventListener("mousedown", (event) => startRowResize(event, handle));
-    handle.addEventListener(
-      "touchstart",
-      (event) => startRowResize(event, handle),
-      { passive: false }
-    );
-  });
-}
-
-function startRowResize(event, handle) {
-  if (event.cancelable) event.preventDefault();
-  const row = handle.previousElementSibling;
-  if (!row) return;
-  const varName = row.getAttribute("data-height-var");
-  if (!varName) return;
-  const startY = event.touches ? event.touches[0].clientY : event.clientY;
-  const startHeight = row.getBoundingClientRect().height;
-  document.body.classList.add("mt-resizing-row");
-
-  const onMove = (ev) => {
-    if (ev.cancelable) ev.preventDefault();
-    const clientY = ev.touches ? ev.touches[0].clientY : ev.clientY;
-    const delta = clientY - startY;
-    const newHeight = Math.max(ROW_MIN_HEIGHT, startHeight + delta);
-    document.documentElement.style.setProperty(varName, `${newHeight}px`);
-    saveRowHeight(varName, `${newHeight}px`);
-    window.dispatchEvent(new Event("resize"));
-  };
-
-  const onUp = () => {
-    document.body.classList.remove("mt-resizing-row");
-    window.removeEventListener("mousemove", onMove);
-    window.removeEventListener("touchmove", onMove);
-    window.removeEventListener("mouseup", onUp);
-    window.removeEventListener("touchend", onUp);
-  };
-
-  window.addEventListener("mousemove", onMove);
-  window.addEventListener("touchmove", onMove, { passive: false });
-  window.addEventListener("mouseup", onUp);
-  window.addEventListener("touchend", onUp);
-}
-
-function setupCenterColResizer() {
-  const handle = document.querySelector(".mt-col-resizer[data-col-resizer='center']");
-  if (!handle) return;
-  const row = handle.closest(".mt-row");
-  if (!row) return;
-
-  const start = (event) => startCenterColResize(event, row);
-  handle.addEventListener("mousedown", start);
-  handle.addEventListener("touchstart", start, { passive: false });
-}
-
-function startCenterColResize(event, row) {
-  if (event.cancelable) event.preventDefault();
-  document.body.classList.add("mt-resizing-col");
-
-  const onMove = (ev) => {
-    if (ev.cancelable) ev.preventDefault();
-    const clientX = ev.touches ? ev.touches[0].clientX : ev.clientX;
-    const rect = row.getBoundingClientRect();
-    if (!rect.width) return;
-    const ratio = Math.min(0.75, Math.max(0.25, (clientX - rect.left) / rect.width));
-    const leftWeight = Math.round(ratio * 100);
-    const rightWeight = Math.max(20, 100 - leftWeight);
-    row.style.setProperty("--center-col1", `${leftWeight}fr`);
-    row.style.setProperty("--center-col2", `${rightWeight}fr`);
-    saveCenterCols(`${leftWeight}fr,${rightWeight}fr`);
-    window.dispatchEvent(new Event("resize"));
-  };
-
-  const onUp = () => {
-    document.body.classList.remove("mt-resizing-col");
-    window.removeEventListener("mousemove", onMove);
-    window.removeEventListener("touchmove", onMove);
-    window.removeEventListener("mouseup", onUp);
-    window.removeEventListener("touchend", onUp);
-  };
-
-  window.addEventListener("mousemove", onMove);
-  window.addEventListener("touchmove", onMove, { passive: false });
-  window.addEventListener("mouseup", onUp);
-  window.addEventListener("touchend", onUp);
-}
-
-// --------------------------------------------------------------
-// Orchestration
-=======
->>>>>>> theirs
 // --------------------------------------------------------------
 
 function setupRowResizers() {
@@ -786,21 +661,13 @@ window.addEventListener("resize", () => {
 
 window.addEventListener("DOMContentLoaded", async () => {
   applySavedRowHeights();
-<<<<<<< ours
-  applySavedCenterCols();
-=======
   applySavedColWidths();
->>>>>>> theirs
   setupMenu();
   setupThemeToggle();
   setupHeatmapModal();
   setupMacroTabs();
   setupRowResizers();
-<<<<<<< ours
-  setupCenterColResizer();
-=======
   setupColResizers();
->>>>>>> theirs
   loadChart(currentSymbol);
   refreshAllForSymbol(currentSymbol);
   refreshCalendar();
