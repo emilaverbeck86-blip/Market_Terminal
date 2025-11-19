@@ -11,9 +11,11 @@ import xml.etree.ElementTree as ET
 
 app = FastAPI()
 
+# Static files and templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+# Constants / Config
 YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
 YAHOO_NEWS_RSS = "https://feeds.finance.yahoo.com/rss/2.0/headline"
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
@@ -66,12 +68,14 @@ FALLBACK_NEWS = [
 _ticker_cache: Dict[str, Any] = {"data": None, "ts": 0.0}
 _movers_cache: Dict[str, Any] = {"data": None, "ts": 0.0}
 
+# Helper functions
+
 def yahoo_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
     params = {"symbols": ",".join(symbols)}
     r = requests.get(YAHOO_QUOTE_URL, params=params, timeout=6)
     r.raise_for_status()
     data = r.json().get("quoteResponse", {}).get("result", [])
-    quotes: List[Dict[str, Any]] = []
+    quotes = []
     for q in data:
         symbol = q.get("symbol")
         price = q.get("regularMarketPrice")
@@ -91,7 +95,7 @@ def yfinance_news(symbol: str, max_items: int = 20) -> List[Dict[str, Any]]:
         raw_items = ticker.news or []
     except Exception:
         return []
-    items: List[Dict[str, Any]] = []
+    items = []
     for entry in raw_items[:max_items]:
         title = (entry.get("title") or "").strip()
         url = entry.get("link") or entry.get("url") or ""
@@ -121,7 +125,7 @@ def yahoo_news(symbol: str, max_items: int = 15) -> List[Dict[str, Any]]:
         r.raise_for_status()
     except Exception:
         return []
-    items: List[Dict[str, Any]] = []
+    items = []
     try:
         root = ET.fromstring(r.content)
         for item in root.findall(".//item")[:max_items]:
@@ -143,7 +147,7 @@ def yahoo_news(symbol: str, max_items: int = 15) -> List[Dict[str, Any]]:
 
 def fallback_news(symbol: str) -> List[Dict[str, Any]]:
     sym = symbol.upper()
-    items: List[Dict[str, Any]] = []
+    items = []
     for template in FALLBACK_NEWS:
         items.append({
             "title": template["title"].format(symbol=sym),
@@ -330,8 +334,5 @@ async def api_macro(metric: str = "inflation"):
     metric = metric.lower()
     if metric not in MACRO_DATA:
         metric = "inflation"
-    data = [
-        {"code": code, "value": value}
-        for code, value in MACRO_DATA[metric].items()
-    ]
+    data = [{"code": code, "value": value} for code, value in MACRO_DATA[metric].items()]
     return {"metric": metric, "data": data}
