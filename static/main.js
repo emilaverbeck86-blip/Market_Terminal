@@ -238,6 +238,8 @@ document.addEventListener("DOMContentLoaded", () => {
   renderCalendar();
   renderMacroMap();
   renderTopMovers();
+document.getElementById("heatmap-link").addEventListener("click", () => {
+  window.location.href = "/heatmap";
 
   // Future: Add event listeners for theme toggling, symbol change, heatmap, menu, etc.
 });
