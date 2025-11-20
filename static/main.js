@@ -2,7 +2,6 @@ let currentSymbol = "AAPL";
 let lastTheme = "dark";
 let macroChart = null;
 let macroCurrentMetric = "inflation";
-let worldMapReady = false;
 
 const HEATMAP_SCRIPT_URL =
   "https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js";
@@ -508,51 +507,12 @@ async function refreshMovers() {
 }
 
 /* ------------------------------------------------------------
- * Macro world map (ECharts)
+ * Macro world map (ECharts, echte Weltkarte)
  * ---------------------------------------------------------- */
-
-async function ensureWorldMap() {
-  if (worldMapReady) return;
-  if (typeof echarts === "undefined") {
-    throw new Error("ECharts not loaded");
-  }
-
-  if (echarts.getMap("terminal-world")) {
-    worldMapReady = true;
-    return;
-  }
-
-  const sources = [
-    "https://fastly.jsdelivr.net/npm/echarts@5/map/json/world.json",
-    "/static/world-simple.geo.json",
-  ];
-
-  for (const src of sources) {
-    try {
-      const res = await fetch(src);
-      if (!res.ok) continue;
-      const geoJson = await res.json();
-      echarts.registerMap("terminal-world", geoJson);
-      worldMapReady = true;
-      return;
-    } catch (err) {
-      console.warn("world map load failed", src, err);
-    }
-  }
-
-  throw new Error("Failed to load world map data");
-}
 
 async function loadMacroData(metric) {
   if (!macroChart) return;
   macroCurrentMetric = metric;
-
-  try {
-    await ensureWorldMap();
-  } catch (err) {
-    console.error("macro map error:", err);
-    return;
-  }
 
   try {
     const data = await getJSON(`/api/macro?metric=${metric}`);
@@ -622,11 +582,9 @@ async function loadMacroData(metric) {
         {
           name: label,
           type: "map",
-          map: "terminal-world",
+          map: "world",      // <- echte Weltkarte aus world.js
           roam: true,
-          emphasis: {
-            label: { show: false },
-          },
+          emphasis: { label: { show: false } },
           itemStyle: {
             borderColor: "#4b5563",
             borderWidth: 0.5,
@@ -646,7 +604,6 @@ async function initMacroChart() {
   const dom = document.getElementById("macro-map");
   if (!dom || typeof echarts === "undefined") return;
   macroChart = echarts.init(dom, null, { renderer: "canvas" });
-  await ensureWorldMap();
   await loadMacroData(macroCurrentMetric);
 }
 
@@ -664,7 +621,7 @@ function setupMacroTabs() {
 }
 
 /* ------------------------------------------------------------
- * Heatmap Modal (real TradingView S&P500 heatmap)
+ * Heatmap Modal (S&P500)
  * ---------------------------------------------------------- */
 
 function initHeatmapWidget() {
@@ -706,7 +663,6 @@ function openHeatmapModal() {
   modal.setAttribute("aria-hidden", "false");
   document.body.classList.add("mt-modal-open");
 
-  // build / rebuild actual S&P500 heatmap
   heatmapWidgetInitialized = false;
   initHeatmapWidget();
 }
