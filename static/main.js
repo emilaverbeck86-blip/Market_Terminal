@@ -3,14 +3,13 @@ let lastTheme = "dark";
 let macroChart = null;
 let macroCurrentMetric = "inflation";
 let worldMapReady = false;
+
 const HEATMAP_SCRIPT_URL =
   "https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js";
 
 let tvWidget = null;
 let chartFallbackActive = false;
 let chartRetryTimer = null;
-
-let heatmapScriptLoaded = false;
 let heatmapWidgetInitialized = false;
 
 const COUNTRY_NAMES = {
@@ -36,13 +35,12 @@ const MACRO_METRIC_LABELS = {
 
 const ROW_MIN_HEIGHT = 180;
 const ROW_MAX_HEIGHT = 520;
-
 const COL_MIN_WIDTH = 220;
 const COL_MAX_WIDTH = 800;
 
-// --------------------------------------------------------------
-// Utilities
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * Utils
+ * ---------------------------------------------------------- */
 
 async function getJSON(url) {
   const res = await fetch(url);
@@ -62,12 +60,13 @@ function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
 }
 
-// --------------------------------------------------------------
-// Theme handling
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * Theme handling
+ * ---------------------------------------------------------- */
 
 function applyTheme(theme) {
   const body = document.body;
+
   if (theme === "light") {
     body.classList.remove("theme-dark");
     body.classList.add("theme-light");
@@ -76,27 +75,23 @@ function applyTheme(theme) {
     body.classList.add("theme-dark");
     theme = "dark";
   }
+
   lastTheme = theme;
 
-  // Sync checkbox UI
   const toggle = document.getElementById("theme-toggle");
-  if (toggle) {
-    toggle.checked = theme === "light";
-  }
+  if (toggle) toggle.checked = theme === "light";
 
-  // Re-init chart so TradingView picks up correct theme
   try {
     loadChart(currentSymbol);
   } catch (e) {
     console.error("chart theme reload failed", e);
   }
 
-  // Redraw macro map so it picks up text color etc.
   if (macroChart) {
     loadMacroData(macroCurrentMetric);
   }
 
-  // Force heatmap reinit with new theme next time it opens
+  // force re-render heatmap next time
   heatmapWidgetInitialized = false;
 }
 
@@ -104,7 +99,6 @@ function initThemeToggle() {
   const toggle = document.getElementById("theme-toggle");
   if (!toggle) return;
 
-  // Initial state
   toggle.checked = lastTheme === "light";
 
   toggle.addEventListener("change", () => {
@@ -113,9 +107,9 @@ function initThemeToggle() {
   });
 }
 
-// --------------------------------------------------------------
-// Layout / resizers
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * Layout resizers
+ * ---------------------------------------------------------- */
 
 function setRowHeight(rowId, value) {
   const clamped = clamp(value, ROW_MIN_HEIGHT, ROW_MAX_HEIGHT);
@@ -124,7 +118,7 @@ function setRowHeight(rowId, value) {
 
 function setupRowResizers() {
   document.querySelectorAll("[data-row-resizer]").forEach((resizer) => {
-    const rowId = resizer.getAttribute("data-row-resizer"); // e.g. "row1"
+    const rowId = resizer.getAttribute("data-row-resizer");
     const rowIndex = rowId ? rowId.replace("row", "") : null;
     const rowEl = rowIndex
       ? document.querySelector(`.mt-row[data-row="${rowIndex}"]`)
@@ -177,7 +171,7 @@ function setupRowResizers() {
 
 function setupColResizers() {
   document.querySelectorAll("[data-col-resizer]").forEach((resizer) => {
-    const id = resizer.getAttribute("data-col-resizer"); // e.g. "row1"
+    const id = resizer.getAttribute("data-col-resizer");
     const row = resizer.closest(".mt-row");
     if (!row || !id) return;
 
@@ -217,10 +211,17 @@ function setupColResizers() {
       const clientX = event.touches ? event.touches[0].clientX : event.clientX;
       const delta = clientX - startX;
 
-      let newLeft = clamp(startLeftWidth + delta, COL_MIN_WIDTH, rowWidth - COL_MIN_WIDTH - 8);
-      let newRight = clamp(startRightWidth - delta, COL_MIN_WIDTH, rowWidth - COL_MIN_WIDTH - 8);
+      let newLeft = clamp(
+        startLeftWidth + delta,
+        COL_MIN_WIDTH,
+        rowWidth - COL_MIN_WIDTH - 8
+      );
+      let newRight = clamp(
+        startRightWidth - delta,
+        COL_MIN_WIDTH,
+        rowWidth - COL_MIN_WIDTH - 8
+      );
 
-      // adjust if sum goes off due to clamping
       if (newLeft + newRight + 8 > rowWidth) {
         newRight = rowWidth - newLeft - 8;
       }
@@ -244,9 +245,9 @@ function setupColResizers() {
   });
 }
 
-// --------------------------------------------------------------
-// TradingView chart
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * TradingView main chart
+ * ---------------------------------------------------------- */
 
 function renderChartPlaceholder(message) {
   const container = document.getElementById("tv-chart");
@@ -310,9 +311,9 @@ function openSymbol(symbol) {
   refreshAllForSymbol(symbol);
 }
 
-// --------------------------------------------------------------
-// Ticker bar
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * Ticker bar
+ * ---------------------------------------------------------- */
 
 async function refreshTickerBar() {
   try {
@@ -355,9 +356,9 @@ async function refreshTickerBar() {
   }
 }
 
-// --------------------------------------------------------------
-// News
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * News
+ * ---------------------------------------------------------- */
 
 async function refreshNews(symbol) {
   const newsBox = document.getElementById("news-list");
@@ -396,9 +397,9 @@ async function refreshNews(symbol) {
   }
 }
 
-// --------------------------------------------------------------
-// Insights
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * Insights
+ * ---------------------------------------------------------- */
 
 async function refreshInsights(symbol) {
   const root = document.querySelector(".mt-insights");
@@ -438,9 +439,9 @@ async function refreshInsights(symbol) {
   }
 }
 
-// --------------------------------------------------------------
-// Calendar
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * Calendar
+ * ---------------------------------------------------------- */
 
 async function refreshCalendar() {
   try {
@@ -464,9 +465,9 @@ async function refreshCalendar() {
   }
 }
 
-// --------------------------------------------------------------
-// Movers
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * Movers
+ * ---------------------------------------------------------- */
 
 async function refreshMovers() {
   try {
@@ -506,19 +507,26 @@ async function refreshMovers() {
   }
 }
 
-// --------------------------------------------------------------
-// Macro world map (ECharts)
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * Macro world map (ECharts)
+ * ---------------------------------------------------------- */
 
 async function ensureWorldMap() {
-  if (worldMapReady || (typeof echarts !== "undefined" && echarts.getMap("terminal-world"))) {
+  if (worldMapReady) return;
+  if (typeof echarts === "undefined") {
+    throw new Error("ECharts not loaded");
+  }
+
+  if (echarts.getMap("terminal-world")) {
     worldMapReady = true;
     return;
   }
+
   const sources = [
     "https://fastly.jsdelivr.net/npm/echarts@5/map/json/world.json",
     "/static/world-simple.geo.json",
   ];
+
   for (const src of sources) {
     try {
       const res = await fetch(src);
@@ -531,14 +539,22 @@ async function ensureWorldMap() {
       console.warn("world map load failed", src, err);
     }
   }
-  console.error("world map error: no sources available");
+
+  throw new Error("Failed to load world map data");
 }
 
 async function loadMacroData(metric) {
   if (!macroChart) return;
   macroCurrentMetric = metric;
+
   try {
     await ensureWorldMap();
+  } catch (err) {
+    console.error("macro map error:", err);
+    return;
+  }
+
+  try {
     const data = await getJSON(`/api/macro?metric=${metric}`);
     const metricName = data.metric || metric;
     const values = data.data || [];
@@ -562,9 +578,7 @@ async function loadMacroData(metric) {
       .filter((v) => v !== null);
     let minVal = numericValues.length ? Math.min(...numericValues) : 0;
     let maxVal = numericValues.length ? Math.max(...numericValues) : 10;
-    if (minVal === maxVal) {
-      maxVal = minVal + 1;
-    }
+    if (minVal === maxVal) maxVal = minVal + 1;
 
     const label = MACRO_METRIC_LABELS[metricName] || metricName.toUpperCase();
 
@@ -601,22 +615,30 @@ async function loadMacroData(metric) {
           { min: 6, label: "> 6%" },
         ],
         inRange: {
-          color: ["#fef9c3", "#fbbf24", "#ea580c", "#b91c1c"],
+          color: ["#22c55e", "#eab308", "#f97316", "#b91c1c"],
         },
       },
       series: [
         {
+          name: label,
           type: "map",
           map: "terminal-world",
           roam: true,
-          emphasis: { label: { show: false } },
+          emphasis: {
+            label: { show: false },
+          },
+          itemStyle: {
+            borderColor: "#4b5563",
+            borderWidth: 0.5,
+          },
           data: seriesData,
         },
       ],
     };
-    macroChart.setOption(option);
+
+    macroChart.setOption(option, true);
   } catch (e) {
-    console.error("macro error", e);
+    console.error("macro data error", e);
   }
 }
 
@@ -641,32 +663,52 @@ function setupMacroTabs() {
   });
 }
 
-// --------------------------------------------------------------
-// Heatmap Modal (TradingView widget)
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * Heatmap Modal (real TradingView S&P500 heatmap)
+ * ---------------------------------------------------------- */
+
+function initHeatmapWidget() {
+  const container = document.getElementById("heatmap-widget-container");
+  if (!container) return;
+
+  container.innerHTML =
+    '<div class="tradingview-widget-container__widget"></div>';
+
+  const theme = lastTheme === "light" ? "light" : "dark";
+
+  const config = {
+    colorTheme: theme,
+    dateRange: "1D",
+    mapType: "s&p500",
+    showSymbolTooltip: true,
+    showFloatingTooltip: true,
+    locale: "en",
+    width: "100%",
+    height: "100%",
+    largeChartUrl: "",
+  };
+
+  const script = document.createElement("script");
+  script.type = "text/javascript";
+  script.src = HEATMAP_SCRIPT_URL;
+  script.async = true;
+  script.innerHTML = JSON.stringify(config);
+
+  container.appendChild(script);
+  heatmapWidgetInitialized = true;
+}
 
 function openHeatmapModal() {
   const modal = document.getElementById("heatmap-modal");
   if (!modal) return;
+
   modal.classList.add("open");
   modal.setAttribute("aria-hidden", "false");
   document.body.classList.add("mt-modal-open");
 
-  if (!heatmapScriptLoaded) {
-    const script = document.createElement("script");
-    script.src = HEATMAP_SCRIPT_URL;
-    script.async = true;
-    script.onload = () => {
-      heatmapScriptLoaded = true;
-      initHeatmapWidget();
-    };
-    script.onerror = () => {
-      console.error("Failed to load TradingView heatmap script");
-    };
-    document.body.appendChild(script);
-  } else if (!heatmapWidgetInitialized) {
-    initHeatmapWidget();
-  }
+  // build / rebuild actual S&P500 heatmap
+  heatmapWidgetInitialized = false;
+  initHeatmapWidget();
 }
 
 function closeHeatmapModal() {
@@ -675,33 +717,6 @@ function closeHeatmapModal() {
   modal.classList.remove("open");
   modal.setAttribute("aria-hidden", "true");
   document.body.classList.remove("mt-modal-open");
-}
-
-function initHeatmapWidget() {
-  const container = document.getElementById("heatmap-widget");
-  if (!container) return;
-  if (heatmapWidgetInitialized) return;
-
-  const theme = lastTheme === "light" ? "light" : "dark";
-
-  const script = document.createElement("script");
-  script.type = "text/javascript";
-  script.innerHTML = `
-    new TradingView.widget({
-      "container_id": "heatmap-widget",
-      "widgetType": "heatmap",
-      "dataSource": "SPX500",
-      "exchange": "US",
-      "showToolbar": true,
-      "width": "100%",
-      "height": "100%",
-      "colorTheme": "${theme}",
-      "locale": "en"
-    });
-  `;
-  container.innerHTML = "";
-  container.appendChild(script);
-  heatmapWidgetInitialized = true;
 }
 
 function setupHeatmapModal() {
@@ -733,9 +748,9 @@ function setupHeatmapModal() {
   });
 }
 
-// --------------------------------------------------------------
-// Menu dropdown & shortcuts
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * Menu
+ * ---------------------------------------------------------- */
 
 function setupMenu() {
   const menuToggle = document.getElementById("menu-toggle");
@@ -744,11 +759,8 @@ function setupMenu() {
 
   const toggleDropdown = () => {
     const isOpen = dropdown.classList.contains("open");
-    if (isOpen) {
-      dropdown.classList.remove("open");
-    } else {
-      dropdown.classList.add("open");
-    }
+    if (isOpen) dropdown.classList.remove("open");
+    else dropdown.classList.add("open");
   };
 
   menuToggle.addEventListener("click", (e) => {
@@ -756,7 +768,6 @@ function setupMenu() {
     toggleDropdown();
   });
 
-  // Close when clicking outside
   document.addEventListener("click", (e) => {
     if (!dropdown.classList.contains("open")) return;
     if (!dropdown.contains(e.target) && e.target !== menuToggle) {
@@ -764,20 +775,21 @@ function setupMenu() {
     }
   });
 
-  // Symbol shortcuts
-  dropdown.querySelectorAll(".mt-menu-item[data-shortcut-symbol]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const sym = btn.getAttribute("data-shortcut-symbol");
-      if (!sym) return;
-      dropdown.classList.remove("open");
-      openSymbol(sym);
+  dropdown
+    .querySelectorAll(".mt-menu-item[data-shortcut-symbol]")
+    .forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const sym = btn.getAttribute("data-shortcut-symbol");
+        if (!sym) return;
+        dropdown.classList.remove("open");
+        openSymbol(sym);
+      });
     });
-  });
 }
 
-// --------------------------------------------------------------
-// Orchestration
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * Orchestration
+ * ---------------------------------------------------------- */
 
 function refreshAllForSymbol(symbol) {
   const sym = symbol.toUpperCase();
@@ -793,9 +805,9 @@ function refreshAllForSymbol(symbol) {
   refreshInsights(sym);
 }
 
-// --------------------------------------------------------------
-// Init
-// --------------------------------------------------------------
+/* ------------------------------------------------------------
+ * Init
+ * ---------------------------------------------------------- */
 
 window.addEventListener("DOMContentLoaded", async () => {
   applyTheme("dark");
@@ -810,6 +822,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   refreshCalendar();
   refreshMovers();
   refreshTickerBar();
+
   setInterval(refreshTickerBar, 20000);
   setInterval(refreshMovers, 90000);
   setInterval(() => refreshNews(currentSymbol), 60000);
