@@ -1,13 +1,14 @@
 import time
 from datetime import datetime, timezone
 from typing import List, Dict, Any
+import xml.etree.ElementTree as ET
+
 import requests
+import yfinance as yf
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import yfinance as yf
-import xml.etree.ElementTree as ET
 
 app = FastAPI()
 
@@ -15,10 +16,14 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+# ---------------------------------------------------------------------------
 # Constants / Config
+# ---------------------------------------------------------------------------
+
 YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
 YAHOO_NEWS_RSS = "https://feeds.finance.yahoo.com/rss/2.0/headline"
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+
 YAHOO_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -27,14 +32,14 @@ YAHOO_HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
-WATCHLIST = [
+WATCHLIST: List[str] = [
     "AAPL", "MSFT", "NVDA", "META", "GOOGL", "TSLA", "AVGO", "AMD",
     "NFLX", "ADBE", "INTC", "CSCO", "QCOM", "TXN", "CRM",
     "JPM", "BAC", "WFC", "GS", "V", "MA",
-    "XOM", "CVX", "UNH", "LLY", "ABBV"
+    "XOM", "CVX", "UNH", "LLY", "ABBV",
 ]
 
-FALLBACK_QUOTES = [
+FALLBACK_QUOTES: List[Dict[str, Any]] = [
     {"symbol": "AAPL", "price": 192.32, "change_pct": 0.85},
     {"symbol": "MSFT", "price": 417.56, "change_pct": 0.42},
     {"symbol": "NVDA", "price": 123.12, "change_pct": -1.18},
@@ -47,7 +52,7 @@ FALLBACK_QUOTES = [
     {"symbol": "XOM", "price": 118.22, "change_pct": -0.33},
 ]
 
-FALLBACK_NEWS = [
+FALLBACK_NEWS: List[Dict[str, str]] = [
     {
         "title": "{symbol} draws active trader interest amid heavy volume",
         "url": "https://finance.yahoo.com/quote/{symbol}",
@@ -62,277 +67,3 @@ FALLBACK_NEWS = [
         "title": "Institutional flows show fresh momentum building in {symbol}",
         "url": "https://finance.yahoo.com/quote/{symbol}/holder",
         "source": "Market Terminal",
-    },
-]
-
-_ticker_cache: Dict[str, Any] = {"data": None, "ts": 0.0}
-_movers_cache: Dict[str, Any] = {"data": None, "ts": 0.0}
-
-# Helper functions
-
-def yahoo_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
-    params = {"symbols": ",".join(symbols)}
-    r = requests.get(YAHOO_QUOTE_URL, params=params, timeout=6)
-    r.raise_for_status()
-    data = r.json().get("quoteResponse", {}).get("result", [])
-    quotes = []
-    for q in data:
-        symbol = q.get("symbol")
-        price = q.get("regularMarketPrice")
-        change = q.get("regularMarketChangePercent")
-        if symbol is None or price is None or change is None:
-            continue
-        quotes.append({
-            "symbol": symbol,
-            "price": round(float(price), 2),
-            "change_pct": round(float(change), 2),
-        })
-    return quotes
-
-def yfinance_news(symbol: str, max_items: int = 20) -> List[Dict[str, Any]]:
-    try:
-        ticker = yf.Ticker(symbol)
-        raw_items = ticker.news or []
-    except Exception:
-        return []
-    items = []
-    for entry in raw_items[:max_items]:
-        title = (entry.get("title") or "").strip()
-        url = entry.get("link") or entry.get("url") or ""
-        if not title or not url:
-            continue
-        publisher = (entry.get("publisher") or entry.get("provider") or "").strip()
-        published = ""
-        ts = entry.get("providerPublishTime") or entry.get("publishedAt")
-        if ts:
-            try:
-                dt = datetime.fromtimestamp(int(ts), tz=timezone.utc)
-                published = dt.strftime("%b %d, %Y %H:%M UTC")
-            except Exception:
-                published = ""
-        items.append({
-            "title": title,
-            "url": url,
-            "source": publisher or "yfinance",
-            "published_at": published,
-        })
-    return items
-
-def yahoo_news(symbol: str, max_items: int = 15) -> List[Dict[str, Any]]:
-    params = {"s": symbol, "region": "US", "lang": "en-US"}
-    try:
-        r = requests.get(YAHOO_NEWS_RSS, params=params, timeout=6)
-        r.raise_for_status()
-    except Exception:
-        return []
-    items = []
-    try:
-        root = ET.fromstring(r.content)
-        for item in root.findall(".//item")[:max_items]:
-            title = (item.findtext("title") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            pub = (item.findtext("pubDate") or "").strip()
-            source = (item.findtext("source") or "").strip()
-            if not title or not link:
-                continue
-            items.append({
-                "title": title,
-                "url": link,
-                "source": source or "Yahoo Finance",
-                "published_at": pub,
-            })
-    except Exception:
-        return []
-    return items
-
-def fallback_news(symbol: str) -> List[Dict[str, Any]]:
-    sym = symbol.upper()
-    items = []
-    for template in FALLBACK_NEWS:
-        items.append({
-            "title": template["title"].format(symbol=sym),
-            "url": template["url"].format(symbol=sym),
-            "source": template["source"],
-            "published_at": datetime.utcnow().strftime("%b %d, %Y"),
-        })
-    return items
-
-def fallback_insights(symbol: str) -> Dict[str, Any]:
-    sym = symbol.upper()
-    base = next((q for q in FALLBACK_QUOTES if q["symbol"] == sym), None)
-    if not base:
-        base = FALLBACK_QUOTES[0]
-    change = base.get("change_pct", 0.0)
-    periods = {
-        "1W": round(change * 0.6, 2),
-        "1M": round(change * 1.1, 2),
-        "3M": round(change * 1.4, 2),
-        "6M": round(change * 1.7, 2),
-        "YTD": round(change * 1.9, 2),
-        "1Y": round(change * 2.2, 2),
-    }
-    profile = (
-        f"{sym} performance snapshot is based on cached market activity "
-        "while live data is temporarily unavailable."
-    )
-    return {"symbol": sym, "periods": periods, "profile": profile}
-
-def simple_insights(symbol: str) -> Dict[str, Any]:
-    url = YAHOO_CHART_URL.format(symbol=symbol)
-    params = {"range": "1y", "interval": "1d"}
-    try:
-        r = requests.get(url, params=params, timeout=8, headers=YAHOO_HEADERS)
-        r.raise_for_status()
-        data = r.json()
-        result = data["chart"]["result"][0]
-        closes = result["indicators"]["quote"][0]["close"]
-    except Exception:
-        return fallback_insights(symbol)
-    prices = [p for p in closes if p is not None]
-    if len(prices) < 5:
-        return fallback_insights(symbol)
-    latest = float(prices[-1])
-    def pct_change(days: int) -> float:
-        try:
-            idx = max(0, len(prices) - 1 - days)
-            base = float(prices[idx])
-            if base <= 0:
-                return 0.0
-            return round((latest - base) / base * 100, 2)
-        except Exception:
-            return 0.0
-    periods = {
-        "1W": pct_change(5),
-        "1M": pct_change(21),
-        "3M": pct_change(63),
-        "6M": pct_change(126),
-        "YTD": pct_change(252),
-        "1Y": pct_change(252),
-    }
-    profile = (
-        f"{symbol.upper()} is a major public company followed closely by global investors. "
-        "This snapshot combines recent price performance and a short descriptive profile "
-        "to give you a quick fundamental impression inside the terminal."
-    )
-    return {
-        "symbol": symbol.upper(),
-        "periods": periods,
-        "profile": profile,
-    }
-
-def dummy_calendar() -> List[Dict[str, str]]:
-    return [
-        {
-            "time": "08:30",
-            "country": "US",
-            "event": "Nonfarm Payrolls",
-            "actual": "210K",
-            "forecast": "185K",
-            "previous": "165K"
-        },
-        {
-            "time": "10:00",
-            "country": "US",
-            "event": "ISM Services PMI",
-            "actual": "52.4",
-            "forecast": "51.8",
-            "previous": "50.9"
-        },
-        {
-            "time": "14:00",
-            "country": "EU",
-            "event": "ECB Rate Decision",
-            "actual": "4.00%",
-            "forecast": "4.00%",
-            "previous": "4.00%"
-        }
-    ]
-
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
-
-@app.get("/heatmap", response_class=HTMLResponse)
-async def heatmap_page(request: Request):
-    return templates.TemplateResponse("heatmap.html", {"request": request})
-
-@app.get("/api/tickers")
-async def api_tickers():
-    global _ticker_cache
-    now = time.time()
-    if _ticker_cache["data"] and now - _ticker_cache["ts"] < 20:
-        return _ticker_cache["data"]
-    try:
-        quotes = yahoo_quotes(WATCHLIST)
-        if not quotes:
-            raise RuntimeError("No quotes returned")
-    except Exception:
-        quotes = FALLBACK_QUOTES
-    payload = {"tickers": quotes}
-    _ticker_cache = {"data": payload, "ts": now}
-    return payload
-
-@app.get("/api/news")
-async def api_news(symbol: str):
-    sym = symbol.upper()
-    items = yfinance_news(sym)
-    if not items:
-        items = yahoo_news(sym)
-    if not items:
-        items = fallback_news(sym)
-    return {"symbol": sym, "items": items}
-
-@app.get("/api/insights")
-async def api_insights(symbol: str):
-    data = simple_insights(symbol.upper())
-    return data
-
-@app.get("/api/calendar")
-async def api_calendar():
-    return {"events": dummy_calendar()}
-
-@app.get("/api/movers")
-async def api_movers():
-    global _movers_cache
-    now = time.time()
-    if _movers_cache["data"] and now - _movers_cache["ts"] < 60:
-        return _movers_cache["data"]
-    try:
-        quotes = yahoo_quotes(WATCHLIST)
-        if not quotes:
-            raise RuntimeError("No mover data")
-    except Exception:
-        quotes = FALLBACK_QUOTES
-    sorted_quotes = sorted(quotes, key=lambda q: q["change_pct"])
-    losers = sorted_quotes[:5]
-    gainers = list(reversed(sorted_quotes[-5:]))
-    payload = {"gainers": gainers, "losers": losers}
-    _movers_cache = {"data": payload, "ts": now}
-    return payload
-
-MACRO_DATA = {
-    "inflation": {
-        "US": 3.2, "CA": 3.1, "BR": 4.7, "DE": 2.3, "UK": 3.9, "FR": 2.6,
-        "ZA": 5.8, "IN": 4.5, "CN": 1.2, "JP": 2.1, "AU": 3.4,
-    },
-    "rates": {
-        "US": 5.5, "CA": 5.0, "BR": 12.8, "DE": 4.0, "UK": 5.25, "ZA": 8.25,
-        "IN": 6.5, "CN": 3.45, "JP": 0.1, "AU": 4.1,
-    },
-    "gdp": {
-        "US": 2.1, "CA": 1.5, "BR": 2.3, "DE": 0.8, "UK": 1.0, "IN": 6.4,
-        "CN": 4.9, "JP": 1.3, "AU": 2.0, "ZA": 1.1,
-    },
-    "unemployment": {
-        "US": 3.8, "CA": 5.5, "BR": 7.7, "DE": 3.0, "UK": 4.3, "IN": 7.2,
-        "CN": 5.2, "JP": 2.7, "AU": 3.6, "ZA": 32.0,
-    },
-}
-
-@app.get("/api/macro")
-async def api_macro(metric: str = "inflation"):
-    metric = metric.lower()
-    if metric not in MACRO_DATA:
-        metric = "inflation"
-    data = [{"code": code, "value": value} for code, value in MACRO_DATA[metric].items()]
-    return {"metric": metric, "data": data}
