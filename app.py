@@ -1,5 +1,6 @@
+import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta, date
 from typing import List, Dict, Any
 import xml.etree.ElementTree as ET
 
@@ -31,6 +32,8 @@ YAHOO_HEADERS = {
     ),
     "Accept": "application/json, text/plain, */*",
 }
+
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 
 WATCHLIST: List[str] = [
     "AAPL", "MSFT", "NVDA", "META", "GOOGL", "TSLA", "AVGO", "AMD",
@@ -70,7 +73,6 @@ FALLBACK_NEWS: List[Dict[str, str]] = [
     },
 ]
 
-# simple in-memory caches
 _ticker_cache: Dict[str, Any] = {"data": None, "ts": 0.0}
 _movers_cache: Dict[str, Any] = {"data": None, "ts": 0.0}
 
@@ -79,11 +81,6 @@ _movers_cache: Dict[str, Any] = {"data": None, "ts": 0.0}
 # ---------------------------------------------------------------------------
 
 def yahoo_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
-    """
-    Load quotes for a list of symbols from Yahoo Finance.
-    Returns a list of {symbol, price, change_pct}.
-    Raises on network/HTTP errors.
-    """
     params = {"symbols": ",".join(symbols)}
     r = requests.get(YAHOO_QUOTE_URL, params=params, timeout=8, headers=YAHOO_HEADERS)
     r.raise_for_status()
@@ -106,9 +103,6 @@ def yahoo_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
 
 
 def get_watchlist_quotes() -> List[Dict[str, Any]]:
-    """
-    Cached quotes for WATCHLIST – falls back to static data if anything fails.
-    """
     now = time.time()
     if (
         _ticker_cache["data"] is not None
@@ -131,21 +125,67 @@ def get_watchlist_quotes() -> List[Dict[str, Any]]:
 
 
 def compute_movers(quotes: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Split into top 5 gainers/losers by change_pct.
-    """
     data = [q for q in quotes if isinstance(q.get("change_pct"), (int, float))]
     sorted_data = sorted(data, key=lambda x: x["change_pct"], reverse=True)
     gainers = sorted_data[:5]
-    losers = sorted_data[-5:]
-    losers = sorted(losers, key=lambda x: x["change_pct"])
+    losers = sorted(sorted_data[-5:], key=lambda x: x["change_pct"])
     return {"gainers": gainers, "losers": losers}
 
 
+# --- News helpers -----------------------------------------------------------
+
+def finnhub_news(symbol: str, max_items: int = 20) -> List[Dict[str, Any]]:
+    """
+    Stock-spezifische News über Finnhub.
+    Voraussetzung: FINNHUB_API_KEY ist gesetzt.
+    """
+    if not FINNHUB_API_KEY:
+        return []
+
+    today = date.today()
+    frm = (today - timedelta(days=14)).isoformat()
+    to = today.isoformat()
+
+    params = {
+        "symbol": symbol.upper(),
+        "from": frm,
+        "to": to,
+        "token": FINNHUB_API_KEY,
+    }
+    try:
+        r = requests.get("https://finnhub.io/api/v1/company-news", params=params, timeout=8)
+        r.raise_for_status()
+        raw = r.json()
+    except Exception as exc:
+        print(f"[finnhub_news] request error for {symbol}: {exc}")
+        return []
+
+    items: List[Dict[str, Any]] = []
+    for entry in raw[:max_items]:
+        headline = (entry.get("headline") or "").strip()
+        url = (entry.get("url") or "").strip()
+        if not headline or not url:
+            continue
+        dt = ""
+        ts = entry.get("datetime")
+        if ts:
+            try:
+                dt_ = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+                dt = dt_.strftime("%b %d, %Y %H:%M UTC")
+            except Exception:
+                dt = ""
+        items.append(
+            {
+                "title": headline,
+                "url": url,
+                "source": (entry.get("source") or "Finnhub").strip(),
+                "published_at": dt,
+            }
+        )
+    return items
+
+
 def yfinance_news(symbol: str, max_items: int = 20) -> List[Dict[str, Any]]:
-    """
-    Try to fetch news via yfinance. Returns [] on any failure.
-    """
     try:
         ticker = yf.Ticker(symbol)
         raw_items = ticker.news or []
@@ -180,9 +220,6 @@ def yfinance_news(symbol: str, max_items: int = 20) -> List[Dict[str, Any]]:
 
 
 def yahoo_news(symbol: str, max_items: int = 15) -> List[Dict[str, Any]]:
-    """
-    Fallback news via Yahoo Finance RSS feed.
-    """
     params = {"s": symbol, "region": "US", "lang": "en-US"}
     try:
         r = requests.get(YAHOO_NEWS_RSS, params=params, timeout=8)
@@ -230,17 +267,7 @@ def fallback_news(symbol: str) -> List[Dict[str, Any]]:
 
 
 def fallback_insights(symbol: str) -> Dict[str, Any]:
-    """
-    Simple static insight block if Yahoo chart API fails.
-    """
-    periods = {
-        "1W": 0.0,
-        "1M": 0.0,
-        "3M": 0.0,
-        "6M": 0.0,
-        "YTD": 0.0,
-        "1Y": 0.0,
-    }
+    periods = {k: 0.0 for k in ["1W", "1M", "3M", "6M", "YTD", "1Y"]}
     profile = (
         f"{symbol.upper()} is a major public company followed closely by global investors. "
         "This snapshot combines recent price performance and a short descriptive profile "
@@ -250,14 +277,8 @@ def fallback_insights(symbol: str) -> Dict[str, Any]:
 
 
 def yahoo_insights(symbol: str) -> Dict[str, Any]:
-    """
-    Fetch 1Y daily closes from Yahoo and compute simple performance buckets.
-    """
     url = YAHOO_CHART_URL.format(symbol=symbol)
-    params = {
-        "range": "1y",
-        "interval": "1d",
-    }
+    params = {"range": "1y", "interval": "1d"}
     try:
         r = requests.get(url, params=params, timeout=8, headers=YAHOO_HEADERS)
         r.raise_for_status()
@@ -303,9 +324,6 @@ def yahoo_insights(symbol: str) -> Dict[str, Any]:
 
 
 def dummy_calendar() -> List[Dict[str, str]]:
-    """
-    Simple static economic calendar snapshot.
-    """
     return [
         {
             "time": "08:30",
@@ -345,8 +363,6 @@ async def index(request: Request):
 
 @app.get("/heatmap", response_class=HTMLResponse)
 async def heatmap_page(request: Request):
-    # kept for backwards compatibility – page is not used anymore,
-    # but route existing prevents 404 if something still links to it
     return templates.TemplateResponse("heatmap.html", {"request": request})
 
 
@@ -374,12 +390,22 @@ async def api_news(symbol: str):
     sym = symbol.upper()
     items: List[Dict[str, Any]] = []
 
+    # 1) Finnhub (wenn API-Key vorhanden)
     try:
-        items = yfinance_news(sym)
+        items = finnhub_news(sym)
     except Exception as exc:
-        print(f"[api_news] yfinance_news crashed for {sym}: {exc}")
+        print(f"[api_news] finnhub_news crashed for {sym}: {exc}")
         items = []
 
+    # 2) yfinance
+    if not items:
+        try:
+            items = yfinance_news(sym)
+        except Exception as exc:
+            print(f"[api_news] yfinance_news crashed for {sym}: {exc}")
+            items = []
+
+    # 3) Yahoo RSS
     if not items:
         try:
             items = yahoo_news(sym)
@@ -387,6 +413,7 @@ async def api_news(symbol: str):
             print(f"[api_news] yahoo_news crashed for {sym}: {exc}")
             items = []
 
+    # 4) Fallback
     if not items:
         items = fallback_news(sym)
 
@@ -410,7 +437,7 @@ async def api_calendar():
 
 
 # ---------------------------------------------------------------------------
-# Macro data (used by Macro Maps – purely static)
+# Macro data (used by Macro Maps – static)
 # ---------------------------------------------------------------------------
 
 MACRO_DATA: Dict[str, Dict[str, float]] = {
