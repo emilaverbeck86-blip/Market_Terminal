@@ -515,33 +515,16 @@ let worldMapReady = false;
 async function ensureWorldMap() {
   if (worldMapReady) return;
   if (typeof echarts === "undefined") {
-    throw new Error("ECharts not loaded");
-  }
-
-  // Wenn schon unter dem Namen "terminal-world" registriert, nichts tun
-  if (echarts.getMap("terminal-world")) {
-    worldMapReady = true;
+    console.error("ECharts not loaded for macro map");
     return;
   }
-
-  const sources = [
-    "https://fastly.jsdelivr.net/npm/echarts@5/map/json/world.json",
-    "/static/world-simple.geo.json", // optionales Fallback, wenn du eine Datei anlegst
-  ];
-
-  for (const src of sources) {
-    try {
-      const res = await fetch(src);
-      if (!res.ok) continue;
-      const geoJson = await res.json();
-      echarts.registerMap("terminal-world", geoJson);
-      worldMapReady = true;
-      console.log("World map registered from", src);
-      return;
-    } catch (err) {
-      console.warn("world map load failed", src, err);
-    }
+  if (!echarts.getMap("world")) {
+    console.warn(
+      "ECharts world map is not registered. Make sure world.js is included in index.html."
+    );
   }
+  worldMapReady = true;
+}
 
   throw new Error("Failed to load world map data from all sources");
 }
@@ -626,7 +609,7 @@ async function loadMacroData(metric) {
         {
           name: label,
           type: "map",
-          map: "terminal-world", // <– WICHTIG: unser registrierter Name
+          map: "world", // <– WICHTIG: unser registrierter Name
           roam: true,
           emphasis: {
             label: { show: false },
