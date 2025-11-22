@@ -22,9 +22,7 @@ templates = Jinja2Templates(directory="templates")
 # ---------------------------------------------------------------------------
 
 YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
-YAHOO_NEWS_RSS = "https://feeds.finance.yahoo.com/rss/2.0/headline"
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-
 YAHOO_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -77,8 +75,9 @@ _ticker_cache: Dict[str, Any] = {"data": None, "ts": 0.0}
 _movers_cache: Dict[str, Any] = {"data": None, "ts": 0.0}
 
 # ---------------------------------------------------------------------------
-# Helper functions
+# Helpers – Quotes & Movers
 # ---------------------------------------------------------------------------
+
 
 def yahoo_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
     params = {"symbols": ",".join(symbols)}
@@ -104,10 +103,7 @@ def yahoo_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
 
 def get_watchlist_quotes() -> List[Dict[str, Any]]:
     now = time.time()
-    if (
-        _ticker_cache["data"] is not None
-        and now - _ticker_cache["ts"] < 20
-    ):
+    if _ticker_cache["data"] is not None and now - _ticker_cache["ts"] < 20:
         return _ticker_cache["data"]
 
     try:
@@ -132,13 +128,13 @@ def compute_movers(quotes: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any
     return {"gainers": gainers, "losers": losers}
 
 
-# --- News helpers -----------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Helpers – News
+# ---------------------------------------------------------------------------
+
 
 def finnhub_news(symbol: str, max_items: int = 20) -> List[Dict[str, Any]]:
-    """
-    Stock-spezifische News über Finnhub.
-    Voraussetzung: FINNHUB_API_KEY ist gesetzt.
-    """
+    """News über Finnhub (wenn FINNHUB_API_KEY gesetzt ist)."""
     if not FINNHUB_API_KEY:
         return []
 
@@ -166,90 +162,22 @@ def finnhub_news(symbol: str, max_items: int = 20) -> List[Dict[str, Any]]:
         url = (entry.get("url") or "").strip()
         if not headline or not url:
             continue
-        dt = ""
+        dt_str = ""
         ts = entry.get("datetime")
         if ts:
             try:
                 dt_ = datetime.fromtimestamp(int(ts), tz=timezone.utc)
-                dt = dt_.strftime("%b %d, %Y %H:%M UTC")
+                dt_str = dt_.strftime("%b %d, %Y %H:%M UTC")
             except Exception:
-                dt = ""
+                dt_str = ""
         items.append(
             {
                 "title": headline,
                 "url": url,
                 "source": (entry.get("source") or "Finnhub").strip(),
-                "published_at": dt,
+                "published_at": dt_str,
             }
         )
-    return items
-
-
-def yfinance_news(symbol: str, max_items: int = 20) -> List[Dict[str, Any]]:
-    try:
-        ticker = yf.Ticker(symbol)
-        raw_items = ticker.news or []
-    except Exception as exc:
-        print(f"[yfinance_news] error for {symbol}: {exc}")
-        return []
-
-    items: List[Dict[str, Any]] = []
-    for entry in raw_items[:max_items]:
-        title = (entry.get("title") or "").strip()
-        url = entry.get("link") or entry.get("url") or ""
-        if not title or not url:
-            continue
-        publisher = (entry.get("publisher") or entry.get("provider") or "").strip()
-        published = ""
-        ts = entry.get("providerPublishTime") or entry.get("publishedAt")
-        if ts:
-            try:
-                dt = datetime.fromtimestamp(int(ts), tz=timezone.utc)
-                published = dt.strftime("%b %d, %Y %H:%M UTC")
-            except Exception:
-                published = ""
-        items.append(
-            {
-                "title": title,
-                "url": url,
-                "source": publisher or "yfinance",
-                "published_at": published,
-            }
-        )
-    return items
-
-
-def yahoo_news(symbol: str, max_items: int = 15) -> List[Dict[str, Any]]:
-    params = {"s": symbol, "region": "US", "lang": "en-US"}
-    try:
-        r = requests.get(YAHOO_NEWS_RSS, params=params, timeout=8)
-        r.raise_for_status()
-    except Exception as exc:
-        print(f"[yahoo_news] request error for {symbol}: {exc}")
-        return []
-
-    items: List[Dict[str, Any]] = []
-    try:
-        root = ET.fromstring(r.content)
-        for item in root.findall(".//item")[:max_items]:
-            title = (item.findtext("title") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            pub = (item.findtext("pubDate") or "").strip()
-            source = (item.findtext("source") or "").strip()
-            if not title or not link:
-                continue
-            items.append(
-                {
-                    "title": title,
-                    "url": link,
-                    "source": source or "Yahoo Finance",
-                    "published_at": pub,
-                }
-            )
-    except Exception as exc:
-        print(f"[yahoo_news] parse error for {symbol}: {exc}")
-        return []
-
     return items
 
 
@@ -264,6 +192,11 @@ def fallback_news(symbol: str) -> List[Dict[str, Any]]:
         }
         for tpl in FALLBACK_NEWS
     ]
+
+
+# ---------------------------------------------------------------------------
+# Helpers – Insights & Calendar
+# ---------------------------------------------------------------------------
 
 
 def fallback_insights(symbol: str) -> Dict[str, Any]:
@@ -353,8 +286,9 @@ def dummy_calendar() -> List[Dict[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Routes – Pages
 # ---------------------------------------------------------------------------
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -364,6 +298,11 @@ async def index(request: Request):
 @app.get("/heatmap", response_class=HTMLResponse)
 async def heatmap_page(request: Request):
     return templates.TemplateResponse("heatmap.html", {"request": request})
+
+
+# ---------------------------------------------------------------------------
+# Routes – Data APIs
+# ---------------------------------------------------------------------------
 
 
 @app.get("/api/tickers")
@@ -397,23 +336,7 @@ async def api_news(symbol: str):
         print(f"[api_news] finnhub_news crashed for {sym}: {exc}")
         items = []
 
-    # 2) yfinance
-    if not items:
-        try:
-            items = yfinance_news(sym)
-        except Exception as exc:
-            print(f"[api_news] yfinance_news crashed for {sym}: {exc}")
-            items = []
-
-    # 3) Yahoo RSS
-    if not items:
-        try:
-            items = yahoo_news(sym)
-        except Exception as exc:
-            print(f"[api_news] yahoo_news crashed for {sym}: {exc}")
-            items = []
-
-    # 4) Fallback
+    # 2) Fallback – keine weiteren Yahoo-News-Calls (verhindert 401/429-Spam)
     if not items:
         items = fallback_news(sym)
 
@@ -437,7 +360,7 @@ async def api_calendar():
 
 
 # ---------------------------------------------------------------------------
-# Macro data (used by Macro Maps – static)
+# Macro Data – for Macro Maps
 # ---------------------------------------------------------------------------
 
 MACRO_DATA: Dict[str, Dict[str, float]] = {
