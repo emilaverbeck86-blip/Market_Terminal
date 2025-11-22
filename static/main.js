@@ -1,15 +1,21 @@
+"use strict";
+
+// --------------------------------------------------------------
+// State & constants
+// --------------------------------------------------------------
+
 let currentSymbol = "AAPL";
 let lastTheme = "dark";
-let macroChart = null;
-let macroCurrentMetric = "inflation";
-
-const HEATMAP_SCRIPT_URL =
-  "https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js";
 
 let tvWidget = null;
 let chartFallbackActive = false;
 let chartRetryTimer = null;
-let heatmapWidgetInitialized = false;
+
+let macroChart = null;
+let worldMapReady = false;
+
+const HEATMAP_SCRIPT_URL =
+  "https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js";
 
 const COUNTRY_NAMES = {
   US: "United States",
@@ -34,16 +40,19 @@ const MACRO_METRIC_LABELS = {
 
 const ROW_MIN_HEIGHT = 180;
 const ROW_MAX_HEIGHT = 520;
+
 const COL_MIN_WIDTH = 220;
 const COL_MAX_WIDTH = 800;
 
-/* ------------------------------------------------------------
- * Utils
- * ---------------------------------------------------------- */
+// --------------------------------------------------------------
+// Utilities
+// --------------------------------------------------------------
 
 async function getJSON(url) {
   const res = await fetch(url);
-  if (!res.ok) throw new Error("HTTP " + res.status);
+  if (!res.ok) {
+    throw new Error("HTTP " + res.status + " for " + url);
+  }
   return await res.json();
 }
 
@@ -59,69 +68,55 @@ function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
 }
 
-/* ------------------------------------------------------------
- * Theme handling
- * ---------------------------------------------------------- */
+// --------------------------------------------------------------
+// Theme handling
+// --------------------------------------------------------------
 
 function applyTheme(theme) {
   const body = document.body;
-
   if (theme === "light") {
     body.classList.remove("theme-dark");
     body.classList.add("theme-light");
   } else {
     body.classList.remove("theme-light");
     body.classList.add("theme-dark");
-    theme = "dark";
   }
-
   lastTheme = theme;
-
-  const toggle = document.getElementById("theme-toggle");
-  if (toggle) toggle.checked = theme === "light";
-
-  try {
-    loadChart(currentSymbol);
-  } catch (e) {
-    console.error("chart theme reload failed", e);
-  }
-
-  if (macroChart) {
-    loadMacroData(macroCurrentMetric);
-  }
-
-  // force re-render heatmap next time
-  heatmapWidgetInitialized = false;
 }
 
 function initThemeToggle() {
   const toggle = document.getElementById("theme-toggle");
   if (!toggle) return;
-
-  toggle.checked = lastTheme === "light";
-
-  toggle.addEventListener("change", () => {
-    const next = toggle.checked ? "light" : "dark";
+  toggle.addEventListener("click", () => {
+    const next = lastTheme === "dark" ? "light" : "dark";
     applyTheme(next);
+    if (macroChart) {
+      macroChart.resize();
+    }
   });
 }
 
-/* ------------------------------------------------------------
- * Layout resizers
- * ---------------------------------------------------------- */
+// --------------------------------------------------------------
+// Layout / resizers
+// --------------------------------------------------------------
 
 function setRowHeight(rowId, value) {
   const clamped = clamp(value, ROW_MIN_HEIGHT, ROW_MAX_HEIGHT);
   document.documentElement.style.setProperty(`--${rowId}-height`, clamped + "px");
 }
 
+function setColWidth(rowId, colVar, value) {
+  const clamped = clamp(value, COL_MIN_WIDTH, COL_MAX_WIDTH);
+  document.documentElement.style.setProperty(
+    `--${rowId}-${colVar}`,
+    clamped + "px"
+  );
+}
+
 function setupRowResizers() {
   document.querySelectorAll("[data-row-resizer]").forEach((resizer) => {
     const rowId = resizer.getAttribute("data-row-resizer");
-    const rowIndex = rowId ? rowId.replace("row", "") : null;
-    const rowEl = rowIndex
-      ? document.querySelector(`.mt-row[data-row="${rowIndex}"]`)
-      : null;
+    const rowEl = document.querySelector(`.mt-row[data-row="${rowId.slice(-1)}"]`);
     if (!rowEl) return;
 
     let startY = 0;
@@ -129,28 +124,21 @@ function setupRowResizers() {
 
     const onDown = (event) => {
       event.preventDefault();
-      const clientY = event.touches ? event.touches[0].clientY : event.clientY;
-      startY = clientY;
-
+      startY = event.touches ? event.touches[0].clientY : event.clientY;
       const style = getComputedStyle(document.documentElement);
-      const raw = style.getPropertyValue(`--${rowId}-height`) || "";
-      const parsed = parseFloat(raw);
-      startHeight =
-        !isNaN(parsed) && parsed > 0
-          ? parsed
-          : rowEl.getBoundingClientRect().height;
-
-      document.body.classList.add("mt-resizing-row");
+      const h = parseFloat(style.getPropertyValue(`--${rowId}-height`)) || 260;
+      startHeight = h;
 
       window.addEventListener("mousemove", onMove);
       window.addEventListener("touchmove", onMove, { passive: false });
       window.addEventListener("mouseup", onUp);
       window.addEventListener("touchend", onUp);
+      document.body.classList.add("mt-resizing-row");
     };
 
     const onMove = (event) => {
-      const clientY = event.touches ? event.touches[0].clientY : event.clientY;
-      const delta = clientY - startY;
+      const y = event.touches ? event.touches[0].clientY : event.clientY;
+      const delta = y - startY;
       setRowHeight(rowId, startHeight + delta);
       if (macroChart) macroChart.resize();
     };
@@ -172,62 +160,36 @@ function setupColResizers() {
   document.querySelectorAll("[data-col-resizer]").forEach((resizer) => {
     const id = resizer.getAttribute("data-col-resizer");
     const row = resizer.closest(".mt-row");
-    if (!row || !id) return;
+    if (!row) return;
 
     const leftVar = `--${id}-col1`;
     const rightVar = `--${id}-col2`;
 
     let startX = 0;
     let startLeftWidth = 0;
-    let startRightWidth = 0;
-    let rowWidth = 0;
 
     const onDown = (event) => {
       event.preventDefault();
-      const clientX = event.touches ? event.touches[0].clientX : event.clientX;
-      startX = clientX;
-
-      const children = row.children;
-      const left = children[0];
-      const right = children[2];
-      if (!left || !right) return;
-
-      const leftRect = left.getBoundingClientRect();
-      const rightRect = right.getBoundingClientRect();
-      startLeftWidth = leftRect.width;
-      startRightWidth = rightRect.width;
-      rowWidth = row.getBoundingClientRect().width;
-
-      document.body.classList.add("mt-resizing-col");
+      startX = event.touches ? event.touches[0].clientX : event.clientX;
+      const style = getComputedStyle(document.documentElement);
+      startLeftWidth =
+        parseFloat(style.getPropertyValue(leftVar)) || row.clientWidth / 2;
 
       window.addEventListener("mousemove", onMove);
       window.addEventListener("touchmove", onMove, { passive: false });
       window.addEventListener("mouseup", onUp);
       window.addEventListener("touchend", onUp);
+      document.body.classList.add("mt-resizing-col");
     };
 
     const onMove = (event) => {
-      const clientX = event.touches ? event.touches[0].clientX : event.clientX;
-      const delta = clientX - startX;
-
-      let newLeft = clamp(
-        startLeftWidth + delta,
-        COL_MIN_WIDTH,
-        rowWidth - COL_MIN_WIDTH - 8
-      );
-      let newRight = clamp(
-        startRightWidth - delta,
-        COL_MIN_WIDTH,
-        rowWidth - COL_MIN_WIDTH - 8
-      );
-
-      if (newLeft + newRight + 8 > rowWidth) {
-        newRight = rowWidth - newLeft - 8;
-      }
+      const x = event.touches ? event.touches[0].clientX : event.clientX;
+      const delta = x - startX;
+      const newLeft = clamp(startLeftWidth + delta, COL_MIN_WIDTH, COL_MAX_WIDTH);
+      const newRight = row.clientWidth - newLeft - 8;
 
       document.documentElement.style.setProperty(leftVar, newLeft + "px");
       document.documentElement.style.setProperty(rightVar, newRight + "px");
-
       if (macroChart) macroChart.resize();
     };
 
@@ -244,9 +206,9 @@ function setupColResizers() {
   });
 }
 
-/* ------------------------------------------------------------
- * TradingView main chart
- * ---------------------------------------------------------- */
+// --------------------------------------------------------------
+// TradingView main chart
+// --------------------------------------------------------------
 
 function renderChartPlaceholder(message) {
   const container = document.getElementById("tv-chart");
@@ -257,11 +219,11 @@ function renderChartPlaceholder(message) {
 
 function loadChart(symbol) {
   currentSymbol = symbol.toUpperCase();
-  const label = document.getElementById("chart-symbol");
-  if (label) label.textContent = currentSymbol;
+  const chartSymbolEl = document.getElementById("chart-symbol");
+  if (chartSymbolEl) chartSymbolEl.textContent = currentSymbol;
 
   const containerId = "tv-chart";
-  const theme = lastTheme === "light" ? "light" : "dark";
+  const theme = lastTheme === "dark" ? "dark" : "light";
 
   if (chartRetryTimer) {
     clearTimeout(chartRetryTimer);
@@ -310,15 +272,16 @@ function openSymbol(symbol) {
   refreshAllForSymbol(symbol);
 }
 
-/* ------------------------------------------------------------
- * Ticker bar
- * ---------------------------------------------------------- */
+// --------------------------------------------------------------
+// Ticker bar
+// --------------------------------------------------------------
 
 async function refreshTickerBar() {
   try {
     const data = await getJSON("/api/tickers");
     const bar = document.getElementById("ticker-bar");
     if (!bar) return;
+
     bar.innerHTML = "";
 
     const strip1 = document.createElement("div");
@@ -338,12 +301,8 @@ async function refreshTickerBar() {
         el.innerHTML =
           `<span class="mt-ticker-symbol">${t.symbol}</span>` +
           `<span>${price}</span> ` +
-          `<span class="mt-ticker-change ${changeClass}">${formatPct(
-            change
-          )}</span>`;
-        el.addEventListener("click", () => {
-          openSymbol(t.symbol);
-        });
+          `<span class="mt-ticker-change ${changeClass}">${formatPct(change)}</span>`;
+        el.addEventListener("click", () => openSymbol(t.symbol));
         strip.appendChild(el);
       });
     }
@@ -355,28 +314,27 @@ async function refreshTickerBar() {
   }
 }
 
-/* ------------------------------------------------------------
- * News
- * ---------------------------------------------------------- */
+// --------------------------------------------------------------
+// News
+// --------------------------------------------------------------
 
 async function refreshNews(symbol) {
-  const newsBox = document.getElementById("news-list");
-  const label = document.getElementById("news-symbol");
-  if (label) label.textContent = symbol.toUpperCase();
+  const newsBox =
+    document.getElementById("news-container") ||
+    document.getElementById("news-list");
   if (!newsBox) return;
 
-  newsBox.innerHTML = `<div class="mt-news-empty">Loading news…</div>`;
+  newsBox.innerHTML = "Loading news…";
 
   try {
     const data = await getJSON(`/api/news?symbol=${encodeURIComponent(symbol)}`);
     const items = data.items || [];
-    newsBox.innerHTML = "";
-
     if (!items.length) {
       newsBox.innerHTML = `<div class="mt-news-empty">No news available.</div>`;
       return;
     }
 
+    newsBox.innerHTML = "";
     items.forEach((item) => {
       const el = document.createElement("a");
       el.href = item.url;
@@ -396,9 +354,9 @@ async function refreshNews(symbol) {
   }
 }
 
-/* ------------------------------------------------------------
- * Insights
- * ---------------------------------------------------------- */
+// --------------------------------------------------------------
+// Insights
+// --------------------------------------------------------------
 
 async function refreshInsights(symbol) {
   const root = document.querySelector(".mt-insights");
@@ -410,15 +368,15 @@ async function refreshInsights(symbol) {
     tile.textContent = "–";
     tile.classList.remove("pos", "neg");
   });
-  profileEl.textContent = "Loading performance snapshot…";
+  if (profileEl) {
+    profileEl.textContent = "Loading performance snapshot…";
+  }
 
   try {
     const data = await getJSON(`/api/insights?symbol=${encodeURIComponent(symbol)}`);
     const periods = data.periods || {};
     Object.entries(periods).forEach(([period, val]) => {
-      const cell = root.querySelector(
-        `.mt-insight-value[data-period="${period}"]`
-      );
+      const cell = root.querySelector(`.mt-insight-value[data-period="${period}"]`);
       if (!cell) return;
       if (val === null || val === undefined) {
         cell.textContent = "–";
@@ -429,18 +387,22 @@ async function refreshInsights(symbol) {
       cell.classList.add(num >= 0 ? "pos" : "neg");
     });
 
-    profileEl.textContent =
-      data.profile ||
-      "This snapshot combines recent price performance and a short descriptive profile to give you a quick fundamental impression inside the terminal.";
+    if (profileEl) {
+      profileEl.textContent =
+        data.profile ||
+        "This snapshot combines recent price performance and a short descriptive profile to give you a quick fundamental impression inside the terminal.";
+    }
   } catch (e) {
     console.error("insights error", e);
-    profileEl.textContent = "No performance snapshot available at this time.";
+    if (profileEl) {
+      profileEl.textContent = "No performance snapshot available at this time.";
+    }
   }
 }
 
-/* ------------------------------------------------------------
- * Calendar
- * ---------------------------------------------------------- */
+// --------------------------------------------------------------
+// Calendar
+// --------------------------------------------------------------
 
 async function refreshCalendar() {
   try {
@@ -464,9 +426,9 @@ async function refreshCalendar() {
   }
 }
 
-/* ------------------------------------------------------------
- * Movers
- * ---------------------------------------------------------- */
+// --------------------------------------------------------------
+// Movers
+// --------------------------------------------------------------
 
 async function refreshMovers() {
   try {
@@ -474,6 +436,7 @@ async function refreshMovers() {
     const gainersDiv = document.getElementById("movers-gainers");
     const losersDiv = document.getElementById("movers-losers");
     if (!gainersDiv || !losersDiv) return;
+
     gainersDiv.innerHTML = "";
     losersDiv.innerHTML = "";
 
@@ -488,7 +451,9 @@ async function refreshMovers() {
         `<span class="mt-mover-change ${
           changeValue >= 0 ? "pos" : "neg"
         }">${formatPct(changeValue)}</span>`;
+
       const activate = () => openSymbol(mover.symbol);
+
       row.addEventListener("click", activate);
       row.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -496,6 +461,7 @@ async function refreshMovers() {
           activate();
         }
       });
+
       target.appendChild(row);
     };
 
@@ -506,41 +472,32 @@ async function refreshMovers() {
   }
 }
 
-/* ------------------------------------------------------------
- * Macro world map (ECharts – echte Weltkarte)
- * ---------------------------------------------------------- */
-
-let worldMapReady = false;
+// --------------------------------------------------------------
+// Macro world map (ECharts)
+// --------------------------------------------------------------
 
 async function ensureWorldMap() {
+  // Wir nutzen die vordefinierte "world"-Map aus world.js
   if (worldMapReady) return;
+
   if (typeof echarts === "undefined") {
     console.error("ECharts not loaded for macro map");
     return;
   }
+
   if (!echarts.getMap("world")) {
     console.warn(
-      "ECharts world map is not registered. Make sure world.js is included in index.html."
+      "ECharts world map not registered. Make sure world.js is included in index.html."
     );
   }
-  worldMapReady = true;
-}
 
-  throw new Error("Failed to load world map data from all sources");
+  worldMapReady = true;
 }
 
 async function loadMacroData(metric) {
   if (!macroChart) return;
-  macroCurrentMetric = metric;
-
   try {
     await ensureWorldMap();
-  } catch (err) {
-    console.error("macro map error:", err);
-    return;
-  }
-
-  try {
     const data = await getJSON(`/api/macro?metric=${metric}`);
     const metricName = data.metric || metric;
     const values = data.data || [];
@@ -565,22 +522,23 @@ async function loadMacroData(metric) {
 
     let minVal = numericValues.length ? Math.min(...numericValues) : 0;
     let maxVal = numericValues.length ? Math.max(...numericValues) : 10;
-    if (minVal === maxVal) maxVal = minVal + 1;
+    if (minVal === maxVal) {
+      maxVal = minVal + 1;
+    }
 
     const label = MACRO_METRIC_LABELS[metricName] || metricName.toUpperCase();
 
     const option = {
-      backgroundColor: "transparent",
       tooltip: {
         trigger: "item",
         formatter: (params) => {
-          const code = params.data?.code ? ` (${params.data.code})` : "";
+          const code = params.data && params.data.code ? ` (${params.data.code})` : "";
           const value =
             params.value === undefined || params.value === null
               ? "N/A"
               : `${params.value}%`;
           return `${
-            params.name || params.data?.code || ""
+            params.name || (params.data && params.data.code) || ""
           }${code}<br/>${label}: ${value}`;
         },
       },
@@ -602,51 +560,32 @@ async function loadMacroData(metric) {
           { min: 6, label: "> 6%" },
         ],
         inRange: {
-          color: ["#22c55e", "#eab308", "#f97316", "#b91c1c"],
+          color: ["#fef9c3", "#fbbf24", "#ea580c", "#b91c1c"],
         },
       },
       series: [
         {
-          name: label,
           type: "map",
-          map: "world", // <– WICHTIG: unser registrierter Name
+          map: "world",
           roam: true,
-          emphasis: {
-            label: { show: false },
-          },
-          itemStyle: {
-            borderColor: "#4b5563",
-            borderWidth: 0.5,
-          },
+          emphasis: { label: { show: false } },
           data: seriesData,
         },
       ],
     };
 
-    macroChart.setOption(option, true);
+    macroChart.setOption(option);
   } catch (e) {
-    console.error("macro data error", e);
+    console.error("macro error", e);
   }
 }
 
 async function initMacroChart() {
   const dom = document.getElementById("macro-map");
-  if (!dom || typeof echarts === "undefined") return;
-
-  try {
-    await ensureWorldMap();
-  } catch (err) {
-    console.error("macro init error:", err);
-    return;
-  }
-
+  if (!dom) return;
   macroChart = echarts.init(dom, null, { renderer: "canvas" });
-  await loadMacroData(macroCurrentMetric);
-
-  // Bei Resize neu rendern
-  window.addEventListener("resize", () => {
-    if (macroChart) macroChart.resize();
-  });
+  await ensureWorldMap();
+  await loadMacroData("inflation");
 }
 
 function setupMacroTabs() {
@@ -656,165 +595,180 @@ function setupMacroTabs() {
         .querySelectorAll(".mt-macro-tab")
         .forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
-      const metric = btn.getAttribute("data-metric") || "inflation";
+      const metric = btn.getAttribute("data-metric");
       loadMacroData(metric);
     });
   });
 }
 
-/* ------------------------------------------------------------
- * Heatmap Modal (S&P500)
- * ---------------------------------------------------------- */
+// --------------------------------------------------------------
+// Heatmap modal (S&P 500 TradingView)
+// --------------------------------------------------------------
 
-function initHeatmapWidget() {
-  const container = document.getElementById("heatmap-widget-container");
+let heatmapScriptLoaded = false;
+
+function ensureHeatmapScript() {
+  return new Promise((resolve, reject) => {
+    if (heatmapScriptLoaded) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = HEATMAP_SCRIPT_URL;
+    script.async = true;
+    script.onload = () => {
+      heatmapScriptLoaded = true;
+      resolve();
+    };
+    script.onerror = () => reject(new Error("Heatmap script load failed"));
+    document.body.appendChild(script);
+  });
+}
+
+async function initHeatmapWidget() {
+  const container = document.getElementById("heatmap-widget");
   if (!container) return;
+  container.innerHTML = "";
 
-  container.innerHTML =
-    '<div class="tradingview-widget-container__widget"></div>';
-
-  const theme = lastTheme === "light" ? "light" : "dark";
-
-  const config = {
-    colorTheme: theme,
-    dateRange: "1D",
-    mapType: "s&p500",
-    showSymbolTooltip: true,
-    showFloatingTooltip: true,
-    locale: "en",
-    width: "100%",
-    height: "100%",
-    largeChartUrl: "",
-  };
+  await ensureHeatmapScript();
 
   const script = document.createElement("script");
   script.type = "text/javascript";
-  script.src = HEATMAP_SCRIPT_URL;
-  script.async = true;
-  script.innerHTML = JSON.stringify(config);
+  script.innerHTML = JSON.stringify(
+    {
+      // TradingView heatmap config
+      colorTheme: lastTheme === "dark" ? "dark" : "light",
+      dateRange: "1D",
+      exchange: "US",
+      showSymbolLogo: true,
+      isTransparent: false,
+      showFloatingTooltip: false,
+      width: "100%",
+      height: "100%",
+      plotType: "heatmap",
+      scaleMode: "percent",
+      fontFamily: "-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+      largeChartUrl: "",
+    },
+    null,
+    2
+  );
 
-  container.appendChild(script);
-  heatmapWidgetInitialized = true;
-}
+  const wrapper =
+    container.querySelector(".tradingview-widget-container__widget") ||
+    container;
 
-function openHeatmapModal() {
-  const modal = document.getElementById("heatmap-modal");
-  if (!modal) return;
-
-  modal.classList.add("open");
-  modal.setAttribute("aria-hidden", "false");
-  document.body.classList.add("mt-modal-open");
-
-  heatmapWidgetInitialized = false;
-  initHeatmapWidget();
-}
-
-function closeHeatmapModal() {
-  const modal = document.getElementById("heatmap-modal");
-  if (!modal) return;
-  modal.classList.remove("open");
-  modal.setAttribute("aria-hidden", "true");
-  document.body.classList.remove("mt-modal-open");
+  wrapper.innerHTML = "";
+  wrapper.appendChild(script);
 }
 
 function setupHeatmapModal() {
   const openBtn = document.getElementById("heatmap-link");
   const modal = document.getElementById("heatmap-modal");
-  if (!modal || !openBtn) return;
+  if (!openBtn || !modal) return;
+
   const closeBtn = modal.querySelector(".mt-modal-close");
 
-  openBtn.addEventListener("click", () => {
-    openHeatmapModal();
-  });
+  const openModal = async () => {
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+    try {
+      await initHeatmapWidget();
+    } catch (e) {
+      console.error("heatmap widget error", e);
+    }
+  };
 
-  if (closeBtn) {
-    closeBtn.addEventListener("click", () => {
-      closeHeatmapModal();
-    });
-  }
+  const closeModal = () => {
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+  };
+
+  openBtn.addEventListener("click", openModal);
+  closeBtn && closeBtn.addEventListener("click", closeModal);
 
   modal.addEventListener("click", (event) => {
     if (event.target === modal) {
-      closeHeatmapModal();
+      closeModal();
     }
   });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && modal.classList.contains("open")) {
-      closeHeatmapModal();
+      closeModal();
     }
   });
 }
 
-/* ------------------------------------------------------------
- * Menu
- * ---------------------------------------------------------- */
+// --------------------------------------------------------------
+// Menu & shortcuts
+// --------------------------------------------------------------
 
-function setupMenu() {
+function setupMenuAndShortcuts() {
   const menuToggle = document.getElementById("menu-toggle");
   const dropdown = document.getElementById("menu-dropdown");
-  if (!menuToggle || !dropdown) return;
-
-  const toggleDropdown = () => {
-    const isOpen = dropdown.classList.contains("open");
-    if (isOpen) dropdown.classList.remove("open");
-    else dropdown.classList.add("open");
-  };
-
-  menuToggle.addEventListener("click", (e) => {
-    e.stopPropagation();
-    toggleDropdown();
-  });
-
-  document.addEventListener("click", (e) => {
-    if (!dropdown.classList.contains("open")) return;
-    if (!dropdown.contains(e.target) && e.target !== menuToggle) {
-      dropdown.classList.remove("open");
-    }
-  });
-
-  dropdown
-    .querySelectorAll(".mt-menu-item[data-shortcut-symbol]")
-    .forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const sym = btn.getAttribute("data-shortcut-symbol");
-        if (!sym) return;
-        dropdown.classList.remove("open");
-        openSymbol(sym);
-      });
+  if (menuToggle && dropdown) {
+    menuToggle.addEventListener("click", () => {
+      dropdown.classList.toggle("open");
     });
+
+    document.addEventListener("click", (event) => {
+      if (
+        !dropdown.contains(event.target) &&
+        event.target !== menuToggle &&
+        dropdown.classList.contains("open")
+      ) {
+        dropdown.classList.remove("open");
+      }
+    });
+  }
+
+  document.querySelectorAll(".mt-menu-item[data-shortcut-symbol]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sym = btn.getAttribute("data-shortcut-symbol");
+      if (sym) {
+        openSymbol(sym);
+      }
+      if (dropdown && dropdown.classList.contains("open")) {
+        dropdown.classList.remove("open");
+      }
+    });
+  });
 }
 
-/* ------------------------------------------------------------
- * Orchestration
- * ---------------------------------------------------------- */
+// --------------------------------------------------------------
+// Orchestration
+// --------------------------------------------------------------
 
 function refreshAllForSymbol(symbol) {
   const sym = symbol.toUpperCase();
   currentSymbol = sym;
-  const chartLabel = document.getElementById("chart-symbol");
-  if (chartLabel) chartLabel.textContent = sym;
-  const newsLabel = document.getElementById("news-symbol");
-  if (newsLabel) newsLabel.textContent = sym;
-  const insightsLabel = document.getElementById("insights-symbol");
-  if (insightsLabel) insightsLabel.textContent = sym;
+
+  const chartSymbolEl = document.getElementById("chart-symbol");
+  const newsSymbolEl = document.getElementById("news-symbol");
+  const insightsSymbolEl = document.getElementById("insights-symbol");
+
+  if (chartSymbolEl) chartSymbolEl.textContent = sym;
+  if (newsSymbolEl) newsSymbolEl.textContent = sym;
+  if (insightsSymbolEl) insightsSymbolEl.textContent = sym;
 
   refreshNews(sym);
   refreshInsights(sym);
 }
 
-/* ------------------------------------------------------------
- * Init
- * ---------------------------------------------------------- */
+// --------------------------------------------------------------
+// Init
+// --------------------------------------------------------------
 
 window.addEventListener("DOMContentLoaded", async () => {
   applyTheme("dark");
   initThemeToggle();
+  setupMenuAndShortcuts();
+  setupHeatmapModal();
   setupRowResizers();
   setupColResizers();
-  setupMenu();
-  setupHeatmapModal();
 
+  // Main content
   loadChart(currentSymbol);
   refreshAllForSymbol(currentSymbol);
   refreshCalendar();
