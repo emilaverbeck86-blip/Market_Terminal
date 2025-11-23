@@ -39,10 +39,7 @@ body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   color: var(--text-primary-dark);
   background-color: var(--bg-body-dark);
-  background-image:
-    radial-gradient(circle at top, rgba(59, 130, 246, 0.18), transparent 55%),
-    radial-gradient(circle at 20% 20%, rgba(14, 165, 233, 0.1), transparent 45%),
-    linear-gradient(135deg, rgba(15, 118, 110, 0.12), transparent 65%);
+  
   min-height: 100vh;
   position: relative;
   font-feature-settings: "tnum" 1;
@@ -192,6 +189,7 @@ body.theme-light .mt-button {
 
 .mt-menu-dropdown {
   position: absolute;
+  z-index: 60;
   right: 0;
   top: calc(100% + 6px);
   min-width: 220px;
@@ -372,14 +370,10 @@ body.theme-light .mt-tile {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(
-    circle at top right,
-    rgba(245, 179, 22, 0.08),
-    transparent 45%
-  );
   pointer-events: none;
-  z-index: 0;
+  opacity: 0;
 }
+
 
 body.theme-light .mt-tile::after {
   background: radial-gradient(
