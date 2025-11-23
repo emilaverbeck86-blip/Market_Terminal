@@ -161,7 +161,10 @@ function setupColResizers() {
       startLeftWidth =
         parseFloat(style.getPropertyValue(leftVar)) ||
         row.querySelector(".mt-col")?.offsetWidth ||
-        400;
+        row.clientWidth / 2;
+      if (startLeftWidth < COL_MIN_WIDTH / 2) {
+        startLeftWidth = row.clientWidth / 2;
+      };
       window.addEventListener("mousemove", onMove);
       window.addEventListener("touchmove", onMove, { passive: false });
       window.addEventListener("mouseup", onUp);
@@ -444,112 +447,20 @@ async function refreshMovers() {
 // --------------------------------------------------------------
 
 async function ensureWorldMap() {
-  if (worldMapReady || echarts.getMap("terminal-world")) {
-    worldMapReady = true;
+  if (worldMapReady) return;
+  if (typeof echarts === "undefined") {
+    console.error("ECharts not loaded for macro map");
     return;
   }
-  const sources = [
-    "https://fastly.jsdelivr.net/npm/echarts@5/map/json/world.json",
-    "/static/world-simple.geo.json",
-  ];
-  for (const src of sources) {
-    try {
-      const res = await fetch(src);
-      if (!res.ok) continue;
-      const geoJson = await res.json();
-      echarts.registerMap("terminal-world", geoJson);
-      worldMapReady = true;
-      return;
-    } catch (err) {
-      console.warn("world map load failed", src, err);
-    }
+  if (!echarts.getMap("world")) {
+    console.warn(
+      "ECharts world map not registered. Make sure world.js is included in index.html."
+    );
+    return;
   }
-  console.error("world map error: no sources available");
+  worldMapReady = true;
 }
 
-async function loadMacroData(metric) {
-  if (!macroChart) return;
-  try {
-    await ensureWorldMap();
-    const data = await getJSON(`/api/macro?metric=${metric}`);
-    const metricName = data.metric || metric;
-    const values = data.data || [];
-
-    const seriesData = values.map((d) => {
-      const rawValue =
-        d.value === null || d.value === undefined ? null : Number(d.value);
-      const numericValue =
-        rawValue !== null && !isNaN(rawValue) ? rawValue : null;
-      return {
-        name: COUNTRY_NAMES[d.code] || d.code,
-        value: numericValue,
-        code: d.code,
-      };
-    });
-
-    const numericValues = seriesData
-      .map((d) =>
-        typeof d.value === "number" && !isNaN(d.value) ? d.value : null
-      )
-      .filter((v) => v !== null);
-    let minVal = numericValues.length ? Math.min(...numericValues) : 0;
-    let maxVal = numericValues.length ? Math.max(...numericValues) : 10;
-    if (minVal === maxVal) {
-      maxVal = minVal + 1;
-    }
-
-    const label = MACRO_METRIC_LABELS[metricName] || metricName.toUpperCase();
-
-    const option = {
-      tooltip: {
-        trigger: "item",
-        formatter: (params) => {
-          const code = params.data?.code ? ` (${params.data.code})` : "";
-          const value =
-            params.value === undefined || params.value === null
-              ? "N/A"
-              : `${params.value}%`;
-          return `${
-            params.name || params.data?.code || ""
-          }${code}<br/>${label}: ${value}`;
-        },
-      },
-      visualMap: {
-        type: "piecewise",
-        orient: "horizontal",
-        left: "center",
-        bottom: 8,
-        textStyle: {
-          color:
-            getComputedStyle(document.body).getPropertyValue(
-              "--text-secondary-dark"
-            ) || "#9ca3af",
-        },
-        pieces: [
-          { max: 2, label: "< 2%" },
-          { min: 2, max: 4, label: "2–4%" },
-          { min: 4, max: 6, label: "4–6%" },
-          { min: 6, label: "> 6%" },
-        ],
-        inRange: {
-          color: ["#fef9c3", "#fbbf24", "#ea580c", "#b91c1c"],
-        },
-      },
-      series: [
-        {
-          type: "map",
-          map: "terminal-world",
-          roam: true,
-          emphasis: { label: { show: false } },
-          data: seriesData,
-        },
-      ],
-    };
-    macroChart.setOption(option);
-  } catch (e) {
-    console.error("macro error", e);
-  }
-}
 
 async function initMacroChart() {
   const dom = document.getElementById("macro-map");
@@ -573,6 +484,124 @@ function setupMacroTabs() {
 }
 
 // --------------------------------------------------------------
+// Menu & Heatmap
+// --------------------------------------------------------------
+
+function setupMenuAndShortcuts() {
+  const menuToggle = document.getElementById("menu-toggle");
+  const dropdown = document.getElementById("menu-dropdown");
+  if (menuToggle && dropdown) {
+    menuToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      dropdown.classList.toggle("open");
+    });
+    document.addEventListener("click", (event) => {
+      if (!dropdown.contains(event.target) && event.target !== menuToggle) {
+        dropdown.classList.remove("open");
+      }
+    });
+  }
+  document.querySelectorAll(".mt-menu-item[data-shortcut-symbol]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sym = btn.getAttribute("data-shortcut-symbol");
+      if (sym) {
+        openSymbol(sym);
+      }
+      if (dropdown && dropdown.classList.contains("open")) {
+        dropdown.classList.remove("open");
+      }
+    });
+  });
+}
+
+let heatmapScriptLoaded = false;
+
+function ensureHeatmapScript() {
+  return new Promise((resolve, reject) => {
+    if (heatmapScriptLoaded) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = HEATMAP_SCRIPT_URL;
+    script.async = true;
+    script.onload = () => {
+      heatmapScriptLoaded = true;
+      resolve();
+    };
+    script.onerror = () => reject(new Error("Heatmap script load failed"));
+    document.body.appendChild(script);
+  });
+}
+
+async function initHeatmapWidget() {
+  const container = document.getElementById("heatmap-widget");
+  if (!container) return;
+  container.innerHTML = "";
+  await ensureHeatmapScript();
+  const script = document.createElement("script");
+  script.type = "text/javascript";
+  script.async = true;
+  script.innerHTML = JSON.stringify(
+    {
+      colorTheme: lastTheme === "dark" ? "dark" : "light",
+      dateRange: "1D",
+      exchange: "US",
+      showSymbolLogo: true,
+      isTransparent: false,
+      showFloatingTooltip: false,
+      width: "100%",
+      height: "100%",
+      plotType: "heatmap",
+      scaleMode: "percent",
+      fontFamily: "-apple-system, BlinkMacSystemFont, system-ui, sans-serif"
+    },
+    null,
+    2
+  );
+  container.innerHTML = "";
+  container.appendChild(script);
+}
+
+function setupHeatmapModal() {
+  const openBtn = document.getElementById("heatmap-link");
+  const modal = document.getElementById("heatmap-modal");
+  if (!openBtn || !modal) return;
+  const closeBtn = modal.querySelector(".mt-modal-close");
+  const openModal = async () => {
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+    try {
+      await initHeatmapWidget();
+    } catch (e) {
+      console.error("heatmap widget error", e);
+    }
+  };
+  const closeModal = () => {
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+  };
+  openBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    openModal();
+  });
+  if (closeBtn) {
+    closeBtn.addEventListener("click", closeModal);
+  }
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) {
+      closeModal();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && modal.classList.contains("open")) {
+      closeModal();
+    }
+  });
+}
+
+
+// --------------------------------------------------------------
 // Orchestration
 // --------------------------------------------------------------
 
@@ -593,6 +622,8 @@ function refreshAllForSymbol(symbol) {
 window.addEventListener("DOMContentLoaded", async () => {
   applyTheme("dark");
   initThemeToggle();
+  setupMenuAndShortcuts();
+  setupHeatmapModal();
   setupRowResizers();
   setupColResizers();
 
