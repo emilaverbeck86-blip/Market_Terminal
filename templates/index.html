@@ -1,53 +1,28 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>Market Terminal</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- CSS -->
-  <link rel="stylesheet" href="/static/style.css" />
-
-  <!-- TradingView main script -->
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/style.css">
+  <!-- TradingView widget script for main chart -->
   <script src="https://s3.tradingview.com/tv.js"></script>
-
-   <!-- ECharts for macro world map -->
+  <!-- ECharts for macro world map -->
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-  <!-- World map definition (liefert eine fertige "world"-Karte) -->
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5/map/js/world.js"></script>
 </head>
-
 <body class="theme-dark">
-
-<!-- ========================================================= -->
-<!--                     HEADER + MENU                          -->
-<!-- ========================================================= -->
 <header class="mt-header">
-
   <div class="mt-logo">MARKET TERMINAL</div>
-
-  <!-- Ticker Bar -->
   <div class="mt-ticker-bar" id="ticker-bar">
-    <!-- Filled dynamically -->
+    <!-- filled by JS -->
   </div>
-
-  <!-- Right side menu -->
   <div class="mt-header-right">
-
-    <!-- Heatmap shortcut -->
-    <button id="heatmap-link" type="button" class="mt-button mt-button-ghost">
-      Heatmap
-    </button>
-
-    <!-- Dropdown Menu -->
+    <button id="heatmap-link" type="button" class="mt-button mt-button-ghost">Heatmap</button>
     <div class="mt-menu">
       <button id="menu-toggle" class="mt-button mt-button-ghost">Menu</button>
-
       <div id="menu-dropdown" class="mt-menu-dropdown">
-        <!-- Theme Switch -->
         <div class="mt-menu-section">
           <div class="mt-menu-title">Theme</div>
-
           <label class="mt-switch-row">
             <span>Dark</span>
             <label class="mt-switch">
@@ -57,15 +32,11 @@
             <span>Light</span>
           </label>
         </div>
-
-        <!-- Symbol Shortcuts -->
         <div class="mt-menu-section">
           <div class="mt-menu-title">Shortcuts</div>
-
           <button class="mt-menu-item" data-shortcut-symbol="SPY">
             S&amp;P 500 (SPY)
           </button>
-
           <button class="mt-menu-item" data-shortcut-symbol="QQQ">
             NASDAQ 100 (QQQ)
           </button>
@@ -73,89 +44,67 @@
       </div>
     </div>
   </div>
-
 </header>
 
-<!-- ========================================================= -->
-<!--                          MAIN                               -->
-<!-- ========================================================= -->
 <main class="mt-main">
-
-  <!-- ========================================================= -->
-  <!--                       ROW 1                                -->
-  <!--         Chart (links) + News (rechts)                     -->
-  <!-- ========================================================= -->
+  <!-- Row 1 -->
   <div class="mt-row-block" data-row-block="1">
     <section
-      class="mt-row"
+      class="mt-row mt-row-top"
       data-row="1"
-      data-row-height="--row1-height"
+      data-height-var="--row1-height"
       data-col-key="row1"
       data-col-left="--row1-col1"
-      data-col-right="--row1-col2">
-
-      <!-- Chart -->
+      data-col-right="--row1-col2"
+    >
       <div class="mt-tile mt-tile-chart">
         <div class="mt-tile-header">
           <span>Chart – <span id="chart-symbol">AAPL</span></span>
         </div>
-
         <div class="mt-tile-body chart-body">
           <div id="tv-chart"></div>
         </div>
       </div>
 
-      <!-- Column resizer -->
       <div
         class="mt-col-resizer"
         data-col-resizer="row1"
         role="separator"
-        aria-label="Resize chart and news panel">
-      </div>
+        aria-label="Resize chart and news panels"
+      ></div>
 
-      <!-- News -->
       <div class="mt-tile mt-tile-news">
         <div class="mt-tile-header">
           <span>News – <span id="news-symbol">AAPL</span></span>
         </div>
-
-        <div class="mt-tile-body mt-scroll" id="news-list">
-          <div class="mt-placeholder">Loading news…</div>
+        <div class="mt-tile-body mt-scroll" id="news-container">
+          <div class="mt-placeholder">No headlines available.</div>
         </div>
       </div>
-
     </section>
-
-    <!-- Row 1 resizer -->
     <div
       class="mt-row-resizer"
-      data-row-resizer="row1"
+      data-row="1"
       role="separator"
-      aria-label="Resize first row">
-    </div>
+      aria-label="Resize first row"
+    ></div>
   </div>
 
-  <!-- ========================================================= -->
-  <!--                       ROW 2                                -->
-  <!--      Insights (links) + Economic Calendar (rechts)        -->
-  <!-- ========================================================= -->
+  <!-- Row 2 -->
   <div class="mt-row-block" data-row-block="2">
     <section
       class="mt-row"
       data-row="2"
-      data-row-height="--row2-height"
+      data-height-var="--row2-height"
       data-col-key="row2"
       data-col-left="--row2-col1"
-      data-col-right="--row2-col2">
-
-      <!-- Insights -->
+      data-col-right="--row2-col2"
+    >
       <div class="mt-tile mt-tile-insights">
         <div class="mt-tile-header">
-          <span>Market Insights – <span id="insights-symbol">AAPL</span></span>
+          <span>Market Insights: <span id="insights-symbol">AAPL</span></span>
         </div>
-
-        <div class="mt-tile-body mt-insights">
-
+        <div class="mt-tile-body">
           <div class="mt-insights-grid">
             <div class="mt-insight-card">
               <div class="mt-insight-label">1W</div>
@@ -182,75 +131,61 @@
               <div class="mt-insight-value" data-period="1Y">–</div>
             </div>
           </div>
-
           <p id="insights-profile" class="mt-insights-text">
             No performance snapshot available at this time.
           </p>
-
         </div>
       </div>
 
-      <!-- Column resizer -->
       <div
         class="mt-col-resizer"
         data-col-resizer="row2"
         role="separator"
-        aria-label="Resize insights and calendar panels">
-      </div>
+        aria-label="Resize insights and calendar panels"
+      ></div>
 
-      <!-- Calendar -->
       <div class="mt-tile mt-tile-calendar">
         <div class="mt-tile-header">
           <span>Economic Calendar (US)</span>
         </div>
-
         <div class="mt-tile-body mt-scroll">
-          <table class="mt-table">
+          <table class="mt-table" id="calendar-table">
             <thead>
-              <tr>
-                <th>Time</th>
-                <th>Country</th>
-                <th>Event</th>
-                <th>Actual</th>
-                <th>Forecast</th>
-                <th>Previous</th>
-              </tr>
+            <tr>
+              <th>Time</th>
+              <th>Country</th>
+              <th>Event</th>
+              <th>Actual</th>
+              <th>Forecast</th>
+              <th>Previous</th>
+            </tr>
             </thead>
-
-            <tbody id="calendar-body"></tbody>
+            <tbody></tbody>
           </table>
         </div>
       </div>
-
     </section>
-
-    <!-- Row 2 resizer -->
     <div
       class="mt-row-resizer"
-      data-row-resizer="row2"
+      data-row="2"
       role="separator"
-      aria-label="Resize second row">
-    </div>
+      aria-label="Resize middle row"
+    ></div>
   </div>
 
-  <!-- ========================================================= -->
-  <!--                       ROW 3                                -->
-  <!--      Macro Map (links) + Movers (rechts)                  -->
-  <!-- ========================================================= -->
+  <!-- Row 3 -->
   <div class="mt-row-block" data-row-block="3">
     <section
       class="mt-row"
       data-row="3"
-      data-row-height="--row3-height"
+      data-height-var="--row3-height"
       data-col-key="row3"
       data-col-left="--row3-col1"
-      data-col-right="--row3-col2">
-
-      <!-- Macro World Map -->
+      data-col-right="--row3-col2"
+    >
       <div class="mt-tile mt-tile-macro">
         <div class="mt-tile-header">
           <span>Macro Maps</span>
-
           <div class="mt-macro-tabs">
             <button class="mt-macro-tab active" data-metric="inflation">Inflation</button>
             <button class="mt-macro-tab" data-metric="rates">Rates</button>
@@ -258,10 +193,8 @@
             <button class="mt-macro-tab" data-metric="unemployment">Unemployment</button>
           </div>
         </div>
-
         <div class="mt-tile-body">
           <div id="macro-map"></div>
-
           <div class="mt-macro-legend">
             <span class="band band-a">&lt; 2%</span>
             <span class="band band-b">2–4%</span>
@@ -271,59 +204,44 @@
         </div>
       </div>
 
-      <!-- Column resizer -->
       <div
         class="mt-col-resizer"
         data-col-resizer="row3"
         role="separator"
-        aria-label="Resize macro and movers panels">
-      </div>
+        aria-label="Resize macro and movers panels"
+      ></div>
 
-      <!-- Movers -->
       <div class="mt-tile mt-tile-movers">
         <div class="mt-tile-header">
           <span>Top Movers (Watchlist)</span>
         </div>
-
         <div class="mt-tile-body mt-movers-body">
-
           <div class="mt-movers-column">
             <div class="mt-movers-title">Top Gainers</div>
             <div id="movers-gainers"></div>
           </div>
-
           <div class="mt-movers-column">
             <div class="mt-movers-title">Top Losers</div>
             <div id="movers-losers"></div>
           </div>
-
         </div>
       </div>
-
     </section>
-
-    <!-- Row 3 resizer -->
     <div
       class="mt-row-resizer"
-      data-row-resizer="row3"
+      data-row="3"
       role="separator"
-      aria-label="Resize third row">
-    </div>
-
+      aria-label="Resize bottom row"
+    ></div>
   </div>
-
 </main>
 
-<!-- ========================================================= -->
-<!--                      HEATMAP MODAL                         -->
-<!-- ========================================================= -->
 <div id="heatmap-modal" class="mt-modal" aria-hidden="true">
-  <div class="mt-modal-dialog" role="dialog" aria-modal="true">
+  <div class="mt-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="heatmap-modal-title">
     <div class="mt-modal-header">
-      <span>S&amp;P 500 Heatmap</span>
-      <button class="mt-modal-close" type="button">&times;</button>
+      <span id="heatmap-modal-title">S&amp;P 500 Heatmap</span>
+      <button class="mt-modal-close" type="button" aria-label="Close heatmap">&times;</button>
     </div>
-
     <div class="mt-modal-body">
       <div class="tradingview-widget-container" id="heatmap-widget-container">
         <div id="heatmap-widget"></div>
@@ -332,10 +250,6 @@
   </div>
 </div>
 
-<!-- ========================================================= -->
-<!--                     MAIN JAVASCRIPT                        -->
-<!-- ========================================================= -->
 <script src="/static/main.js"></script>
-
 </body>
 </html>
