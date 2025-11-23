@@ -1,18 +1,13 @@
-"use strict";
-
-// --------------------------------------------------------------
-// State & constants
-// --------------------------------------------------------------
-
 let currentSymbol = "AAPL";
 let lastTheme = "dark";
+let macroChart = null;
+let worldMapReady = false;
+const HEATMAP_SCRIPT_URL =
+  "https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js";
 
 let tvWidget = null;
 let chartFallbackActive = false;
 let chartRetryTimer = null;
-
-let macroChart = null;
-let worldMapReady = false;
 
 const COUNTRY_NAMES = {
   US: "United States",
@@ -47,9 +42,7 @@ const COL_MAX_WIDTH = 800;
 
 async function getJSON(url) {
   const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error("HTTP " + res.status + " for " + url);
-  }
+  if (!res.ok) throw new Error("HTTP " + res.status);
   return await res.json();
 }
 
@@ -125,12 +118,10 @@ function setupRowResizers() {
       const style = getComputedStyle(document.documentElement);
       const h = parseFloat(style.getPropertyValue(`--${rowId}-height`)) || 260;
       startHeight = h;
-
       window.addEventListener("mousemove", onMove);
       window.addEventListener("touchmove", onMove, { passive: false });
       window.addEventListener("mouseup", onUp);
       window.addEventListener("touchend", onUp);
-      document.body.classList.add("mt-resizing-row");
     };
 
     const onMove = (event) => {
@@ -141,7 +132,6 @@ function setupRowResizers() {
     };
 
     const onUp = () => {
-      document.body.classList.remove("mt-resizing-row");
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("touchmove", onMove);
       window.removeEventListener("mouseup", onUp);
@@ -158,7 +148,6 @@ function setupColResizers() {
     const id = resizer.getAttribute("data-col-resizer");
     const row = resizer.closest(".mt-row");
     if (!row) return;
-
     const leftVar = `--${id}-col1`;
     const rightVar = `--${id}-col2`;
 
@@ -170,13 +159,13 @@ function setupColResizers() {
       startX = event.touches ? event.touches[0].clientX : event.clientX;
       const style = getComputedStyle(document.documentElement);
       startLeftWidth =
-        parseFloat(style.getPropertyValue(leftVar)) || row.clientWidth / 2;
-
+        parseFloat(style.getPropertyValue(leftVar)) ||
+        row.querySelector(".mt-col")?.offsetWidth ||
+        400;
       window.addEventListener("mousemove", onMove);
       window.addEventListener("touchmove", onMove, { passive: false });
       window.addEventListener("mouseup", onUp);
       window.addEventListener("touchend", onUp);
-      document.body.classList.add("mt-resizing-col");
     };
 
     const onMove = (event) => {
@@ -184,14 +173,12 @@ function setupColResizers() {
       const delta = x - startX;
       const newLeft = clamp(startLeftWidth + delta, COL_MIN_WIDTH, COL_MAX_WIDTH);
       const newRight = row.clientWidth - newLeft - 8;
-
       document.documentElement.style.setProperty(leftVar, newLeft + "px");
       document.documentElement.style.setProperty(rightVar, newRight + "px");
       if (macroChart) macroChart.resize();
     };
 
     const onUp = () => {
-      document.body.classList.remove("mt-resizing-col");
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("touchmove", onMove);
       window.removeEventListener("mouseup", onUp);
@@ -204,7 +191,7 @@ function setupColResizers() {
 }
 
 // --------------------------------------------------------------
-// TradingView main chart
+// TradingView chart
 // --------------------------------------------------------------
 
 function renderChartPlaceholder(message) {
@@ -216,8 +203,7 @@ function renderChartPlaceholder(message) {
 
 function loadChart(symbol) {
   currentSymbol = symbol.toUpperCase();
-  const chartSymbolEl = document.getElementById("chart-symbol");
-  if (chartSymbolEl) chartSymbolEl.textContent = currentSymbol;
+  document.getElementById("chart-symbol").textContent = currentSymbol;
 
   const containerId = "tv-chart";
   const theme = lastTheme === "dark" ? "dark" : "light";
@@ -277,10 +263,7 @@ async function refreshTickerBar() {
   try {
     const data = await getJSON("/api/tickers");
     const bar = document.getElementById("ticker-bar");
-    if (!bar) return;
-
     bar.innerHTML = "";
-
     const strip1 = document.createElement("div");
     const strip2 = document.createElement("div");
     strip1.className = "mt-ticker-strip";
@@ -298,10 +281,10 @@ async function refreshTickerBar() {
         el.innerHTML =
           `<span class="mt-ticker-symbol">${t.symbol}</span>` +
           `<span>${price}</span> ` +
-          `<span class="mt-ticker-change ${changeClass}">${formatPct(
-            change
-          )}</span>`;
-        el.addEventListener("click", () => openSymbol(t.symbol));
+          `<span class="mt-ticker-change ${changeClass}">${formatPct(change)}</span>`;
+        el.addEventListener("click", () => {
+          openSymbol(t.symbol);
+        });
         strip.appendChild(el);
       });
     }
@@ -318,13 +301,9 @@ async function refreshTickerBar() {
 // --------------------------------------------------------------
 
 async function refreshNews(symbol) {
-  const newsBox =
-    document.getElementById("news-container") ||
-    document.getElementById("news-list");
+  const newsBox = document.getElementById("news-list");
   if (!newsBox) return;
-
-  newsBox.innerHTML = "Loading news…";
-
+  newsBox.innerHTML = "";
   try {
     const data = await getJSON(`/api/news?symbol=${encodeURIComponent(symbol)}`);
     const items = data.items || [];
@@ -333,7 +312,6 @@ async function refreshNews(symbol) {
       return;
     }
 
-    newsBox.innerHTML = "";
     items.forEach((item) => {
       const el = document.createElement("a");
       el.href = item.url;
@@ -367,17 +345,13 @@ async function refreshInsights(symbol) {
     tile.textContent = "–";
     tile.classList.remove("pos", "neg");
   });
-  if (profileEl) {
-    profileEl.textContent = "Loading performance snapshot…";
-  }
+  profileEl.textContent = "Loading performance snapshot…";
 
   try {
     const data = await getJSON(`/api/insights?symbol=${encodeURIComponent(symbol)}`);
     const periods = data.periods || {};
     Object.entries(periods).forEach(([period, val]) => {
-      const cell = root.querySelector(
-        `.mt-insight-value[data-period="${period}"]`
-      );
+      const cell = root.querySelector(`.mt-insight-value[data-period="${period}"]`);
       if (!cell) return;
       if (val === null || val === undefined) {
         cell.textContent = "–";
@@ -388,16 +362,12 @@ async function refreshInsights(symbol) {
       cell.classList.add(num >= 0 ? "pos" : "neg");
     });
 
-    if (profileEl) {
-      profileEl.textContent =
-        data.profile ||
-        "This snapshot combines recent price performance and a short descriptive profile to give you a quick fundamental impression inside the terminal.";
-    }
+    profileEl.textContent =
+      data.profile ||
+      "This snapshot combines recent price performance and a short descriptive profile to give you a quick fundamental impression inside the terminal.";
   } catch (e) {
     console.error("insights error", e);
-    if (profileEl) {
-      profileEl.textContent = "No performance snapshot available at this time.";
-    }
+    profileEl.textContent = "No performance snapshot available at this time.";
   }
 }
 
@@ -437,7 +407,6 @@ async function refreshMovers() {
     const gainersDiv = document.getElementById("movers-gainers");
     const losersDiv = document.getElementById("movers-losers");
     if (!gainersDiv || !losersDiv) return;
-
     gainersDiv.innerHTML = "";
     losersDiv.innerHTML = "";
 
@@ -452,9 +421,7 @@ async function refreshMovers() {
         `<span class="mt-mover-change ${
           changeValue >= 0 ? "pos" : "neg"
         }">${formatPct(changeValue)}</span>`;
-
       const activate = () => openSymbol(mover.symbol);
-
       row.addEventListener("click", activate);
       row.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -462,7 +429,6 @@ async function refreshMovers() {
           activate();
         }
       });
-
       target.appendChild(row);
     };
 
@@ -474,39 +440,37 @@ async function refreshMovers() {
 }
 
 // --------------------------------------------------------------
-// Macro world map (ECharts) – lokale GeoJSON
+// Macro world map (ECharts)
 // --------------------------------------------------------------
 
 async function ensureWorldMap() {
-  if (worldMapReady) return;
-  if (typeof echarts === "undefined") {
-    console.error("ECharts not loaded for macro map");
+  if (worldMapReady || echarts.getMap("terminal-world")) {
+    worldMapReady = true;
     return;
   }
-
-  // wir laden nur unsere lokale Datei, kein externes world.json
-  const src = "/static/world-simple.geo.json";
-
-  try {
-    const res = await fetch(src);
-    if (!res.ok) {
-      throw new Error("HTTP " + res.status + " for " + src);
+  const sources = [
+    "https://fastly.jsdelivr.net/npm/echarts@5/map/json/world.json",
+    "/static/world-simple.geo.json",
+  ];
+  for (const src of sources) {
+    try {
+      const res = await fetch(src);
+      if (!res.ok) continue;
+      const geoJson = await res.json();
+      echarts.registerMap("terminal-world", geoJson);
+      worldMapReady = true;
+      return;
+    } catch (err) {
+      console.warn("world map load failed", src, err);
     }
-    const geoJson = await res.json();
-    echarts.registerMap("terminal-world", geoJson);
-    worldMapReady = true;
-    console.log("World map registered from", src);
-  } catch (err) {
-    console.error("world map load failed:", err);
   }
+  console.error("world map error: no sources available");
 }
 
 async function loadMacroData(metric) {
   if (!macroChart) return;
   try {
     await ensureWorldMap();
-    if (!worldMapReady) return;
-
     const data = await getJSON(`/api/macro?metric=${metric}`);
     const metricName = data.metric || metric;
     const values = data.data || [];
@@ -528,7 +492,6 @@ async function loadMacroData(metric) {
         typeof d.value === "number" && !isNaN(d.value) ? d.value : null
       )
       .filter((v) => v !== null);
-
     let minVal = numericValues.length ? Math.min(...numericValues) : 0;
     let maxVal = numericValues.length ? Math.max(...numericValues) : 10;
     if (minVal === maxVal) {
@@ -541,13 +504,13 @@ async function loadMacroData(metric) {
       tooltip: {
         trigger: "item",
         formatter: (params) => {
-          const code = params.data && params.data.code ? ` (${params.data.code})` : "";
+          const code = params.data?.code ? ` (${params.data.code})` : "";
           const value =
             params.value === undefined || params.value === null
               ? "N/A"
               : `${params.value}%`;
           return `${
-            params.name || (params.data && params.data.code) || ""
+            params.name || params.data?.code || ""
           }${code}<br/>${label}: ${value}`;
         },
       },
@@ -582,8 +545,7 @@ async function loadMacroData(metric) {
         },
       ],
     };
-
-    macroChart.setOption(option, true);
+    macroChart.setOption(option);
   } catch (e) {
     console.error("macro error", e);
   }
@@ -593,11 +555,8 @@ async function initMacroChart() {
   const dom = document.getElementById("macro-map");
   if (!dom) return;
   macroChart = echarts.init(dom, null, { renderer: "canvas" });
+  await ensureWorldMap();
   await loadMacroData("inflation");
-
-  window.addEventListener("resize", () => {
-    if (macroChart) macroChart.resize();
-  });
 }
 
 function setupMacroTabs() {
@@ -614,121 +573,15 @@ function setupMacroTabs() {
 }
 
 // --------------------------------------------------------------
-// Heatmap modal – lädt /heatmap in einem Iframe
-// --------------------------------------------------------------
-
-async function initHeatmapWidget() {
-  const container = document.getElementById("heatmap-widget");
-  if (!container) return;
-
-  // nur einmal ein Iframe erzeugen
-  let iframe = container.querySelector("iframe");
-  if (!iframe) {
-    iframe = document.createElement("iframe");
-    iframe.src = "/heatmap";
-    iframe.loading = "lazy";
-    iframe.referrerPolicy = "no-referrer-when-downgrade";
-    iframe.style.border = "0";
-    iframe.style.width = "100%";
-    iframe.style.height = "100%";
-    container.appendChild(iframe);
-  }
-}
-
-function setupHeatmapModal() {
-  const openBtn = document.getElementById("heatmap-link");
-  const modal = document.getElementById("heatmap-modal");
-  if (!openBtn || !modal) return;
-
-  const closeBtn = modal.querySelector(".mt-modal-close");
-
-  const openModal = async () => {
-    modal.classList.add("open");
-    modal.setAttribute("aria-hidden", "false");
-    try {
-      await initHeatmapWidget();
-    } catch (e) {
-      console.error("heatmap widget error", e);
-    }
-  };
-
-  const closeModal = () => {
-    modal.classList.remove("open");
-    modal.setAttribute("aria-hidden", "true");
-  };
-
-  openBtn.addEventListener("click", openModal);
-  if (closeBtn) {
-    closeBtn.addEventListener("click", closeModal);
-  }
-
-  modal.addEventListener("click", (event) => {
-    if (event.target === modal) {
-      closeModal();
-    }
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && modal.classList.contains("open")) {
-      closeModal();
-    }
-  });
-}
-
-// --------------------------------------------------------------
-// Menu & shortcuts
-// --------------------------------------------------------------
-
-function setupMenuAndShortcuts() {
-  const menuToggle = document.getElementById("menu-toggle");
-  const dropdown = document.getElementById("menu-dropdown");
-  if (menuToggle && dropdown) {
-    menuToggle.addEventListener("click", () => {
-      dropdown.classList.toggle("open");
-    });
-
-    document.addEventListener("click", (event) => {
-      if (
-        !dropdown.contains(event.target) &&
-        event.target !== menuToggle &&
-        dropdown.classList.contains("open")
-      ) {
-        dropdown.classList.remove("open");
-      }
-    });
-  }
-
-  document
-    .querySelectorAll(".mt-menu-item[data-shortcut-symbol]")
-    .forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const sym = btn.getAttribute("data-shortcut-symbol");
-        if (sym) {
-          openSymbol(sym);
-        }
-        if (dropdown && dropdown.classList.contains("open")) {
-          dropdown.classList.remove("open");
-        }
-      });
-    });
-}
-
-// --------------------------------------------------------------
 // Orchestration
 // --------------------------------------------------------------
 
 function refreshAllForSymbol(symbol) {
   const sym = symbol.toUpperCase();
   currentSymbol = sym;
-
-  const chartSymbolEl = document.getElementById("chart-symbol");
-  const newsSymbolEl = document.getElementById("news-symbol");
-  const insightsSymbolEl = document.getElementById("insights-symbol");
-
-  if (chartSymbolEl) chartSymbolEl.textContent = sym;
-  if (newsSymbolEl) newsSymbolEl.textContent = sym;
-  if (insightsSymbolEl) insightsSymbolEl.textContent = sym;
-
+  document.getElementById("chart-symbol").textContent = sym;
+  document.getElementById("news-symbol").textContent = sym;
+  document.getElementById("insights-symbol").textContent = sym;
   refreshNews(sym);
   refreshInsights(sym);
 }
@@ -740,18 +593,14 @@ function refreshAllForSymbol(symbol) {
 window.addEventListener("DOMContentLoaded", async () => {
   applyTheme("dark");
   initThemeToggle();
-  setupMenuAndShortcuts();
-  setupHeatmapModal();
   setupRowResizers();
   setupColResizers();
 
-  // Main content
   loadChart(currentSymbol);
   refreshAllForSymbol(currentSymbol);
   refreshCalendar();
   refreshMovers();
   refreshTickerBar();
-
   setInterval(refreshTickerBar, 20000);
   setInterval(refreshMovers, 90000);
   setInterval(() => refreshNews(currentSymbol), 60000);
